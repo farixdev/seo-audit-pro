@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SEO Audit Pro — Comprehensive Technical &amp; On-Page Intelligence</title>
+  <link rel="icon" type="image/png" href="/static/assets/icon.png">
+
+  <!-- Clean Google Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Self-contained Enterprise Stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css">
+
+  <!-- Core Offline Libraries -->
+  <script src="/static/libs/lucide.min.js"></script>
+  <script src="/static/libs/chart.umd.min.js"></script>
+  <script src="/static/libs/html2canvas.min.js"></script>
+</head>
+<body>
+
+  <div class="app-container">
+
+    <!-- Header Navigation Bar -->
+    <header class="app-header">
+      <div class="header-inner">
+        <!-- Logo & Title -->
+        <div class="brand-section">
+          <div class="brand-logo">
+            <i data-lucide="activity" style="width: 20px; height: 20px;"></i>
+          </div>
+          <div>
+            <div style="display: flex; align-items: center;">
+              <span class="brand-title">SEO Audit Pro</span>
+              <span class="brand-tag">Enterprise Edition</span>
+            </div>
+            <p class="brand-sub">Comprehensive Site Crawler, Core Web Vitals &amp; Technical Diagnostics</p>
+          </div>
+        </div>
+
+        <!-- Navigation Tabs & Actions -->
+        <div class="header-actions">
+          <nav class="header-nav">
+            <button id="nav-audit-tab" class="nav-tab active" onclick="switchMainTab('audit')">
+              <i data-lucide="scan" style="width: 14px; height: 14px;"></i>
+              <span>Audit Suite</span>
+            </button>
+            <button id="nav-tracker-tab" class="nav-tab" onclick="switchMainTab('tracker')">
+              <i data-lucide="trending-up" style="width: 14px; height: 14px;"></i>
+              <span>Progress Tracker</span>
+            </button>
+            <button id="nav-history-tab" class="nav-tab" onclick="switchMainTab('history')">
+              <i data-lucide="archive" style="width: 14px; height: 14px;"></i>
+              <span>Audit History</span>
+            </button>
+          </nav>
+
+          <!-- Settings Button -->
+          <button id="open-settings-btn" class="icon-btn" title="Settings &amp; API Keys" onclick="openSettingsModal()">
+            <i data-lucide="settings" style="width: 16px; height: 16px;"></i>
+          </button>
+
+          <!-- Open Reports Folder -->
+          <button id="open-reports-btn" class="icon-btn" title="Open Reports Directory" onclick="openReportsFolder()">
+            <i data-lucide="folder" style="width: 16px; height: 16px;"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Body -->
+    <main class="main-content">
+
+      <!-- ======================================================== -->
+      <!-- TAB 1: AUDIT SUITE                                      -->
+      <!-- ======================================================== -->
+      <section id="tab-audit" style="display: flex; flex-direction: column; gap: 24px;">
+
+        <!-- Search & Launch Card -->
+        <div class="search-card">
+          <form id="audit-form" onsubmit="handleStartAudit(event)" style="display: flex; flex-direction: column; gap: 14px;">
+            <!-- URL Input Row -->
+            <div class="search-row">
+              <div class="url-input-wrapper">
+                <i data-lucide="globe" class="url-icon" style="width: 18px; height: 18px;"></i>
+                <input
+                  type="text"
+                  id="target-url"
+                  placeholder="Enter website URL (e.g. https://yourdomain.com)"
+                  required
+                  class="url-input"
+                  autocomplete="off"
+                />
+              </div>
+
+              <button type="submit" id="btn-run-audit" class="btn-primary">
+                <i data-lucide="play" style="width: 16px; height: 16px;"></i>
+                <span>Run Deep Audit</span>
+              </button>
+            </div>
+
+            <!-- Fast Quick Controls Row -->
+            <div class="search-controls">
+              <div class="search-options-group">
+                <!-- Single Page Toggle -->
+                <label class="form-label-inline">
+                  <input type="checkbox" id="check-single-page" onchange="toggleCrawlMode(this.checked)">
+                  <span style="font-weight: 600; color: var(--text-main);">Single-Page Audit</span>
+                </label>
+
+                <!-- Crawl Depth Control (supports 25 to 1,000+ pages) -->
+                <div id="crawl-depth-wrapper" style="display: flex; align-items: center; gap: 8px;">
+                  <span>Crawl Depth:</span>
+                  <select id="crawl-depth-select" class="clean-select text-mono" onchange="handleCrawlSelect(this.value)">
+                    <option value="25" selected>25 pages (Quick)</option>
+                    <option value="100">100 pages (Standard)</option>
+                    <option value="250">250 pages (Deep)</option>
+                    <option value="500">500 pages (Extended)</option>
+                    <option value="1000">1,000 pages (Enterprise)</option>
+                    <option value="custom">Custom Limit...</option>
+                  </select>
+                  <input type="number" id="crawl-depth-custom" min="1" max="5000" value="25" class="clean-input text-mono hidden" style="width: 80px; padding: 4px 8px; font-size: 12px;" placeholder="Max" oninput="handleCustomCrawlInput(this.value)">
+                  <input type="hidden" id="crawl-depth-slider" value="25">
+                </div>
+
+                <!-- PageSpeed Strategy -->
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span>PageSpeed:</span>
+                  <select id="psi-strategy-select" class="clean-select">
+                    <option value="both" selected>Mobile &amp; Desktop</option>
+                    <option value="mobile">Mobile Only</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Options Expander -->
+              <button type="button" class="text-btn" onclick="toggleAdvancedOptions()">
+                <i data-lucide="sliders-horizontal" style="width: 14px; height: 14px;"></i>
+                <span id="advanced-toggle-text">Competitors &amp; Scope</span>
+              </button>
+            </div>
+
+            <!-- Collapsible Advanced Options -->
+            <div id="advanced-options-panel" class="collapsible-options hidden">
+              <div class="grid-2">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <label style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Competitors Benchmark (comma-separated, up to 3 URLs)</label>
+                  <input type="text" id="competitors-input" placeholder="https://competitor1.com, https://competitor2.com" class="clean-input">
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <label style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Custom Proxy (optional, e.g. socks5://127.0.0.1:9050)</label>
+                  <input type="text" id="proxy-input" placeholder="http://127.0.0.1:8080" class="clean-input">
+                </div>
+              </div>
+
+              <!-- Category Scopes -->
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Audit Categories Included</span>
+                <div id="category-checkboxes" class="grid-4" style="font-size: 12px;"></div>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Live Progress Activity Card -->
+        <div id="audit-progress-card" class="progress-box hidden">
+          <div class="progress-header">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--primary);"></div>
+              <div>
+                <h4 id="progress-stage-title" style="font-size: 14px; font-weight: 700; color: var(--text-main);">Running Technical Audit...</h4>
+                <p id="progress-stage-subtitle" style="font-size: 12px; color: var(--text-muted);">Analyzing robots.txt, discovering sitemaps, and crawling pages</p>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span id="progress-percent-badge" class="badge badge-low text-mono">10%</span>
+              <button id="btn-cancel-audit" class="btn-secondary" style="color: var(--color-critical);" onclick="cancelCurrentAudit()">Cancel Audit</button>
+            </div>
+          </div>
+
+          <div class="progress-track">
+            <div id="progress-bar-fill" class="progress-fill" style="width: 10%;"></div>
+          </div>
+
+          <div id="progress-log-terminal" class="progress-terminal"></div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- AUDIT RESULTS PRESENTATION VIEW                         -->
+        <!-- ======================================================== -->
+        <div id="audit-results-container" class="hidden" style="display: flex; flex-direction: column; gap: 24px;">
+
+          <!-- Results Header & Export Toolbar -->
+          <div class="results-toolbar">
+            <div class="results-domain-info">
+              <div style="width: 36px; height: 36px; background-color: var(--primary-subtle); color: var(--primary); border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center;">
+                <i data-lucide="check" style="width: 20px; height: 20px;"></i>
+              </div>
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <h2 id="result-domain-title" class="results-domain-title">—</h2>
+                  <span id="result-date-badge" class="badge badge-subtle text-mono">—</span>
+                  <span id="result-type-badge" class="badge badge-low">—</span>
+                </div>
+                <p id="result-verdict-summary" style="font-size: 12px; color: var(--text-muted);">Strictly graded against Google and agency technical standards.</p>
+              </div>
+            </div>
+
+            <div class="toolbar-actions">
+              <!-- View Mode Toggle -->
+              <div class="view-mode-toggle">
+                <button id="view-mode-layman" class="view-mode-btn active" onclick="setAuditViewMode('layman')">
+                  <i data-lucide="layout" style="width: 13px; height: 13px;"></i>
+                  <span>Executive View</span>
+                </button>
+                <button id="view-mode-expert" class="view-mode-btn" onclick="setAuditViewMode('expert')">
+                  <i data-lucide="layers" style="width: 13px; height: 13px;"></i>
+                  <span>SEO Expert Matrix</span>
+                </button>
+              </div>
+
+              <!-- Export Word (.docx) -->
+              <button id="btn-export-docx" class="btn-secondary" onclick="downloadWordReport()">
+                <i data-lucide="file-text" style="width: 14px; height: 14px; color: var(--primary);"></i>
+                <span>Word (.docx)</span>
+              </button>
+
+              <!-- Export PDF -->
+              <button id="btn-export-pdf" class="btn-secondary" onclick="handlePdfExport()">
+                <i data-lucide="printer" style="width: 14px; height: 14px; color: #dc2626;"></i>
+                <span>PDF Report</span>
+              </button>
+
+              <!-- Export JSON -->
+              <button id="btn-export-json" class="btn-secondary" onclick="downloadJsonReport()">
+                <i data-lucide="code" style="width: 14px; height: 14px;"></i>
+                <span>JSON</span>
+              </button>
+
+              <!-- Capture Full Report Image -->
+              <button class="btn-secondary" onclick="captureElementAsImage('audit-results-container', 'Full-SEO-Report')">
+                <i data-lucide="camera" style="width: 14px; height: 14px; color: #16a34a;"></i>
+                <span>Capture Report Image</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Section 1: Hero Score Meter (left) & Executive Summary (right) -->
+          <div class="grid-hero">
+            <!-- Left: Health Score Gauge -->
+            <div id="card-hero-meter" class="card card-padding" style="display: flex; flex-direction: column; justify-content: space-between;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-hero-meter', 'SEO-Health-Score')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+
+              <div>
+                <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.04em;">SEO Health Score</span>
+                <div class="score-hero-box">
+                  <div class="score-gauge-relative">
+                    <svg class="score-gauge-svg" viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r="42" stroke="#e2e8f0" stroke-width="8" fill="transparent"></circle>
+                      <circle id="score-circle-meter" cx="50" cy="50" r="42" stroke="var(--primary)" stroke-width="8" stroke-dasharray="264" stroke-dashoffset="60" stroke-linecap="round" fill="transparent"></circle>
+                    </svg>
+                    <div class="score-center-text">
+                      <span id="score-grade-badge" class="badge badge-subtle grade-badge-lg">GRADE —</span>
+                      <span id="score-num-value" class="score-num">—</span>
+                      <span class="score-denominator">OUT OF 100</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Stat Pills -->
+              <div class="stat-pills-row">
+                <div class="stat-pill">
+                  <span class="stat-pill-label">Pages Crawled</span>
+                  <span id="stat-pages-crawled" class="stat-pill-val">—</span>
+                </div>
+                <div class="stat-pill">
+                  <span class="stat-pill-label">Critical Issues</span>
+                  <span id="stat-critical-issues" class="stat-pill-val" style="color: var(--color-critical);">—</span>
+                </div>
+                <div class="stat-pill">
+                  <span class="stat-pill-label">Mobile Speed</span>
+                  <span id="stat-mobile-psi" class="stat-pill-val" style="color: var(--primary);">—</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Executive Summary & Highlights -->
+            <div id="card-exec-summary" class="card card-padding" style="display: flex; flex-direction: column; justify-content: space-between;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-exec-summary', 'Executive-Summary')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+
+              <div>
+                <div class="card-header" style="margin-bottom: 12px;">
+                  <div class="card-title-group">
+                    <i data-lucide="file-check" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                    <h3 class="card-title">Executive Diagnostic Summary</h3>
+                  </div>
+                  <span id="exec-summary-source-badge" class="badge badge-subtle text-mono">Summary</span>
+                </div>
+                <p id="exec-summary-text" class="exec-body">Evaluating technical signals...</p>
+              </div>
+
+              <!-- Strengths, Weaknesses & Opportunities 3-Column Split Boxes (DOCX Parity) -->
+              <div class="findings-split-3">
+                <div class="finding-box finding-box-strengths">
+                  <div class="finding-box-title" style="color: var(--color-pass);">
+                    <i data-lucide="check-circle" style="width: 13px; height: 13px;"></i>
+                    <span>Key Strengths</span>
+                  </div>
+                  <ul id="exec-strengths-list" class="finding-list"></ul>
+                </div>
+
+                <div class="finding-box finding-box-issues">
+                  <div class="finding-box-title" style="color: var(--color-critical);">
+                    <i data-lucide="alert-circle" style="width: 13px; height: 13px;"></i>
+                    <span>Urgent Bottlenecks</span>
+                  </div>
+                  <ul id="exec-weaknesses-list" class="finding-list"></ul>
+                </div>
+
+                <div class="finding-box finding-box-opportunities">
+                  <div class="finding-box-title" style="color: var(--primary);">
+                    <i data-lucide="sparkles" style="width: 13px; height: 13px;"></i>
+                    <span>Growth Opportunities</span>
+                  </div>
+                  <ul id="exec-opportunities-list" class="finding-list"></ul>
+                </div>
+              </div>
+
+              <!-- Score Penalties Banner (if applied by scoring engine) -->
+              <div id="score-penalties-banner" class="penalties-banner hidden">
+                <i data-lucide="alert-triangle" style="width: 16px; height: 16px; color: var(--color-critical); flex-shrink: 0;"></i>
+                <div style="flex: 1;">
+                  <strong style="color: var(--color-critical);">Score Penalties Active:</strong>
+                  <span id="score-penalties-text" style="color: var(--text-main); margin-left: 4px;"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 1B: Domain & Page Authority (DA / PA) & Monthly Organic Traffic -->
+          <div class="grid-2">
+            <!-- Left: Domain Authority & Page Authority -->
+            <div id="card-authority-overview" class="card card-padding" style="display: flex; flex-direction: column; justify-content: space-between; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-authority-overview', 'Domain-Page-Authority')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="award" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                  <h3 class="card-title">Domain Authority &amp; Page Authority</h3>
+                </div>
+                <span id="authority-source-badge" class="badge badge-subtle text-mono">Algorithmic Model</span>
+              </div>
+
+              <!-- Authority Gauges Grid -->
+              <div class="grid-2" style="gap: 12px;">
+                <!-- DA Gauge -->
+                <div style="background-color: var(--bg-subtle); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                  <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Domain Authority (DA)</span>
+                  <div style="display: flex; align-items: baseline; gap: 4px;">
+                    <span id="authority-da-val" class="text-mono" style="font-size: 32px; font-weight: 800; color: var(--primary);">—</span>
+                    <span style="font-size: 13px; color: var(--text-muted); font-weight: 600;">/ 100</span>
+                  </div>
+                  <span id="authority-da-status" class="badge badge-low text-mono" style="font-size: 10px;">Evaluating...</span>
+                </div>
+
+                <!-- PA Gauge -->
+                <div style="background-color: var(--bg-subtle); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                  <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Page Authority (PA)</span>
+                  <div style="display: flex; align-items: baseline; gap: 4px;">
+                    <span id="authority-pa-val" class="text-mono" style="font-size: 32px; font-weight: 800; color: #0284c7;">—</span>
+                    <span style="font-size: 13px; color: var(--text-muted); font-weight: 600;">/ 100</span>
+                  </div>
+                  <span id="authority-pa-status" class="badge badge-pass text-mono" style="font-size: 10px;">Evaluating...</span>
+                </div>
+              </div>
+
+              <!-- Authority Footprint Facts -->
+              <div class="canonical-details-grid" style="font-size: 11px;">
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">TLD Prestige</span>
+                  <span id="authority-tld-badge" class="text-mono" style="font-size: 11px; font-weight: 700; color: var(--primary);">—</span>
+                </div>
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Security Trust Grade</span>
+                  <span id="authority-ssl-grade" class="text-mono" style="font-size: 11px; font-weight: 700; color: #16a34a;">—</span>
+                </div>
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Architecture Equity</span>
+                  <span id="authority-arch-equity" class="text-mono" style="font-size: 11px; font-weight: 700; color: var(--text-main);">—</span>
+                </div>
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Crawl Footprint</span>
+                  <span id="authority-footprint" class="text-mono" style="font-size: 11px; font-weight: 700; color: var(--text-main);">— pages</span>
+                </div>
+              </div>
+
+              <p style="font-size: 11px; color: var(--text-muted); line-height: 1.4; border-top: 1px solid var(--border-subtle); padding-top: 6px;">
+                Note: Domain Authority (DA) and Page Authority (PA) are third-party comparative metrics developed to assess link equity and competitor strength — not direct Google ranking factors.
+              </p>
+            </div>
+
+            <!-- Right: Monthly Organic Traffic & Geographic Trajectory -->
+            <div id="card-traffic-overview" class="card card-padding" style="display: flex; flex-direction: column; justify-content: space-between; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-traffic-overview', 'Monthly-Organic-Traffic')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="trending-up" style="width: 16px; height: 16px; color: #16a34a;"></i>
+                  <div>
+                    <h3 class="card-title">Monthly Organic Traffic &amp; Trends</h3>
+                    <p class="card-desc">12-month estimated search visitor trajectory and geographic distribution</p>
+                  </div>
+                </div>
+
+                <!-- Country / Geo Filter -->
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11px; color: var(--text-muted);">Region:</span>
+                  <select id="traffic-geo-select" class="clean-select text-mono" style="font-size: 11.5px; padding: 4px 8px;" onchange="handleTrafficGeoChange(this.value)">
+                    <option value="ALL">Worldwide (Global)</option>
+                    <option value="PRIMARY" selected>Target Market</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- 4 Traffic KPI Pills -->
+              <div class="stat-pills-row">
+                <div class="stat-pill">
+                  <span class="stat-pill-label">Monthly Visits</span>
+                  <span id="traffic-monthly-visits" class="stat-pill-val" style="color: #16a34a;">—</span>
+                </div>
+                <div class="stat-pill">
+                  <span class="stat-pill-label">Est. Impressions</span>
+                  <span id="traffic-monthly-impressions" class="stat-pill-val" style="color: var(--primary);">—</span>
+                </div>
+                <div class="stat-pill">
+                  <span class="stat-pill-label">Ranking Keywords</span>
+                  <span id="traffic-ranking-keywords" class="stat-pill-val" style="color: #0284c7;">—</span>
+                </div>
+                <div class="stat-pill">
+                  <span class="stat-pill-label">Visibility Index</span>
+                  <span id="traffic-visibility-index" class="stat-pill-val" style="color: #d97706;">—</span>
+                </div>
+              </div>
+
+              <!-- 12-Month Traffic Chart Canvas -->
+              <div class="chart-box" style="height: 160px;">
+                <canvas id="trafficTrendChart"></canvas>
+              </div>
+
+              <!-- Geographic Distribution Breakdown Strip -->
+              <div id="traffic-geo-strip" style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; border-top: 1px solid var(--border-subtle); padding-top: 6px;"></div>
+            </div>
+          </div>
+
+          <!-- Section 2: 10 Category Scorecards -->
+          <div class="card card-padding">
+            <div class="card-header">
+              <div class="card-title-group">
+                <i data-lucide="bar-chart-2" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                <h3 class="card-title">Audit Dimensions &amp; Weighted Scores</h3>
+              </div>
+              <button class="card-camera-btn-inline" onclick="captureElementAsImage('category-cards-grid', 'Category-Scores')">
+                <i data-lucide="camera" style="width: 13px; height: 13px;"></i>
+                <span>Capture Section</span>
+              </button>
+            </div>
+            <div id="category-cards-grid" class="grid-4"></div>
+          </div>
+
+          <!-- Section 3: Visual Charts (Radar & Donut) -->
+          <div class="grid-2">
+            <!-- Radar Chart -->
+            <div id="card-radar-chart" class="card card-padding">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-radar-chart', 'SEO-Radar-Footprint')" title="Download chart image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="compass" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                  <h4 class="card-title">Full-Spectrum SEO Radar Footprint</h4>
+                </div>
+                <span style="font-size: 11px; color: var(--text-muted);">Benchmark: 100/100</span>
+              </div>
+              <div class="chart-box">
+                <canvas id="radarChart"></canvas>
+              </div>
+            </div>
+
+            <!-- Severity Donut -->
+            <div id="card-donut-chart" class="card card-padding">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-donut-chart', 'Issues-Severity-Distribution')" title="Download chart image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="pie-chart" style="width: 16px; height: 16px; color: #0284c7;"></i>
+                  <h4 class="card-title">Issue Severity Breakdown</h4>
+                </div>
+                <span id="donut-total-checks" class="badge badge-subtle text-mono">72 Checks</span>
+              </div>
+              <div class="chart-box">
+                <canvas id="severityDonutChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: Full Category Deep-Dive Explorer (DOCX Parity) -->
+          <div id="section-category-deepdive" class="card card-padding" style="display: flex; flex-direction: column; gap: 16px;">
+            <button class="card-camera-btn" onclick="captureElementAsImage('section-category-deepdive', 'Category-Deep-Dive')" title="Download section image">
+              <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+            </button>
+            <div class="card-header">
+              <div class="card-title-group">
+                <i data-lucide="layers" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                <div>
+                  <h3 class="card-title">Detailed Findings by Category (DOCX Report Deep-Dive)</h3>
+                  <p class="card-desc">Exhaustive check-by-check breakdown across all 8 evaluated dimensions</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Category Navigation Tabs -->
+            <div id="category-explorer-tabs" class="cat-explorer-nav"></div>
+
+            <!-- Selected Category Header & Client Explanation -->
+            <div id="category-selected-overview" style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <h4 id="cat-explorer-title" style="font-size: 15px; font-weight: 800; color: var(--text-main);">Technical SEO</h4>
+                <span id="cat-explorer-score-badge" class="badge badge-pass text-mono" style="font-size: 13px;">92/100</span>
+              </div>
+              <div id="cat-explorer-client-callout" class="client-callout-box">
+                Can Google find, crawl and trust your site?
+              </div>
+            </div>
+
+            <!-- Full Checks Table for Category -->
+            <div style="overflow-x: auto;">
+              <table class="clean-table">
+                <thead>
+                  <tr>
+                    <th style="width: 22%;">Check Name</th>
+                    <th style="width: 10%; text-align: center;">Status</th>
+                    <th style="width: 48%;">Findings &amp; Remediation</th>
+                    <th style="width: 10%; text-align: center;">Effort</th>
+                    <th style="width: 10%; text-align: center;">Gain</th>
+                  </tr>
+                </thead>
+                <tbody id="category-checks-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Section 5: Core Web Vitals & Google PageSpeed v5 -->
+          <div id="section-cwv-container" class="card card-padding" style="display: flex; flex-direction: column; gap: 18px;">
+            <button class="card-camera-btn" onclick="captureElementAsImage('section-cwv-container', 'Core-Web-Vitals')" title="Download section image">
+              <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+            </button>
+            <div class="card-header">
+              <div class="card-title-group">
+                <i data-lucide="gauge" style="width: 16px; height: 16px; color: #d97706;"></i>
+                <div>
+                  <h3 class="card-title">Core Web Vitals &amp; Google PageSpeed v5</h3>
+                  <p class="card-desc">Lighthouse lab simulations and Chrome User Experience Report (CrUX) field data</p>
+                </div>
+              </div>
+              <div class="view-mode-toggle">
+                <button id="cwv-btn-mobile" class="view-mode-btn active" onclick="switchCwvStrategy('mobile')">Mobile</button>
+                <button id="cwv-btn-desktop" class="view-mode-btn" onclick="switchCwvStrategy('desktop')">Desktop</button>
+              </div>
+            </div>
+
+            <!-- 4 Lighthouse Scores -->
+            <div id="lighthouse-scores-row" class="grid-4"></div>
+
+            <!-- 5 CWV Threshold Cards -->
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.04em;">Core Web Vitals Thresholds</span>
+              <div id="cwv-metrics-grid" class="grid-5"></div>
+            </div>
+
+            <!-- Opportunities Table -->
+            <div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+              <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.04em;">Performance Diagnostics &amp; Opportunities</span>
+              <table class="clean-table">
+                <thead>
+                  <tr>
+                    <th>Opportunity</th>
+                    <th>Estimated Savings</th>
+                    <th>Recommendation</th>
+                  </tr>
+                </thead>
+                <tbody id="cwv-opportunities-table"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Section 6: Technical Diagnostics (Robots, AI Crawlers, Sitemaps & Security) -->
+          <div class="grid-2">
+            <!-- Left: Robots.txt & Modern AI Crawler Permissions -->
+            <div id="card-ai-crawlers" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-ai-crawlers', 'AI-Crawler-Permissions')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="bot" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                  <h4 class="card-title">AI Search Crawlers &amp; Robots.txt</h4>
+                </div>
+                <span id="robots-status-badge" class="badge badge-pass">Robots.txt Present</span>
+              </div>
+
+              <!-- AI Crawlers Matrix Table -->
+              <table class="clean-table text-mono">
+                <thead>
+                  <tr>
+                    <th>AI Bot / Engine</th>
+                    <th>Operator</th>
+                    <th style="text-align: center;">Permission</th>
+                  </tr>
+                </thead>
+                <tbody id="ai-crawlers-tbody"></tbody>
+              </table>
+
+              <!-- Sitemaps Declared List -->
+              <div style="border-top: 1px solid var(--border-subtle); padding-top: 10px; display: flex; flex-direction: column; gap: 4px;">
+                <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">XML Sitemaps Discovered</span>
+                <div id="sitemaps-list-box" class="text-mono" style="font-size: 11px; color: var(--text-main);"></div>
+              </div>
+            </div>
+
+            <!-- Right: Security Headers & HTTPS Enforcement -->
+            <div id="card-security-headers" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-security-headers', 'Security-Headers-Checklist')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="shield-check" style="width: 16px; height: 16px; color: #16a34a;"></i>
+                  <h4 class="card-title">Security Headers &amp; Safe Browsing</h4>
+                </div>
+                <span id="https-status-badge" class="badge badge-pass">HTTPS Valid</span>
+              </div>
+
+              <!-- Security Headers Table -->
+              <table class="clean-table text-mono">
+                <thead>
+                  <tr>
+                    <th>Security Header</th>
+                    <th>Protection Purpose</th>
+                    <th style="text-align: center;">Status</th>
+                  </tr>
+                </thead>
+                <tbody id="security-headers-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Section 6B: Broken Links, HTTP Redirection & Crawl Diagnostics (Exhaustive Intelligence) -->
+          <div class="grid-2">
+            <!-- Left: HTTP to HTTPS Redirection & Security Chain -->
+            <div id="card-http-redirect" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-http-redirect', 'HTTP-Redirection-Chain')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="shuffle" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                  <h4 class="card-title">HTTP &rarr; HTTPS Redirection Chain</h4>
+                </div>
+                <span id="http-redirect-badge" class="badge badge-subtle">Evaluating...</span>
+              </div>
+
+              <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+                Validates that insecure <code class="text-mono" style="color: var(--text-main);">http://</code> requests automatically 301-redirect to encrypted <code class="text-mono" style="color: var(--primary);">https://</code>.
+              </div>
+
+              <div id="http-redirect-details" class="canonical-fact-card">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Insecure Origin Status:</span>
+                  <span id="http-origin-status" class="badge badge-subtle text-mono">—</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Enforced SSL Redirection:</span>
+                  <span id="http-ssl-enforced" class="badge badge-subtle text-mono">—</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Broken Internal Links Checker -->
+            <div id="card-broken-links" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-broken-links', 'Broken-Internal-Links')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="link-2-off" style="width: 16px; height: 16px; color: #dc2626;"></i>
+                  <h4 class="card-title">Internal Links Integrity &amp; 404s</h4>
+                </div>
+                <span id="broken-links-badge" class="badge badge-subtle">0 Broken</span>
+              </div>
+
+              <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px;">
+                <span id="broken-links-checked-summary" style="color: var(--text-muted);">0 internal links verified across pages</span>
+                <span id="broken-links-status-text" class="text-mono" style="font-weight: 700; color: #16a34a;">Status Clean</span>
+              </div>
+
+              <div id="broken-links-container" class="broken-links-table-wrapper">
+                <table class="clean-table text-mono" style="font-size: 11px;">
+                  <thead>
+                    <tr>
+                      <th>Sampled Link URL</th>
+                      <th style="width: 80px; text-align: center;">HTTP Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="broken-links-tbody">
+                    <tr><td colspan="2" style="text-align: center; color: var(--text-muted); padding: 12px;">No broken links detected.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 6C: Canonical URL, Meta Directives & Media Assets -->
+          <div class="grid-2">
+            <!-- Left: Canonical URL & Directives -->
+            <div id="card-canonical-directives" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-canonical-directives', 'Canonical-URL-Directives')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="file-code" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                  <h4 class="card-title">Canonical URL &amp; Indexation Directives</h4>
+                </div>
+                <span id="canonical-status-badge" class="badge badge-subtle">Evaluating...</span>
+              </div>
+
+              <div class="canonical-details-grid">
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Declared Canonical</span>
+                  <span id="canonical-declared-url" class="truncate text-mono" style="font-size: 11px; font-weight: 600; color: var(--primary);">—</span>
+                </div>
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Canonical Status</span>
+                  <span id="canonical-match-verdict" class="text-mono" style="font-size: 11px; font-weight: 700; color: #16a34a;">—</span>
+                </div>
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Robots Meta Tag</span>
+                  <span id="robots-meta-directives" class="text-mono" style="font-size: 11px; color: var(--text-main);">index, follow</span>
+                </div>
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">X-Robots-Tag Header</span>
+                  <span id="x-robots-header" class="text-mono" style="font-size: 11px; color: var(--text-main);">None (Permissive)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Media & Image Optimization -->
+            <div id="card-media-assets" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-media-assets', 'Media-Image-Optimization')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="image" style="width: 16px; height: 16px; color: #0284c7;"></i>
+                  <h4 class="card-title">Media, Images &amp; Asset Optimization</h4>
+                </div>
+                <span id="media-alt-badge" class="badge badge-subtle">Evaluating...</span>
+              </div>
+
+              <div class="media-assets-grid">
+                <div class="media-asset-stat">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Total Images</span>
+                  <span id="media-total-images" class="text-mono" style="font-size: 16px; font-weight: 800; color: var(--text-main);">—</span>
+                </div>
+                <div class="media-asset-stat">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Alt Coverage</span>
+                  <span id="media-alt-coverage" class="text-mono" style="font-size: 16px; font-weight: 800; color: #16a34a;">—</span>
+                </div>
+                <div class="media-asset-stat">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Modern (WebP)</span>
+                  <span id="media-modern-formats" class="text-mono" style="font-size: 16px; font-weight: 800; color: var(--primary);">—</span>
+                </div>
+                <div class="media-asset-stat">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Responsive</span>
+                  <span id="media-responsive-images" class="text-mono" style="font-size: 16px; font-weight: 800; color: #d97706;">—</span>
+                </div>
+              </div>
+
+              <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 6px;">
+                <span>Lazy Loading: <strong id="media-lazy-status" style="color: var(--text-main);">—</strong></span>
+                <span>Explicit Dimensions: <strong id="media-dims-status" style="color: var(--text-main);">—</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 6D: Local SEO & Section 6E: Off-Page / Backlink Audit -->
+          <div class="grid-2">
+            <!-- Section 6D: Local SEO & Google Business Profile -->
+            <div id="card-local-seo" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-local-seo', 'Local-SEO-Audit')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="map-pin" style="width: 16px; height: 16px; color: #16a34a;"></i>
+                  <h4 class="card-title">Local SEO, Maps &amp; Citations</h4>
+                </div>
+                <span id="local-seo-badge" class="badge badge-subtle">Evaluating...</span>
+              </div>
+
+              <div class="canonical-details-grid">
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Google Maps / GBP</span>
+                  <span id="local-map-status" class="text-mono" style="font-size: 11px; font-weight: 700; color: #16a34a;">—</span>
+                </div>
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">LocalBusiness Schema</span>
+                  <span id="local-schema-status" class="text-mono" style="font-size: 11px; font-weight: 700; color: var(--primary);">—</span>
+                </div>
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Phone (Click-to-Call)</span>
+                  <span id="local-phone-status" class="text-mono" style="font-size: 11px; color: var(--text-main);">—</span>
+                </div>
+                <div class="canonical-fact-card">
+                  <span style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Physical Address (NAP)</span>
+                  <span id="local-address-status" class="text-mono" style="font-size: 11px; color: var(--text-main);">—</span>
+                </div>
+              </div>
+
+              <!-- Citations & Reviews Strip -->
+              <div style="display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border-subtle); padding-top: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                  <span style="color: var(--text-muted);">Local Citations Detected:</span>
+                  <span id="local-citations-text" class="text-mono" style="font-weight: 600; color: var(--text-main);">—</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                  <span style="color: var(--text-muted);">Customer Reviews &amp; Testimonials:</span>
+                  <span id="local-reviews-text" class="text-mono" style="font-weight: 700; color: #16a34a;">—</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 6E: Off-Page SEO & Backlink Intelligence -->
+            <div id="card-offpage-seo" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-offpage-seo', 'Off-Page-Backlinks')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="link" style="width: 16px; height: 16px; color: #0284c7;"></i>
+                  <h4 class="card-title">Off-Page SEO &amp; Backlink Intelligence</h4>
+                </div>
+                <span id="offpage-status-badge" class="badge badge-subtle">Evaluating...</span>
+              </div>
+
+              <div class="media-assets-grid">
+                <div class="media-asset-stat">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Outbound Links</span>
+                  <span id="offpage-outbound-total" class="text-mono" style="font-size: 16px; font-weight: 800; color: var(--text-main);">—</span>
+                </div>
+                <div class="media-asset-stat">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Dofollow Ratio</span>
+                  <span id="offpage-dofollow-ratio" class="text-mono" style="font-size: 16px; font-weight: 800; color: #16a34a;">—</span>
+                </div>
+                <div class="media-asset-stat">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Toxic Risk Check</span>
+                  <span id="offpage-toxic-status" class="text-mono" style="font-size: 16px; font-weight: 800; color: #16a34a;">CLEAN</span>
+                </div>
+                <div class="media-asset-stat">
+                  <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Link Quality Tier</span>
+                  <span id="offpage-quality-tier" class="text-mono" style="font-size: 16px; font-weight: 800; color: var(--primary);">TIER A</span>
+                </div>
+              </div>
+
+              <!-- Anchor Text & Outbound Hygiene -->
+              <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 6px;">
+                <span>Anchor Diversity: <strong id="offpage-anchor-diversity" style="color: var(--text-main);">Healthy</strong></span>
+                <span>Spam TLD Outbound: <strong id="offpage-spam-tld-count" style="color: #16a34a;">0 Detected</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 7: Google SERP & Social Previews -->
+          <div class="grid-2">
+            <!-- Google SERP Snippet Preview -->
+            <div id="card-serp-simulator" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-serp-simulator', 'Google-SERP-Preview')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="search" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                  <h4 class="card-title">Google SERP Snippet Preview</h4>
+                </div>
+                <div class="view-mode-toggle">
+                  <button id="serp-btn-mobile" class="view-mode-btn active" onclick="setSerpDevice('mobile')">Mobile</button>
+                  <button id="serp-btn-desktop" class="view-mode-btn" onclick="setSerpDevice('desktop')">Desktop</button>
+                </div>
+              </div>
+
+              <!-- Google Mockup Card -->
+              <div id="serp-preview-box" class="serp-container">
+                <div class="serp-url-row">
+                  <span id="serp-preview-domain" class="truncate">https://...</span>
+                </div>
+                <h5 id="serp-preview-title" class="serp-title">Page Title</h5>
+                <p id="serp-preview-desc" class="serp-desc">Meta description preview will be displayed here.</p>
+              </div>
+
+              <!-- Length Gauges -->
+              <div class="grid-2" style="font-size: 11.5px;">
+                <div style="background-color: var(--bg-subtle); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 8px 10px;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="color: var(--text-muted);">Title Length:</span>
+                    <span id="serp-title-len-text" class="text-mono text-bold" style="color: var(--primary);">— / 60</span>
+                  </div>
+                  <div class="cat-track">
+                    <div id="serp-title-len-bar" class="cat-fill" style="width: 0%; background-color: var(--primary);"></div>
+                  </div>
+                </div>
+
+                <div style="background-color: var(--bg-subtle); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 8px 10px;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="color: var(--text-muted);">Meta Description:</span>
+                    <span id="serp-desc-len-text" class="text-mono text-bold" style="color: var(--primary);">— / 160</span>
+                  </div>
+                  <div class="cat-track">
+                    <div id="serp-desc-len-bar" class="cat-fill" style="width: 0%; background-color: var(--primary);"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Social Card / OpenGraph & Twitter Preview -->
+            <div id="card-social-preview" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-social-preview', 'Social-Card-Preview')" title="Download card image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="share-2" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                  <h4 class="card-title">Social Share Card Preview (OpenGraph / Twitter)</h4>
+                </div>
+                <span id="og-status-badge" class="badge badge-subtle">Evaluating...</span>
+              </div>
+
+              <!-- Social Card Mockup with live image -->
+              <div style="border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; background-color: var(--bg-surface);">
+                <div id="social-image-container" style="height: 120px; background-color: var(--bg-subtle); display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 11px; overflow: hidden; position: relative;">
+                  <img id="social-og-image" src="" alt="og:image" style="width: 100%; height: 100%; object-fit: cover; display: none;">
+                  <span id="social-og-placeholder">No og:image declared</span>
+                </div>
+                <div style="padding: 10px 14px; display: flex; flex-direction: column; gap: 3px;">
+                  <span id="social-card-domain" class="text-mono" style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">—</span>
+                  <h6 id="social-card-title" class="truncate" style="font-size: 13px; font-weight: 700;">—</h6>
+                  <p id="social-card-desc" class="truncate" style="font-size: 11px; color: var(--text-muted);">—</p>
+                </div>
+              </div>
+
+              <!-- OpenGraph Discovered Tags List -->
+              <div id="social-tags-container" style="border-top: 1px solid var(--border-subtle); padding-top: 8px;">
+                <span style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Discovered Social Tags</span>
+                <div id="social-tags-list" class="social-tags-list" style="margin-top: 4px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 8: Headings Hierarchy & Content Metrics -->
+          <div id="section-headings-content-row" class="grid-2">
+            <!-- Headings Tree -->
+            <div id="card-heading-tree" class="card card-padding" style="display: flex; flex-direction: column; gap: 12px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-heading-tree', 'Headings-Hierarchy-Tree')" title="Download section image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="list-tree" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                  <h4 class="card-title">Headings Structure (H1-H6)</h4>
+                </div>
+                <span id="h1-count-badge" class="badge badge-subtle text-mono">—</span>
+              </div>
+              <div id="headings-tree-list" style="max-height: 220px; overflow-y: auto; background-color: var(--bg-subtle); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 4px;"></div>
+            </div>
+
+            <!-- Content Depth & Readability -->
+            <div id="card-content-metrics" class="card card-padding" style="display: flex; flex-direction: column; gap: 12px;">
+              <button class="card-camera-btn" onclick="captureElementAsImage('card-content-metrics', 'Content-Readability')" title="Download section image">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+              </button>
+              <div class="card-header">
+                <div class="card-title-group">
+                  <i data-lucide="book-open" style="width: 16px; height: 16px; color: #0284c7;"></i>
+                  <h4 class="card-title">Content Depth &amp; Readability</h4>
+                </div>
+                <span id="content-extraction-badge" class="badge badge-subtle text-mono">—</span>
+              </div>
+
+              <div class="grid-3" style="text-align: center;">
+                <div class="stat-pill">
+                  <span class="stat-pill-label">Word Count</span>
+                  <span id="metric-word-count" class="stat-pill-val">—</span>
+                </div>
+                <div class="stat-pill">
+                  <span class="stat-pill-label">Flesch Reading Ease</span>
+                  <span id="metric-flesch-score" class="stat-pill-val" style="color: var(--color-pass);">—</span>
+                </div>
+                <div class="stat-pill">
+                  <span class="stat-pill-label">Primary Keyword</span>
+                  <span id="metric-primary-kw" class="stat-pill-val truncate" style="color: var(--primary); font-size: 12px;">—</span>
+                </div>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 4px; padding-top: 6px;">
+                <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Schema.org Entities Detected</span>
+                <div id="schema-badges-container" style="display: flex; flex-wrap: wrap; gap: 6px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 9: Prioritized Action Plan -->
+          <div id="section-action-items" class="card card-padding" style="display: flex; flex-direction: column; gap: 16px;">
+            <button class="card-camera-btn" onclick="captureElementAsImage('section-action-items', 'Prioritized-Action-Plan')" title="Download section image">
+              <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+            </button>
+            <div class="card-header">
+              <div class="card-title-group">
+                <i data-lucide="check-square" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                <h3 class="card-title">Prioritized Action Items</h3>
+                <span id="action-items-total-badge" class="badge badge-low text-mono">0 Items</span>
+              </div>
+
+              <!-- Filter Controls -->
+                <input type="text" id="action-items-search" placeholder="Filter issues..." class="clean-input" style="width: 140px;" oninput="filterActionItems()">
+                <select id="action-items-tier-filter" class="clean-select" onchange="filterActionItems()">
+                  <option value="all">All 6 Action Tiers</option>
+                  <option value="1">Tier 1: Search Visibility &amp; Indexability</option>
+                  <option value="2">Tier 2: Technical SEO</option>
+                  <option value="3">Tier 3: On-Page SEO &amp; Content</option>
+                  <option value="4">Tier 4: Local SEO</option>
+                  <option value="5">Tier 5: Off-Page SEO &amp; Authority</option>
+                  <option value="6">Tier 6: Performance, Mobile &amp; Security</option>
+                </select>
+                <select id="action-items-severity-filter" class="clean-select" onchange="filterActionItems()">
+                  <option value="all">All Severities</option>
+                  <option value="Critical">Critical</option>
+                  <option value="High">High Priority</option>
+                  <option value="Medium">Medium Priority</option>
+                  <option value="Low">Low Priority</option>
+                </select>
+                <select id="action-items-category-filter" class="clean-select" onchange="filterActionItems()">
+                  <option value="all">All Categories</option>
+                  <option value="technical">Technical SEO</option>
+                  <option value="onpage">On-Page SEO</option>
+                  <option value="performance">Performance</option>
+                  <option value="content">Content Quality</option>
+                  <option value="mobile">Mobile</option>
+                  <option value="accessibility">Accessibility</option>
+                  <option value="security">Security</option>
+                  <option value="local">Local SEO</option>
+                  <option value="offpage">Off-Page SEO</option>
+                  <option value="ux">User Experience</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Visual Stacked Priority Severity Bar (DOCX Parity) -->
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">
+                <span>Issue Severity Distribution</span>
+                <span id="stacked-bar-summary">Ranked by business impact</span>
+              </div>
+              <div id="action-stacked-bar" class="stacked-priority-bar"></div>
+            </div>
+
+            <!-- Action Items List -->
+            <div id="action-items-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+          </div>
+
+          <!-- Section 10: Crawled Pages Inventory -->
+          <div id="section-crawled-pages" class="card card-padding" style="display: flex; flex-direction: column; gap: 14px;">
+            <button class="card-camera-btn" onclick="captureElementAsImage('section-crawled-pages', 'Crawled-Pages-Inventory')" title="Download section image">
+              <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+            </button>
+            <div class="card-header">
+              <div class="card-title-group">
+                <i data-lucide="file-spreadsheet" style="width: 16px; height: 16px; color: #0284c7;"></i>
+                <h3 class="card-title">Crawled Pages Inventory</h3>
+                <span id="crawled-pages-count-badge" class="badge badge-subtle text-mono">0 Pages</span>
+              </div>
+              <input type="text" id="crawl-table-search" placeholder="Search URL or title..." class="clean-input" style="width: 200px;" oninput="filterCrawledPagesTable()">
+            </div>
+
+            <div style="overflow-x: auto;">
+              <table class="clean-table">
+                <thead>
+                  <tr>
+                    <th>Page URL</th>
+                    <th>Status</th>
+                    <th>Title Tag</th>
+                    <th style="text-align: center;">Title Len</th>
+                    <th style="text-align: center;">Words</th>
+                    <th style="text-align: center;">Links</th>
+                    <th style="text-align: center;">Indexable</th>
+                  </tr>
+                </thead>
+                <tbody id="crawled-pages-tbody" class="text-mono"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Section 11: Competitor Benchmark -->
+          <div id="section-competitor-benchmark" class="card card-padding hidden" style="display: flex; flex-direction: column; gap: 14px;">
+            <button class="card-camera-btn" onclick="captureElementAsImage('section-competitor-benchmark', 'Competitor-Benchmark')" title="Download section image">
+              <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+            </button>
+            <div class="card-header">
+              <div class="card-title-group">
+                <i data-lucide="git-compare" style="width: 16px; height: 16px; color: #d97706;"></i>
+                <h3 class="card-title">Competitor Comparison Benchmark</h3>
+              </div>
+            </div>
+            <div id="competitor-comparison-content"></div>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- ======================================================== -->
+      <!-- TAB 2: PROGRESS TRACKER (Executive & Interactive Suite) -->
+      <!-- ======================================================== -->
+      <section id="tab-tracker" class="hidden" style="display: flex; flex-direction: column; gap: 24px;">
+
+        <!-- Tracker Header Bar & Domain Selector -->
+        <div class="card card-padding" style="display: flex; flex-direction: column; gap: 18px;">
+          <div class="card-header">
+            <div class="card-title-group">
+              <i data-lucide="trending-up" style="width: 20px; height: 20px; color: var(--primary);"></i>
+              <div>
+                <h2 class="card-title" style="font-size: 18px;">Site SEO Progress Tracker &amp; Goal Engine</h2>
+                <p class="card-desc">Track longitudinal SEO trajectories, monitor milestone velocity, simulate fix gains, and compare audit diffs</p>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Active Domain:</span>
+              <select id="tracker-domain-select" class="clean-select text-mono" style="font-weight: 700; padding: 6px 12px; min-width: 180px;" onchange="loadDomainTimeline(this.value)"></select>
+              <button class="btn-secondary" style="font-size: 11.5px; padding: 6px 10px;" onclick="syncCurrentAuditToTracker()" title="Track currently active audit">
+                <i data-lucide="crosshair" style="width: 13px; height: 13px;"></i>
+                <span>Track Active Site</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Domain Executive Health Strip -->
+          <div id="tracker-domain-strip" class="domain-kpi-strip">
+            <div class="domain-kpi-item">
+              <span class="domain-kpi-label">Current Score</span>
+              <div style="display: flex; align-items: baseline; gap: 6px;">
+                <span id="tracker-strip-score" class="domain-kpi-val" style="color: var(--primary);">—</span>
+                <span id="tracker-strip-grade" class="badge badge-pass" style="font-size: 10px;">GRADE —</span>
+              </div>
+              <span id="tracker-strip-domain" class="domain-kpi-sub truncate">Select domain</span>
+            </div>
+
+            <div class="domain-kpi-item">
+              <span class="domain-kpi-label">Net Score Delta</span>
+              <span id="tracker-strip-delta" class="domain-kpi-val" style="color: #16a34a;">—</span>
+              <span id="tracker-strip-delta-sub" class="domain-kpi-sub">Since baseline audit</span>
+            </div>
+
+            <div class="domain-kpi-item">
+              <span class="domain-kpi-label">Audits Tracked</span>
+              <span id="tracker-strip-audits" class="domain-kpi-val">0</span>
+              <span id="tracker-strip-dates" class="domain-kpi-sub">Historical records</span>
+            </div>
+
+            <div class="domain-kpi-item">
+              <span class="domain-kpi-label">Mobile PageSpeed</span>
+              <span id="tracker-strip-psi" class="domain-kpi-val" style="color: #d97706;">—</span>
+              <span class="domain-kpi-sub">Lighthouse Score</span>
+            </div>
+
+            <div class="domain-kpi-item">
+              <span class="domain-kpi-label">Critical Issues</span>
+              <span id="tracker-strip-critical" class="domain-kpi-val" style="color: #dc2626;">0</span>
+              <span class="domain-kpi-sub">Urgent blockers</span>
+            </div>
+
+            <div class="domain-kpi-item">
+              <span class="domain-kpi-label">Latest Audit</span>
+              <span id="tracker-strip-date" class="domain-kpi-val" style="font-size: 13px; padding-top: 3px;">—</span>
+              <span id="tracker-strip-pages" class="domain-kpi-sub">0 pages reviewed</span>
+            </div>
+          </div>
+
+          <!-- Goal & Target Setting Cockpit (Forms & Live Gauges) -->
+          <div class="tracker-goal-card">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <i data-lucide="target" style="width: 18px; height: 18px; color: var(--primary);"></i>
+                <div>
+                  <h4 style="font-size: 14px; font-weight: 800; color: var(--text-main);">SEO Health Benchmark Targets &amp; Goal Cockpit</h4>
+                  <span style="font-size: 11px; color: var(--text-muted);">Set benchmark goals and track live gap reduction across your audits</span>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <button type="button" class="btn-secondary" style="font-size: 11px;" onclick="applyTargetPreset('industry')">Top 10% Preset</button>
+                <button type="button" class="btn-secondary" style="font-size: 11px;" onclick="applyTargetPreset('perfect')">Perfection Preset</button>
+                <button type="button" class="btn-primary" style="font-size: 11px; padding: 6px 12px;" onclick="saveDomainTargets()">Save Goals</button>
+              </div>
+            </div>
+
+            <!-- Target Inputs Form Grid -->
+            <div class="grid-4" style="font-size: 12px;">
+              <div style="background-color: var(--bg-surface); padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">TARGET SCORE (0-100)</label>
+                <input type="number" id="target-score-input" min="50" max="100" value="90" class="clean-input" style="font-weight: 700; font-size: 14px;" oninput="recomputeTargetGauges()">
+              </div>
+              <div style="background-color: var(--bg-surface); padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">TARGET MOBILE SPEED (PSI)</label>
+                <input type="number" id="target-mobile-psi-input" min="50" max="100" value="85" class="clean-input" style="font-weight: 700; font-size: 14px;" oninput="recomputeTargetGauges()">
+              </div>
+              <div style="background-color: var(--bg-surface); padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">TARGET SPEED (MAX LCP SECS)</label>
+                <input type="number" id="target-lcp-input" min="1" max="10" step="0.1" value="2.5" class="clean-input" style="font-weight: 700; font-size: 14px;" oninput="recomputeTargetGauges()">
+              </div>
+              <div style="background-color: var(--bg-surface); padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">TARGET CRITICAL ISSUES</label>
+                <input type="number" id="target-critical-input" min="0" max="10" value="0" class="clean-input" style="font-weight: 700; font-size: 14px;" oninput="recomputeTargetGauges()">
+              </div>
+            </div>
+
+            <!-- 4 Live Target Gap Analysis Gauges -->
+            <div id="target-gauges-grid" class="target-gauges-grid">
+              <!-- Gauge 1: Health Score -->
+              <div class="target-gauge-card">
+                <div class="target-gauge-top">
+                  <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Health Score Gap</span>
+                  <span id="target-gauge-score-badge" class="badge badge-subtle">—</span>
+                </div>
+                <div id="target-gauge-score-val" class="target-gauge-val">— / —</div>
+                <div class="cat-track" style="height: 6px;">
+                  <div id="target-gauge-score-bar" class="cat-fill" style="width: 0%; background-color: var(--primary);"></div>
+                </div>
+                <span id="target-gauge-score-status" style="font-size: 10.5px; color: var(--text-subtle);">Benchmark tracking</span>
+              </div>
+
+              <!-- Gauge 2: Mobile PSI -->
+              <div class="target-gauge-card">
+                <div class="target-gauge-top">
+                  <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Mobile PageSpeed</span>
+                  <span id="target-gauge-psi-badge" class="badge badge-subtle">—</span>
+                </div>
+                <div id="target-gauge-psi-val" class="target-gauge-val">— / —</div>
+                <div class="cat-track" style="height: 6px;">
+                  <div id="target-gauge-psi-bar" class="cat-fill" style="width: 0%; background-color: #16a34a;"></div>
+                </div>
+                <span id="target-gauge-psi-status" style="font-size: 10.5px; color: var(--text-subtle);">Speed benchmark</span>
+              </div>
+
+              <!-- Gauge 3: LCP Speed -->
+              <div class="target-gauge-card">
+                <div class="target-gauge-top">
+                  <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">LCP Load Time</span>
+                  <span id="target-gauge-lcp-badge" class="badge badge-subtle">—</span>
+                </div>
+                <div id="target-gauge-lcp-val" class="target-gauge-val">— &le; —</div>
+                <div class="cat-track" style="height: 6px;">
+                  <div id="target-gauge-lcp-bar" class="cat-fill" style="width: 0%; background-color: #0d9488;"></div>
+                </div>
+                <span id="target-gauge-lcp-status" style="font-size: 10.5px; color: var(--text-subtle);">Core Web Vitals ceiling</span>
+              </div>
+
+              <!-- Gauge 4: Critical Blockers -->
+              <div class="target-gauge-card">
+                <div class="target-gauge-top">
+                  <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Critical Blockers</span>
+                  <span id="target-gauge-crit-badge" class="badge badge-subtle">—</span>
+                </div>
+                <div id="target-gauge-crit-val" class="target-gauge-val">— &rarr; 0</div>
+                <div class="cat-track" style="height: 6px;">
+                  <div id="target-gauge-crit-bar" class="cat-fill" style="width: 0%; background-color: #dc2626;"></div>
+                </div>
+                <span id="target-gauge-crit-status" style="font-size: 10.5px; color: var(--text-subtle);">Urgent blockers remaining</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- All-in-One Multi-Parameter Metric Trajectory Cockpit Chart -->
+          <div id="tracker-chart-box" style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <h4 style="font-size: 14.5px; font-weight: 800; color: var(--text-main);">All-In-One SEO Progress &amp; Health Trajectory Cockpit</h4>
+                  <span class="badge badge-low text-mono">Unified Longitudinal View</span>
+                </div>
+                <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">
+                  Simultaneously tracks Health Score, Mobile &amp; Desktop Speed, Technical SEO, Target Benchmark, and Critical Issues over exact audit dates. Click any point to view that audit.
+                </p>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <!-- Metric Selector Tabs -->
+                <div class="tracker-metric-tabs">
+                  <button class="tracker-metric-btn active" onclick="switchTrackerMetric('multi')">All-in-One (Combined)</button>
+                  <button class="tracker-metric-btn" onclick="switchTrackerMetric('overall')">Overall Health Score</button>
+                  <button class="tracker-metric-btn" onclick="switchTrackerMetric('speed')">Mobile vs Desktop PSI</button>
+                  <button class="tracker-metric-btn" onclick="switchTrackerMetric('category')">Category Subscores</button>
+                  <button class="tracker-metric-btn" onclick="switchTrackerMetric('cwv')">Core Web Vitals</button>
+                  <button class="tracker-metric-btn" onclick="switchTrackerMetric('issues')">Issues Burn-Down</button>
+                </div>
+
+                <button class="card-camera-btn-inline" onclick="captureElementAsImage('tracker-chart-box', 'SEO-Progress-Timeline')">
+                  <i data-lucide="camera" style="width: 13px; height: 13px;"></i>
+                  <span>Capture Chart</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="chart-box" style="height: 340px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 10px; background-color: var(--bg-surface);">
+              <canvas id="progressTimelineChart"></canvas>
+            </div>
+
+            <!-- State Milestones Strip directly beneath chart -->
+            <div id="chart-milestones-summary" class="chart-milestones-summary">
+              <span style="font-weight: 700; color: var(--text-muted); text-transform: uppercase; font-size: 10.5px;">Audit Milestones:</span>
+              <div id="chart-milestones-pills" style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                <span style="color: var(--text-muted); font-size: 11px;">No milestones recorded yet. Run an audit to start tracking.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive "What-If" Fix Simulator -->
+        <div class="simulator-box">
+          <div class="card-header">
+            <div class="card-title-group">
+              <i data-lucide="wand-2" style="width: 16px; height: 16px; color: var(--primary);"></i>
+              <div>
+                <h3 class="card-title">Interactive "What-If" SEO Fix Simulator</h3>
+                <p class="card-desc">Simulate how resolving detected issues will boost your site's overall score in real time</p>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 12px; color: var(--text-muted);">Projected Score:</span>
+              <span id="sim-projected-score-badge" class="badge badge-pass text-mono" style="font-size: 14px; padding: 4px 10px;">— / 100</span>
+              <span id="sim-gain-badge" class="badge badge-low text-mono">+0 pts gain</span>
+            </div>
+          </div>
+
+          <!-- Simulator Quick Actions -->
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Quick Presets:</span>
+              <button type="button" class="btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="simulatorSelectAll('critical')">Select All Critical</button>
+              <button type="button" class="btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="simulatorSelectAll('all')">Select All Issues</button>
+              <button type="button" class="btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="simulatorSelectAll('none')">Clear</button>
+            </div>
+            <span id="sim-selected-count" style="font-size: 11.5px; color: var(--text-muted);">0 issues selected for simulation</span>
+          </div>
+
+          <div id="simulator-issues-container" style="display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto;">
+            <p style="color: var(--text-muted); font-size: 12px;">Run an audit or select one from history to simulate fixes.</p>
+          </div>
+        </div>
+
+        <!-- Comprehensive Side-by-Side Audit Comparison Matrix & Diff Engine -->
+        <div class="card card-padding" style="display: flex; flex-direction: column; gap: 18px;">
+          <div class="card-header">
+            <div class="card-title-group">
+              <i data-lucide="git-compare" style="width: 16px; height: 16px; color: #0284c7;"></i>
+              <div>
+                <h3 class="card-title">Side-by-Side Audit Comparison &amp; Diffs (Before vs. After)</h3>
+                <p class="card-desc">Detailed progression matrix showing resolved issues, new regressions, and metric deltas</p>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <button type="button" class="btn-secondary" style="font-size: 11px; padding: 4px 8px;" onclick="presetCompare('first-last')">Compare First vs. Latest</button>
+              <button type="button" class="btn-secondary" style="font-size: 11px; padding: 4px 8px;" onclick="presetCompare('prev-last')">Compare Previous vs. Latest</button>
+            </div>
+          </div>
+
+          <div class="grid-3">
+            <div>
+              <label style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; display: block;">Baseline Audit (Older):</label>
+              <select id="compare-audit-1" class="clean-select text-mono" style="width: 100%;"></select>
+            </div>
+            <div>
+              <label style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; display: block;">Target Audit (Newer):</label>
+              <select id="compare-audit-2" class="clean-select text-mono" style="width: 100%;"></select>
+            </div>
+            <div style="display: flex; align-items: flex-end;">
+              <button class="btn-primary" style="width: 100%; padding: 8px 14px; font-size: 12.5px;" onclick="executeAuditComparison()">
+                <i data-lucide="git-compare" style="width: 14px; height: 14px;"></i>
+                <span>Compute Comparison</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Comparison Output Container -->
+          <div id="comparison-results-output" class="hidden" style="border-top: 1px solid var(--border-subtle); padding-top: 16px; display: flex; flex-direction: column; gap: 16px;"></div>
+        </div>
+
+        <!-- Audit Milestones & Historical Activity Feed -->
+        <div class="card card-padding" style="display: flex; flex-direction: column; gap: 16px;">
+          <div class="card-header">
+            <div class="card-title-group">
+              <i data-lucide="calendar" style="width: 18px; height: 18px; color: var(--primary);"></i>
+              <div>
+                <h3 class="card-title">Audit Milestone Activity Feed &amp; Historical Trajectory</h3>
+                <p class="card-desc">Chronological log of every technical audit executed for the active domain</p>
+              </div>
+            </div>
+          </div>
+
+          <div id="tracker-milestones-feed" class="milestones-container">
+            <div style="color: var(--text-muted); font-size: 12px; padding: 12px;">No historical milestones recorded yet. Run an audit to start tracking.</div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ======================================================== -->
+      <!-- TAB 3: AUDIT HISTORY                                    -->
+      <!-- ======================================================== -->
+      <section id="tab-history" class="hidden" style="display: flex; flex-direction: column; gap: 24px;">
+
+        <div class="card card-padding" style="display: flex; flex-direction: column; gap: 16px;">
+          <div class="card-header">
+            <div class="card-title-group">
+              <i data-lucide="archive" style="width: 18px; height: 18px; color: var(--primary);"></i>
+              <div>
+                <h2 class="card-title" style="font-size: 17px;">Audit Archive &amp; Saved Reports</h2>
+                <p class="card-desc">Review previous audits, compare progress, or download saved deliverables</p>
+              </div>
+            </div>
+            <button class="btn-secondary" onclick="loadAuditHistory()">
+              <i data-lucide="refresh-cw" style="width: 13px; height: 13px;"></i>
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          <div style="overflow-x: auto;">
+            <table class="clean-table">
+              <thead>
+                <tr>
+                  <th>Domain / URL</th>
+                  <th>Audit Date</th>
+                  <th style="text-align: center;">Health Score</th>
+                  <th style="text-align: center;">Grade</th>
+                  <th style="text-align: center;">Pages</th>
+                  <th style="text-align: center;">Critical Issues</th>
+                  <th style="text-align: right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="history-table-tbody" class="text-mono"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-overlay hidden">
+      <div class="modal-dialog">
+        <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="settings" style="width: 16px; height: 16px; color: var(--primary);"></i>
+            <h3 style="font-size: 15px; font-weight: 700; color: var(--text-main);">Settings &amp; API Configuration</h3>
+          </div>
+          <button class="icon-btn" onclick="closeSettingsModal()" style="border: none; padding: 4px;">
+            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+          </button>
+        </div>
+
+        <form id="settings-form" onsubmit="handleSaveSettings(event)" style="display: flex; flex-direction: column; gap: 14px;">
+          <div style="background-color: var(--primary-subtle); border: 1px solid var(--primary-border); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 12px; color: var(--primary);">
+            PageSpeed Insights runs keyless. Optional AI keys unlock the executive summary.
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">Groq API Key (Fast &amp; Free):</label>
+              <input type="password" id="setting-groq-key" placeholder="gsk_..." class="clean-input">
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">Gemini API Key:</label>
+              <input type="password" id="setting-gemini-key" placeholder="AIza..." class="clean-input">
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">OpenRouter / Anthropic Key:</label>
+              <input type="password" id="setting-openrouter-key" placeholder="sk-..." class="clean-input">
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border-subtle); padding-top: 8px;">
+              <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">PageSpeed Insights Key (Optional quota bump):</label>
+              <input type="password" id="setting-psi-key" placeholder="Google Cloud API key (leave blank for keyless)" class="clean-input">
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border-subtle); padding-top: 8px;">
+              <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">Moz Access ID (Domain &amp; Page Authority):</label>
+              <input type="text" id="setting-moz-access" placeholder="moz_access_id (leave blank for algorithmic model)" class="clean-input">
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">Moz Secret Key:</label>
+              <input type="password" id="setting-moz-secret" placeholder="moz_secret_key" class="clean-input">
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
+            <button type="button" class="btn-secondary" onclick="closeSettingsModal()">Cancel</button>
+            <button type="submit" class="btn-primary" style="padding: 8px 16px;">Save Settings</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container"></div>
+
+  </div>
+
+  <!-- Application Logic -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

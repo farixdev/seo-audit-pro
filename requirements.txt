@@ -1,0 +1,12 @@
+# SEO Audit Pro — Production Dependencies for Render / Cloud Deployment
+flask>=3.0.0
+gunicorn>=21.2.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+python-docx>=1.1.0
+matplotlib>=3.8.0
+trafilatura>=1.8.0
+python-dotenv>=1.0.0
+
+# Optional: PySide6>=6.6 (only needed for legacy desktop app.py, excluded for cloud web servers)

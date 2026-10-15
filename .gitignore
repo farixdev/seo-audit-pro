@@ -1,0 +1,28 @@
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Secrets & Environment variables
+.env
+!.env.example
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Generated audit exports & runtime reports (keep templates & static)
+reports/*.docx
+reports/*.pdf
+reports/*.json
+reports/*.html
+reports/audits/
+!reports/.gitkeep
+history.json
+
+# Local build artifacts
+build/
+dist/
+*.egg-info/
