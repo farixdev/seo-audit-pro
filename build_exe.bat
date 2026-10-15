@@ -14,7 +14,7 @@ if not exist ".venv\Scripts\python.exe" (
 call .venv\Scripts\python.exe -m pip install -q -r requirements.txt pyinstaller || goto :err
 
 echo [2/3] Building executables with PyInstaller...
-call .venv\Scripts\pyinstaller.exe --noconfirm --clean "SEO Audit Pro.spec" || goto :err
+call .venv\Scripts\pyinstaller.exe --noconfirm --clean "SEO Audit Pro Web.spec" || goto :err
 
 echo [3/3] Creating distribution zips...
 .venv\Scripts\python.exe -c "import zipfile, os, pathlib, shutil; \

@@ -16,8 +16,15 @@ from datetime import datetime
 
 import scoring
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-REPORTS_DIR = os.path.join(APP_DIR, "reports")
+import sys
+
+if getattr(sys, "frozen", False):
+    EXE_DIR = os.path.dirname(sys.executable)
+else:
+    EXE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+APP_DIR = EXE_DIR
+REPORTS_DIR = os.path.join(EXE_DIR, "reports")
 AUDITS_DIR = os.path.join(REPORTS_DIR, "audits")
 HISTORY_FILE = os.path.join(REPORTS_DIR, "history.json")
 TARGETS_FILE = os.path.join(REPORTS_DIR, "targets.json")
@@ -71,6 +78,8 @@ def _get_db():
     try:
         import psycopg2
         target_url = _clean_db_url(os.environ.get("DATABASE_URL") or NEON_DATABASE_URL)
+        if not target_url or not target_url.strip():
+            return None
         conn = psycopg2.connect(target_url, connect_timeout=6)
         conn.autocommit = True
         return conn

@@ -42,14 +42,21 @@ import seo_checks
 config.load_env()
 prefs.apply_saved_env()
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-REPORTS_DIR = os.path.join(APP_DIR, "reports")
+if getattr(sys, "frozen", False):
+    BUNDLE_DIR = sys._MEIPASS
+    EXE_DIR = os.path.dirname(sys.executable)
+else:
+    BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
+    EXE_DIR = BUNDLE_DIR
+
+APP_DIR = BUNDLE_DIR
+REPORTS_DIR = os.path.join(EXE_DIR, "reports")
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 app = Flask(
     __name__,
-    template_folder=os.path.join(APP_DIR, "templates"),
-    static_folder=os.path.join(APP_DIR, "static"),
+    template_folder=os.path.join(BUNDLE_DIR, "templates"),
+    static_folder=os.path.join(BUNDLE_DIR, "static"),
 )
 app.config["JSON_AS_ASCII"] = False
 
