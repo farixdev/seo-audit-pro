@@ -1633,3 +1633,69 @@ a:hover {
   font-family: var(--font-mono);
 }
 
+/* ========================================================================== */
+/* Shimmer & Skeleton Screen Loading System                                   */
+/* ========================================================================== */
+@keyframes shimmerSweep {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(226, 232, 240, 0.5) 0%,
+    rgba(248, 250, 252, 0.95) 50%,
+    rgba(226, 232, 240, 0.5) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmerSweep 1.5s infinite ease-in-out;
+  border-radius: var(--radius-sm);
+  display: block;
+}
+
+.shimmer-line {
+  height: 14px;
+  width: 100%;
+  border-radius: 4px;
+}
+
+.shimmer-line.short {
+  width: 35%;
+}
+
+.shimmer-line.medium {
+  width: 65%;
+}
+
+.shimmer-line.lg {
+  height: 24px;
+}
+
+.shimmer-circle {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.shimmer-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shimmer-row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+

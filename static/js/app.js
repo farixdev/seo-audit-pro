@@ -2147,16 +2147,32 @@ async function captureElementAsImage(elementId, baseName) {
   }
 }
 
-// ==========================================================================
-// Reports & Exports (Word, PDF, JSON)
-// ==========================================================================
+// Helper to reliably trigger file download or open in new tab
+function triggerFileDownload(url, filename) {
+  const link = document.createElement('a');
+  link.href = url;
+  if (filename) link.download = filename;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => {
+    try {
+      document.body.removeChild(link);
+    } catch (e) {}
+  }, 400);
+}
+
 function downloadWordReport() {
   if (!AppState.currentAuditId) {
     showToast('No active audit to export.', 'error');
     return;
   }
-  window.location.href = `/api/audit/${AppState.currentAuditId}/docx`;
+  const auditId = AppState.currentAuditId;
+  const domain = AppState.currentResult?.domain || 'report';
+  const url = `/api/audit/${auditId}/docx`;
   showToast('Downloading Word report (.docx)...', 'info');
+  triggerFileDownload(url, `SEO-Audit-${domain}-${auditId.slice(0, 8)}.docx`);
 }
 
 async function handlePdfExport() {
@@ -2193,6 +2209,10 @@ function downloadJsonReport() {
 // Progress Tracker & Historical Trajectory Suite
 // ==========================================================================
 async function initTrackerView() {
+  const domainSelect = document.getElementById('tracker-domain-select');
+  if (domainSelect && domainSelect.options.length === 0) {
+    domainSelect.innerHTML = `<option value="">Loading historical audits...</option>`;
+  }
   try {
     const res = await fetch('/api/history');
     const data = await res.json();
@@ -2289,6 +2309,20 @@ function syncCurrentAuditToTracker() {
 
 async function loadDomainTimeline(domain) {
   if (!domain) return;
+  const milestonesFeed = document.getElementById('tracker-milestones-feed');
+  if (milestonesFeed) {
+    milestonesFeed.innerHTML = `
+      <div class="shimmer-card">
+        <div class="shimmer shimmer-line short" style="margin-bottom: 6px;"></div>
+        <div class="shimmer shimmer-line" style="margin-bottom: 6px;"></div>
+        <div class="shimmer shimmer-line medium"></div>
+      </div>
+      <div class="shimmer-card">
+        <div class="shimmer shimmer-line short" style="margin-bottom: 6px;"></div>
+        <div class="shimmer shimmer-line"></div>
+      </div>
+    `;
+  }
   try {
     const res = await fetch(`/api/progress/timeline?domain=${encodeURIComponent(domain)}`);
     const data = await res.json();
@@ -3311,7 +3345,7 @@ function renderTrackerMilestones(timeline) {
         </div>
         <div style="display: flex; align-items: center; gap: 6px;">
           <button class="btn-secondary" style="font-size: 11px; padding: 4px 8px;" onclick="openPastAudit('${m.id}')">View Suite</button>
-          <button class="btn-secondary" style="font-size: 11px; padding: 4px 8px;" onclick="downloadWordDirect('${m.id}')">DOCX</button>
+          <button class="btn-secondary" style="font-size: 11px; padding: 4px 8px;" onclick="downloadWordDirect('${m.id}', '${escapeHtml(m.domain || '')}')">DOCX</button>
         </div>
       </div>
     `;
@@ -3326,6 +3360,43 @@ function renderTrackerMilestones(timeline) {
 async function loadAuditHistory() {
   const tbody = document.getElementById('history-table-tbody');
   if (!tbody) return;
+
+  // Show shimmer skeleton rows while fetching history
+  tbody.innerHTML = `
+    <tr>
+      <td colspan="7" style="padding: 20px 16px;">
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div style="display: flex; gap: 14px; align-items: center;">
+            <div class="shimmer shimmer-line" style="width: 25%;"></div>
+            <div class="shimmer shimmer-line" style="width: 15%;"></div>
+            <div class="shimmer shimmer-line" style="width: 10%;"></div>
+            <div class="shimmer shimmer-line" style="width: 8%;"></div>
+            <div class="shimmer shimmer-line" style="width: 10%;"></div>
+            <div class="shimmer shimmer-line" style="width: 10%;"></div>
+            <div class="shimmer shimmer-line" style="width: 22%;"></div>
+          </div>
+          <div style="display: flex; gap: 14px; align-items: center;">
+            <div class="shimmer shimmer-line" style="width: 22%;"></div>
+            <div class="shimmer shimmer-line" style="width: 18%;"></div>
+            <div class="shimmer shimmer-line" style="width: 12%;"></div>
+            <div class="shimmer shimmer-line" style="width: 7%;"></div>
+            <div class="shimmer shimmer-line" style="width: 11%;"></div>
+            <div class="shimmer shimmer-line" style="width: 9%;"></div>
+            <div class="shimmer shimmer-line" style="width: 21%;"></div>
+          </div>
+          <div style="display: flex; gap: 14px; align-items: center;">
+            <div class="shimmer shimmer-line" style="width: 27%;"></div>
+            <div class="shimmer shimmer-line" style="width: 14%;"></div>
+            <div class="shimmer shimmer-line" style="width: 11%;"></div>
+            <div class="shimmer shimmer-line" style="width: 8%;"></div>
+            <div class="shimmer shimmer-line" style="width: 10%;"></div>
+            <div class="shimmer shimmer-line" style="width: 10%;"></div>
+            <div class="shimmer shimmer-line" style="width: 20%;"></div>
+          </div>
+        </div>
+      </td>
+    </tr>
+  `;
 
   try {
     const res = await fetch('/api/history');
@@ -3351,7 +3422,7 @@ async function loadAuditHistory() {
         <td style="text-align: center; color: #dc2626; font-weight: 700;">${h.critical_issues || 0}</td>
         <td style="text-align: right;">
           <button class="btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="openPastAudit('${h.id}')">View</button>
-          <button class="btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="downloadWordDirect('${h.id}')">DOCX</button>
+          <button class="btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="downloadWordDirect('${h.id}', '${escapeHtml(h.domain || '')}')">DOCX</button>
           <button class="btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #dc2626;" onclick="deletePastAudit('${h.id}')">Delete</button>
         </td>
       `;
@@ -3377,8 +3448,11 @@ async function openPastAudit(auditId) {
   }
 }
 
-function downloadWordDirect(auditId) {
-  window.location.href = `/api/audit/${auditId}/docx`;
+function downloadWordDirect(auditId, domain) {
+  if (!auditId) return;
+  const url = `/api/audit/${auditId}/docx`;
+  showToast('Downloading Word report (.docx)...', 'info');
+  triggerFileDownload(url, `SEO-Audit-${domain || auditId.slice(0, 8)}.docx`);
 }
 
 async function deletePastAudit(auditId) {

@@ -7,3 +7,5 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: DATABASE_URL
+        sync: false

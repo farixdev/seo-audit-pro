@@ -3,12 +3,15 @@
 History and Progress Tracker for SEO Audit Pro.
 Stores completed audits, computes SEO progress over time, manages targets,
 and simulates score gains from remediating detected issues.
+Powered by Neon PostgreSQL with thread-safe in-memory caching and local fallback.
 """
 
 import copy
 import json
 import os
 import re
+import threading
+import time
 from datetime import datetime
 
 import scoring
@@ -19,14 +22,146 @@ AUDITS_DIR = os.path.join(REPORTS_DIR, "audits")
 HISTORY_FILE = os.path.join(REPORTS_DIR, "history.json")
 TARGETS_FILE = os.path.join(REPORTS_DIR, "targets.json")
 
+# Neon PostgreSQL Connection URL - Loaded strictly from environment variable
+NEON_DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+
+def _clean_db_url(raw_url):
+    """Strip channel_binding or unsupported params that older libpq/Linux versions reject."""
+    if not raw_url:
+        return ""
+    try:
+        import urllib.parse
+        parsed = urllib.parse.urlparse(raw_url)
+        if parsed.query:
+            qs = urllib.parse.parse_qs(parsed.query)
+            qs.pop("channel_binding", None)
+            new_query = urllib.parse.urlencode(qs, doseq=True)
+            return urllib.parse.urlunparse(parsed._replace(query=new_query))
+    except Exception:
+        pass
+    cleaned = re.sub(r"[\?\&]channel_binding=[^&]+", "", raw_url)
+    if "?" not in cleaned and "&" in cleaned:
+        cleaned = cleaned.replace("&", "?", 1)
+    return cleaned
+
+
+# In-Memory Cache for ultra-fast web performance
+# TTL in seconds
+CACHE_TTL_HISTORY = 30
+CACHE_TTL_TIMELINE = 30
+CACHE_TTL_TARGETS = 60
+
+_CACHE_LOCK = threading.Lock()
+_CACHE = {
+    "history": None,       # (timestamp, list_of_summaries)
+    "timelines": {},       # domain -> (timestamp, list_of_summaries)
+    "targets": {},         # domain -> (timestamp, dict)
+    "audits": {},          # audit_id -> full_result_dict (immutable)
+}
+
 
 def _ensure_dirs():
     os.makedirs(REPORTS_DIR, exist_ok=True)
     os.makedirs(AUDITS_DIR, exist_ok=True)
 
 
+def _get_db():
+    """Returns a new psycopg2 connection to Neon PostgreSQL, or None if unavailable."""
+    try:
+        import psycopg2
+        target_url = _clean_db_url(os.environ.get("DATABASE_URL") or NEON_DATABASE_URL)
+        conn = psycopg2.connect(target_url, connect_timeout=6)
+        conn.autocommit = True
+        return conn
+    except Exception as e:
+        print(f"[history_manager] DB connection error: {e}")
+        return None
+
+
+def _init_db():
+    """Ensure database schema tables exist in Neon PostgreSQL."""
+    conn = _get_db()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS seo_audits (
+                    id VARCHAR(128) PRIMARY KEY,
+                    domain VARCHAR(255) NOT NULL,
+                    url TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    score INTEGER NOT NULL,
+                    grade VARCHAR(10) NOT NULL,
+                    summary JSONB NOT NULL,
+                    result JSONB NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_seo_audits_domain ON seo_audits (lower(domain));
+                CREATE INDEX IF NOT EXISTS idx_seo_audits_created ON seo_audits (created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS seo_targets (
+                    domain VARCHAR(255) PRIMARY KEY,
+                    targets JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL
+                );
+                """
+            )
+    except Exception as e:
+        print(f"[history_manager] DB init schema error: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+# Initialize DB tables on startup
+try:
+    _init_db()
+except Exception:
+    pass
+
+
+# ---------------------------------------------------------------------------
+# History Index & Audit Store
+# ---------------------------------------------------------------------------
+
 def load_history():
-    """Returns the list of historical audit summaries, sorted newest first."""
+    """
+    Returns the list of historical audit summaries, sorted newest first.
+    Uses in-memory cache, falls back to Neon PostgreSQL, then local history.json.
+    """
+    now = time.time()
+    with _CACHE_LOCK:
+        cached = _CACHE.get("history")
+        if cached and (now - cached[0]) < CACHE_TTL_HISTORY:
+            return copy.deepcopy(cached[1])
+
+    # Try Neon PostgreSQL
+    conn = _get_db()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT summary FROM seo_audits ORDER BY created_at DESC LIMIT 200"
+                )
+                rows = cur.fetchall()
+                if rows is not None:
+                    summaries = [r[0] for r in rows if r and r[0]]
+                    with _CACHE_LOCK:
+                        _CACHE["history"] = (now, summaries)
+                    return copy.deepcopy(summaries)
+        except Exception as e:
+            print(f"[history_manager] Error querying history from DB: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # Fallback to local file
     _ensure_dirs()
     if not os.path.isfile(HISTORY_FILE):
         return []
@@ -34,14 +169,16 @@ def load_history():
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, list):
-                return data
+                with _CACHE_LOCK:
+                    _CACHE["history"] = (now, data)
+                return copy.deepcopy(data)
             return []
     except Exception:
         return []
 
 
 def save_history(history_list):
-    """Saves the audit summaries list."""
+    """Saves the audit summaries list to local disk as backup."""
     _ensure_dirs()
     try:
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -51,16 +188,13 @@ def save_history(history_list):
 
 
 def save_audit_result(audit_id, result):
-    """Saves full audit result JSON and adds an entry to the history index."""
+    """
+    Saves full audit result JSON and adds an entry to Neon PostgreSQL and local disk.
+    Invalidates history caches to ensure instant consistency.
+    """
     _ensure_dirs()
-    audit_file = os.path.join(AUDITS_DIR, f"{audit_id}.json")
-    try:
-        with open(audit_file, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"[history] Error saving audit {audit_id}: {e}")
 
-    # Build summary record for index
+    # Build summary record for index & timeline
     sc = result.get("score") or {}
     dims = {d.get("key"): d.get("score") for d in sc.get("dimensions", [])}
     psi = result.get("psi") or {}
@@ -81,15 +215,22 @@ def save_audit_result(audit_id, result):
     items = result.get("action_items") or []
     counts = result.get("priority_counts") or {}
 
+    domain = result.get("domain", "")
+    url = result.get("url") or result.get("final_url", "")
+    date_str = result.get("date") or datetime.now().strftime("%Y-%m-%d")
+    now_iso = datetime.now().isoformat()
+    score_val = sc.get("score", 0)
+    grade_val = sc.get("grade", "?")
+
     summary = {
         "id": audit_id,
-        "url": result.get("url") or result.get("final_url", ""),
-        "domain": result.get("domain", ""),
-        "timestamp": datetime.now().isoformat(),
-        "date": result.get("date") or datetime.now().strftime("%Y-%m-%d"),
+        "url": url,
+        "domain": domain,
+        "timestamp": now_iso,
+        "date": date_str,
         "time": datetime.now().strftime("%H:%M"),
-        "score": sc.get("score", 0),
-        "grade": sc.get("grade", "?"),
+        "score": score_val,
+        "grade": grade_val,
         "label": sc.get("label", ""),
         "pages_crawled": result.get("pages_crawled", 1),
         "critical_issues": counts.get("Critical", 0),
@@ -116,30 +257,149 @@ def save_audit_result(audit_id, result):
         },
     }
 
-    history = load_history()
-    history = [h for h in history if h.get("id") != audit_id]
-    history.insert(0, summary)
-    history = history[:200]
-    save_history(history)
+    # 1. Save to Neon PostgreSQL
+    conn = _get_db()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO seo_audits (id, domain, url, created_at, score, grade, summary, result)
+                    VALUES (%s, %s, %s, NOW(), %s, %s, %s::jsonb, %s::jsonb)
+                    ON CONFLICT (id) DO UPDATE SET
+                        domain = EXCLUDED.domain,
+                        url = EXCLUDED.url,
+                        score = EXCLUDED.score,
+                        grade = EXCLUDED.grade,
+                        summary = EXCLUDED.summary,
+                        result = EXCLUDED.result
+                    """,
+                    (
+                        audit_id,
+                        domain,
+                        url,
+                        score_val,
+                        grade_val,
+                        json.dumps(summary, ensure_ascii=False),
+                        json.dumps(result, ensure_ascii=False),
+                    ),
+                )
+        except Exception as e:
+            print(f"[history_manager] Error inserting audit into Neon DB: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # 2. Local disk backup
+    audit_file = os.path.join(AUDITS_DIR, f"{audit_id}.json")
+    try:
+        with open(audit_file, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[history_manager] Error saving audit local file {audit_id}: {e}")
+
+    # 3. Update local history index
+    try:
+        local_history = []
+        if os.path.isfile(HISTORY_FILE):
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                local_history = json.load(f)
+        if not isinstance(local_history, list):
+            local_history = []
+        local_history = [h for h in local_history if h.get("id") != audit_id]
+        local_history.insert(0, summary)
+        local_history = local_history[:200]
+        save_history(local_history)
+    except Exception:
+        pass
+
+    # 4. Invalidate & update in-memory caches
+    with _CACHE_LOCK:
+        _CACHE["history"] = None
+        _CACHE["timelines"].clear()
+        _CACHE["audits"][audit_id] = copy.deepcopy(result)
+
     return summary
 
 
 def get_audit(audit_id):
-    """Loads full audit result JSON by id."""
+    """Loads full audit result JSON by id from cache, Neon DB, or local file."""
+    if not audit_id:
+        return None
+
+    # 1. Check in-memory cache
+    with _CACHE_LOCK:
+        if audit_id in _CACHE["audits"]:
+            return copy.deepcopy(_CACHE["audits"][audit_id])
+
+    # 2. Query Neon DB
+    conn = _get_db()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT result FROM seo_audits WHERE id = %s",
+                    (audit_id,),
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    res = row[0]
+                    with _CACHE_LOCK:
+                        _CACHE["audits"][audit_id] = copy.deepcopy(res)
+                    return res
+        except Exception as e:
+            print(f"[history_manager] Error fetching audit {audit_id} from Neon DB: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # 3. Local disk fallback
     _ensure_dirs()
     safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", audit_id)
     path = os.path.join(AUDITS_DIR, f"{safe_id}.json")
     if os.path.isfile(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                res = json.load(f)
+                with _CACHE_LOCK:
+                    _CACHE["audits"][audit_id] = copy.deepcopy(res)
+                return res
         except Exception:
             return None
     return None
 
 
 def delete_audit(audit_id):
-    """Deletes audit from history and disk."""
+    """Deletes audit from Neon DB, cache, and disk."""
+    if not audit_id:
+        return False
+
+    # 1. Delete from Neon DB
+    conn = _get_db()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM seo_audits WHERE id = %s", (audit_id,))
+        except Exception as e:
+            print(f"[history_manager] Error deleting audit {audit_id} from Neon DB: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # 2. Invalidate cache
+    with _CACHE_LOCK:
+        _CACHE["history"] = None
+        _CACHE["timelines"].clear()
+        if audit_id in _CACHE["audits"]:
+            del _CACHE["audits"][audit_id]
+
+    # 3. Delete from disk
     _ensure_dirs()
     safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", audit_id)
     path = os.path.join(AUDITS_DIR, f"{safe_id}.json")
@@ -148,9 +408,17 @@ def delete_audit(audit_id):
             os.remove(path)
         except OSError:
             pass
-    history = load_history()
-    history = [h for h in history if h.get("id") != audit_id]
-    save_history(history)
+
+    try:
+        if os.path.isfile(HISTORY_FILE):
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                data = [h for h in data if h.get("id") != audit_id]
+                save_history(data)
+    except Exception:
+        pass
+
     return True
 
 
@@ -159,7 +427,45 @@ def get_domain_progress(domain):
     Returns the historical progression timeline for a specific domain,
     sorted chronologically (oldest to newest).
     """
+    if not domain:
+        return []
     norm_dom = domain.lower().replace("www.", "").strip()
+
+    # Check cache
+    now = time.time()
+    with _CACHE_LOCK:
+        cached = _CACHE["timelines"].get(norm_dom)
+        if cached and (now - cached[0]) < CACHE_TTL_TIMELINE:
+            return copy.deepcopy(cached[1])
+
+    # Try Neon PostgreSQL
+    conn = _get_db()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT summary FROM seo_audits
+                    WHERE lower(replace(domain, 'www.', '')) = %s
+                    ORDER BY created_at ASC
+                    """,
+                    (norm_dom,),
+                )
+                rows = cur.fetchall()
+                if rows:
+                    timeline = [r[0] for r in rows if r and r[0]]
+                    with _CACHE_LOCK:
+                        _CACHE["timelines"][norm_dom] = (now, timeline)
+                    return copy.deepcopy(timeline)
+        except Exception as e:
+            print(f"[history_manager] Error querying domain timeline from Neon DB: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # Fallback to in-memory/file history scan
     history = load_history()
     matches = []
     for h in history:
@@ -167,35 +473,117 @@ def get_domain_progress(domain):
         if h_dom == norm_dom:
             matches.append(h)
     matches.sort(key=lambda x: x.get("timestamp", x.get("date", "")))
-    return matches
+
+    with _CACHE_LOCK:
+        _CACHE["timelines"][norm_dom] = (now, matches)
+
+    return copy.deepcopy(matches)
 
 
-# ---- Site Targets & Goals --------------------------------------------------
+# ---------------------------------------------------------------------------
+# Site Targets & Goals (Neon DB + Cache + Local Fallback)
+# ---------------------------------------------------------------------------
+
+DEFAULT_TARGETS = {
+    "target_score": 90,
+    "target_lcp": 2.5,
+    "target_mobile_psi": 85,
+    "target_critical": 0,
+}
+
+
 def get_targets(domain):
     """Get target goals for a specific domain."""
-    _ensure_dirs()
+    if not domain:
+        return copy.deepcopy(DEFAULT_TARGETS)
     norm = domain.lower().replace("www.", "").strip()
+
+    # Check cache
+    now = time.time()
+    with _CACHE_LOCK:
+        cached = _CACHE["targets"].get(norm)
+        if cached and (now - cached[0]) < CACHE_TTL_TARGETS:
+            return copy.deepcopy(cached[1])
+
+    # Try Neon DB
+    conn = _get_db()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT targets FROM seo_targets WHERE lower(replace(domain, 'www.', '')) = %s",
+                    (norm,),
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    t_data = row[0]
+                    with _CACHE_LOCK:
+                        _CACHE["targets"][norm] = (now, t_data)
+                    return copy.deepcopy(t_data)
+        except Exception as e:
+            print(f"[history_manager] Error querying targets from Neon DB: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # Fallback to local file
+    _ensure_dirs()
     if os.path.isfile(TARGETS_FILE):
         try:
             with open(TARGETS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict) and norm in data:
-                    return data[norm]
+                    res = data[norm]
+                    with _CACHE_LOCK:
+                        _CACHE["targets"][norm] = (now, res)
+                    return copy.deepcopy(res)
         except Exception:
             pass
+
     # Defaults
-    return {
-        "target_score": 90,
-        "target_lcp": 2.5,
-        "target_mobile_psi": 85,
-        "target_critical": 0,
-    }
+    return copy.deepcopy(DEFAULT_TARGETS)
 
 
 def save_targets(domain, targets_dict):
     """Save target goals for a specific domain."""
-    _ensure_dirs()
+    if not domain:
+        return copy.deepcopy(DEFAULT_TARGETS)
     norm = domain.lower().replace("www.", "").strip()
+    clean_target = {
+        "target_score": int(targets_dict.get("target_score", 90)),
+        "target_lcp": float(targets_dict.get("target_lcp", 2.5)),
+        "target_mobile_psi": int(targets_dict.get("target_mobile_psi", 85)),
+        "target_critical": int(targets_dict.get("target_critical", 0)),
+        "updated_at": datetime.now().strftime("%Y-%m-%d"),
+    }
+
+    # 1. Save to Neon DB
+    conn = _get_db()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO seo_targets (domain, targets, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (domain) DO UPDATE SET
+                        targets = EXCLUDED.targets,
+                        updated_at = NOW()
+                    """,
+                    (norm, json.dumps(clean_target)),
+                )
+        except Exception as e:
+            print(f"[history_manager] Error saving targets to Neon DB: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # 2. Save to local targets file as backup
+    _ensure_dirs()
     data = {}
     if os.path.isfile(TARGETS_FILE):
         try:
@@ -205,22 +593,25 @@ def save_targets(domain, targets_dict):
                     data = {}
         except Exception:
             data = {}
-    data[norm] = {
-        "target_score": int(targets_dict.get("target_score", 90)),
-        "target_lcp": float(targets_dict.get("target_lcp", 2.5)),
-        "target_mobile_psi": int(targets_dict.get("target_mobile_psi", 85)),
-        "target_critical": int(targets_dict.get("target_critical", 0)),
-        "updated_at": datetime.now().strftime("%Y-%m-%d"),
-    }
+    data[norm] = clean_target
     try:
         with open(TARGETS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
     except Exception:
         pass
-    return data[norm]
+
+    # 3. Update cache
+    now = time.time()
+    with _CACHE_LOCK:
+        _CACHE["targets"][norm] = (now, clean_target)
+
+    return clean_target
 
 
-# ---- "What-If" Fix Simulator ------------------------------------------------
+# ---------------------------------------------------------------------------
+# "What-If" Fix Simulator
+# ---------------------------------------------------------------------------
+
 def simulate_fixes(audit_id, fixed_check_ids):
     """
     Simulates what happens if specified check IDs are remediated (marked pass).
@@ -257,7 +648,10 @@ def simulate_fixes(audit_id, fixed_check_ids):
     }
 
 
-# ---- Audit Comparison -------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Audit Comparison (Full Delta Engine)
+# ---------------------------------------------------------------------------
+
 def compare_audits(audit_id_1, audit_id_2):
     """
     Compares two audits (audit1: baseline/older, audit2: newer)
