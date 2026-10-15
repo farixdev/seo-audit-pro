@@ -172,7 +172,7 @@ def dashboard_html(result, charts):
                  "<td style='padding:6px 8px;font-weight:700;color:%s'>%d</td>"
                  "<td style='padding:6px 8px'>%.0f%%</td>"
                  "<td style='padding:6px 8px'>%.1f</td>"
-                 "<td style='padding:6px 8px;color:#66707e'>%d ✓ / %d ⚠ / %d ✗"
+                 "<td style='padding:6px 8px;color:#66707e'>%d Pass / %d Warn / %d Fail"
                  "</td></tr>"
                  % (esc(d["label"]),
                     "#1a7f37" if d["score"] >= 90 else
@@ -228,7 +228,7 @@ def competitor_html(result, charts):
     s = ["<h2>Competitor comparison</h2>"]
     if not comps:
         return _wrap("".join(s) + "<p style='color:#888'>No competitor URLs "
-                     "were provided. Add them in ⚙ Options to benchmark speed, "
+                     "were provided. Add them in Options to benchmark speed, "
                      "content and technical scores side by side.</p>")
     s.append(_img(charts.get("competitor_bars"), 560))
     sc = result.get("score") or {}
@@ -263,9 +263,9 @@ def competitor_html(result, charts):
                     esc(r.get("score", "—")), esc(r.get("grade", "—")),
                     esc(("%d" % r["perf_mobile"]) if r.get("perf_mobile")
                         is not None else "—"),
-                    "✓" if r.get("https") else "✗", esc(r.get("title_len", "—")),
+                    "Yes" if r.get("https") else "No", esc(r.get("title_len", "—")),
                     esc(r.get("meta_len", "—")), esc(r.get("word_count", "—")),
-                    "✓" if r.get("sd") else "✗"))
+                    "Yes" if r.get("sd") else "No"))
     s.append("</table>")
     return _wrap("".join(s))
 

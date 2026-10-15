@@ -216,6 +216,15 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(
+        os.path.join(APP_DIR, "static", "assets"),
+        "favicon.ico",
+        mimetype="image/vnd.microsoft.icon",
+    )
+
+
 @app.route("/api/audit/start", methods=["POST"])
 def start_audit():
     data = request.get_json() or {}

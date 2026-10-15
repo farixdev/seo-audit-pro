@@ -4,7 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SEO Audit Pro — Comprehensive Technical &amp; On-Page Intelligence</title>
-  <link rel="icon" type="image/png" href="/static/assets/icon.png">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/assets/icon.png">
+  <link rel="shortcut icon" href="/static/assets/icon.png">
+  <link rel="apple-touch-icon" href="/static/assets/icon.png">
 
   <!-- Clean Google Typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -26,13 +29,11 @@
     <!-- Header Navigation Bar -->
     <header class="app-header">
       <div class="header-inner">
-        <!-- Logo & Title -->
-        <div class="brand-section">
-          <div class="brand-logo">
-            <i data-lucide="activity" style="width: 20px; height: 20px;"></i>
-          </div>
-          <div>
-            <div style="display: flex; align-items: center;">
+        <!-- Official Brand Logo & Title -->
+        <div class="brand-section" style="display: flex; align-items: center; gap: 14px;">
+          <img src="/static/assets/logo.png" alt="Mindcob" style="height: 36px; width: auto; object-fit: contain;">
+          <div style="border-left: 1px solid var(--border-subtle); padding-left: 14px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
               <span class="brand-title">SEO Audit Pro</span>
               <span class="brand-tag">Enterprise Edition</span>
             </div>
@@ -88,7 +89,7 @@
                 <input
                   type="text"
                   id="target-url"
-                  placeholder="Enter website URL (e.g. https://yourdomain.com)"
+                  placeholder="Enter website URL to audit..."
                   required
                   class="url-input"
                   autocomplete="off"
@@ -121,7 +122,7 @@
                     <option value="1000">1,000 pages (Enterprise)</option>
                     <option value="custom">Custom Limit...</option>
                   </select>
-                  <input type="number" id="crawl-depth-custom" min="1" max="5000" value="25" class="clean-input text-mono hidden" style="width: 80px; padding: 4px 8px; font-size: 12px;" placeholder="Max" oninput="handleCustomCrawlInput(this.value)">
+                  <input type="number" id="crawl-depth-custom" min="1" max="5000" value="25" class="clean-input text-mono hidden" style="width: 80px; padding: 4px 8px; font-size: 12px;" placeholder="Pages" oninput="handleCustomCrawlInput(this.value)">
                   <input type="hidden" id="crawl-depth-slider" value="25">
                 </div>
 
@@ -146,12 +147,12 @@
             <div id="advanced-options-panel" class="collapsible-options hidden">
               <div class="grid-2">
                 <div style="display: flex; flex-direction: column; gap: 4px;">
-                  <label style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Competitors Benchmark (comma-separated, up to 3 URLs)</label>
-                  <input type="text" id="competitors-input" placeholder="https://competitor1.com, https://competitor2.com" class="clean-input">
+                  <label style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Competitor URLs (optional, comma-separated)</label>
+                  <input type="text" id="competitors-input" placeholder="Competitor URLs separated by comma" class="clean-input">
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 4px;">
-                  <label style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Custom Proxy (optional, e.g. socks5://127.0.0.1:9050)</label>
-                  <input type="text" id="proxy-input" placeholder="http://127.0.0.1:8080" class="clean-input">
+                  <label style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Custom Proxy (optional)</label>
+                  <input type="text" id="proxy-input" placeholder="Proxy host:port" class="clean-input">
                 </div>
               </div>
 
@@ -1496,32 +1497,32 @@
           <div style="display: flex; flex-direction: column; gap: 10px;">
             <div style="display: flex; flex-direction: column; gap: 4px;">
               <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">Groq API Key (Fast &amp; Free):</label>
-              <input type="password" id="setting-groq-key" placeholder="gsk_..." class="clean-input">
+              <input type="password" id="setting-groq-key" placeholder="API Key" class="clean-input">
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 4px;">
               <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">Gemini API Key:</label>
-              <input type="password" id="setting-gemini-key" placeholder="AIza..." class="clean-input">
+              <input type="password" id="setting-gemini-key" placeholder="API Key" class="clean-input">
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 4px;">
               <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">OpenRouter / Anthropic Key:</label>
-              <input type="password" id="setting-openrouter-key" placeholder="sk-..." class="clean-input">
+              <input type="password" id="setting-openrouter-key" placeholder="API Key" class="clean-input">
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border-subtle); padding-top: 8px;">
               <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">PageSpeed Insights Key (Optional quota bump):</label>
-              <input type="password" id="setting-psi-key" placeholder="Google Cloud API key (leave blank for keyless)" class="clean-input">
+              <input type="password" id="setting-psi-key" placeholder="Optional API Key" class="clean-input">
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border-subtle); padding-top: 8px;">
               <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">Moz Access ID (Domain &amp; Page Authority):</label>
-              <input type="text" id="setting-moz-access" placeholder="moz_access_id (leave blank for algorithmic model)" class="clean-input">
+              <input type="text" id="setting-moz-access" placeholder="Optional Access ID" class="clean-input">
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 4px;">
               <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">Moz Secret Key:</label>
-              <input type="password" id="setting-moz-secret" placeholder="moz_secret_key" class="clean-input">
+              <input type="password" id="setting-moz-secret" placeholder="Optional Secret Key" class="clean-input">
             </div>
           </div>
 
