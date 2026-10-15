@@ -259,9 +259,9 @@ function handleStreamPayload(data, cleanup) {
       if (data.result) {
         displayAuditResults(data.result);
       } else {
-        fetchAuditResult(data.id);
+        fetchAuditResult(data.id || AppState.currentAuditId);
       }
-    }, 500);
+    }, 400);
   } else if (data.status === 'failed' || data.status === 'cancelled') {
     cleanup();
     showToast(data.error || `Audit ${data.status}`, 'error');
@@ -270,11 +270,22 @@ function handleStreamPayload(data, cleanup) {
 }
 
 async function fetchAuditResult(auditId) {
+  const id = auditId || AppState.currentAuditId;
+  if (!id) return;
   try {
-    const res = await fetch(`/api/audit/status/${auditId}`);
+    showToast('Loading audit results...', 'info');
+    const res = await fetch(`/api/audit/status/${id}`);
     const data = await res.json();
     if (data.result) {
       displayAuditResults(data.result);
+      return;
+    }
+    // Fallback to history endpoint if status was completed and saved
+    const histRes = await fetch(`/api/history/${id}`);
+    const histData = await histRes.json();
+    if (histData.audit) {
+      displayAuditResults(histData.audit);
+      return;
     }
   } catch (err) {
     showToast('Failed to load completed audit result', 'error');
@@ -321,11 +332,20 @@ function appendTerminalLog(msg) {
 // Audit Results Presentation
 // ==========================================================================
 function displayAuditResults(result) {
+  if (!result) return;
   AppState.currentResult = result;
   AppState.currentAuditId = result.id || AppState.currentAuditId;
 
+  // Ensure active tab is audit suite and progress card is hidden
+  switchMainTab('audit');
+  const progressCard = document.getElementById('audit-progress-card');
+  if (progressCard) progressCard.classList.add('hidden');
+
   const resultsContainer = document.getElementById('audit-results-container');
-  if (resultsContainer) resultsContainer.classList.remove('hidden');
+  if (resultsContainer) {
+    resultsContainer.classList.remove('hidden');
+    resultsContainer.style.display = 'flex';
+  }
 
   const domainTitle = document.getElementById('result-domain-title');
   const dateBadge = document.getElementById('result-date-badge');
@@ -347,36 +367,47 @@ function displayAuditResults(result) {
       : 'Strictly evaluated against agency standards.';
   }
 
-  renderHeroScore(scoreObj, result);
-  renderExecutiveSummary(result);
-  renderAuthorityOverview(result);
-  renderTrafficOverview(result);
-  renderCategoryScorecards(scoreObj.dimensions || []);
-  renderRadarChart(result);
-  renderSeverityDonut(result);
-  renderCategoryDeepDive(result);
-  renderCoreWebVitals(result);
-  renderTechnicalDiagnostics(result);
-  renderHttpRedirection(result);
-  renderBrokenLinks(result);
-  renderCanonicalDirectives(result);
-  renderMediaAssets(result);
-  renderLocalSeo(result);
-  renderOffpageSeo(result);
-  renderSerpPreview(result);
-  renderSocialPreview(result);
-  renderHeadingsTree(result);
-  renderContentMetrics(result);
-  renderActionItems(result.action_items || []);
-  renderCrawledPages(result.all_facts || []);
-  renderCompetitorBenchmark(result);
-  renderNextSteps(result);
+  const safeRun = (name, fn) => {
+    try {
+      fn();
+    } catch (e) {
+      console.warn(`Render error in ${name}:`, e);
+    }
+  };
 
-  // Setup fix simulator with current issues
-  setupFixSimulator(result);
+  safeRun('HeroScore', () => renderHeroScore(scoreObj, result));
+  safeRun('ExecutiveSummary', () => renderExecutiveSummary(result));
+  safeRun('AuthorityOverview', () => renderAuthorityOverview(result));
+  safeRun('TrafficOverview', () => renderTrafficOverview(result));
+  safeRun('CategoryScorecards', () => renderCategoryScorecards(scoreObj.dimensions || []));
+  safeRun('RadarChart', () => renderRadarChart(result));
+  safeRun('SeverityDonut', () => renderSeverityDonut(result));
+  safeRun('CategoryDeepDive', () => renderCategoryDeepDive(result));
+  safeRun('CoreWebVitals', () => renderCoreWebVitals(result));
+  safeRun('TechnicalDiagnostics', () => renderTechnicalDiagnostics(result));
+  safeRun('HttpRedirection', () => renderHttpRedirection(result));
+  safeRun('BrokenLinks', () => renderBrokenLinks(result));
+  safeRun('CanonicalDirectives', () => renderCanonicalDirectives(result));
+  safeRun('MediaAssets', () => renderMediaAssets(result));
+  safeRun('LocalSeo', () => renderLocalSeo(result));
+  safeRun('OffpageSeo', () => renderOffpageSeo(result));
+  safeRun('SerpPreview', () => renderSerpPreview(result));
+  safeRun('SocialPreview', () => renderSocialPreview(result));
+  safeRun('HeadingsTree', () => renderHeadingsTree(result));
+  safeRun('ContentMetrics', () => renderContentMetrics(result));
+  safeRun('ActionItems', () => renderActionItems(result.action_items || []));
+  safeRun('CrawledPages', () => renderCrawledPages(result.all_facts || []));
+  safeRun('CompetitorBenchmark', () => renderCompetitorBenchmark(result));
+  safeRun('NextSteps', () => renderNextSteps(result));
+  safeRun('FixSimulator', () => setupFixSimulator(result));
 
-  if (window.lucide) window.lucide.createIcons();
-  resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  try {
+    if (window.lucide) window.lucide.createIcons();
+  } catch (e) {}
+
+  if (resultsContainer) {
+    resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 // ==========================================================================

@@ -61,22 +61,24 @@ AUDITS_LOCK = threading.Lock()
 
 def _docx_to_pdf(docx_path, pdf_path):
     """Render a .docx to PDF via Microsoft Word (Windows) COM automation if available."""
-    docx_path, pdf_path = os.path.abspath(docx_path), os.path.abspath(pdf_path)
-    ps = (
-        "param($in,$out)\n"
-        "try {\n"
-        "  $w = New-Object -ComObject Word.Application\n"
-        "  $w.Visible = $false\n"
-        "  $d = $w.Documents.Open($in)\n"
-        "  try { $d.Fields.Update() | Out-Null } catch {}\n"
-        "  try { foreach($t in $d.TablesOfContents){ $t.Update() } } catch {}\n"
-        "  $d.SaveAs([ref]$out,[ref]17)\n"
-        "  $d.Close($false); $w.Quit()\n"
-        "  Write-Output 'OK'\n"
-        "} catch { Write-Output ('ERR:' + $_.Exception.Message) }\n"
-    )
-    fh = tempfile.NamedTemporaryFile("w", suffix=".ps1", delete=False, encoding="utf-8")
+    if sys.platform != "win32":
+        return False, "PDF COM automation is only available on Windows."
     try:
+        docx_path, pdf_path = os.path.abspath(docx_path), os.path.abspath(pdf_path)
+        ps = (
+            "param($in,$out)\n"
+            "try {\n"
+            "  $w = New-Object -ComObject Word.Application\n"
+            "  $w.Visible = $false\n"
+            "  $d = $w.Documents.Open($in)\n"
+            "  try { $d.Fields.Update() | Out-Null } catch {}\n"
+            "  try { foreach($t in $d.TablesOfContents){ $t.Update() } } catch {}\n"
+            "  $d.SaveAs([ref]$out,[ref]17)\n"
+            "  $d.Close($false); $w.Quit()\n"
+            "  Write-Output 'OK'\n"
+            "} catch { Write-Output ('ERR:' + $_.Exception.Message) }\n"
+        )
+        fh = tempfile.NamedTemporaryFile("w", suffix=".ps1", delete=False, encoding="utf-8")
         fh.write(ps)
         fh.close()
         proc = subprocess.run(
@@ -174,18 +176,24 @@ def _execute_audit_thread(audit_id, params):
             print(f"[audit] Error generating docx: {e}")
             state["docx_path"] = None
 
-        # Attempt PDF conversion via MS Word
-        pdf_filename = f"SEO-Audit-{safe_domain}-{date_str}-{audit_id[:6]}.pdf"
-        pdf_path = os.path.join(REPORTS_DIR, pdf_filename)
-        if state["docx_path"] and os.path.isfile(state["docx_path"]):
-            ok_pdf, _ = _docx_to_pdf(state["docx_path"], pdf_path)
-            if ok_pdf and os.path.isfile(pdf_path):
-                state["pdf_path"] = pdf_path
-                log_progress("Generated PDF report deliverable.")
+        # Attempt PDF conversion via MS Word (Windows only, non-blocking)
+        try:
+            if sys.platform == "win32" and state.get("docx_path") and os.path.isfile(state["docx_path"]):
+                pdf_filename = f"SEO-Audit-{safe_domain}-{date_str}-{audit_id[:6]}.pdf"
+                pdf_path = os.path.join(REPORTS_DIR, pdf_filename)
+                ok_pdf, _ = _docx_to_pdf(state["docx_path"], pdf_path)
+                if ok_pdf and os.path.isfile(pdf_path):
+                    state["pdf_path"] = pdf_path
+                    log_progress("Generated PDF report deliverable.")
+        except Exception as pe:
+            print(f"[audit] Optional PDF conversion skipped: {pe}")
 
-        # Persist audit into history store
-        history_summary = history_manager.save_audit_result(audit_id, result)
-        result["history_summary"] = history_summary
+        # Persist audit into database / history store (safely wrapped)
+        try:
+            history_summary = history_manager.save_audit_result(audit_id, result)
+            result["history_summary"] = history_summary
+        except Exception as he:
+            print(f"[audit] History save warning: {he}")
 
         with AUDITS_LOCK:
             state["status"] = "completed"
@@ -317,6 +325,12 @@ def audit_status(audit_id):
                 })
             return jsonify({"error": "Audit not found"}), 404
 
+        # Ensure result is present if status is completed
+        res_payload = state.get("result")
+        if not res_payload and state["status"] == "completed":
+            res_payload = history_manager.get_audit(audit_id)
+            state["result"] = res_payload
+
         # Return state
         return jsonify({
             "id": state["id"],
@@ -325,7 +339,7 @@ def audit_status(audit_id):
             "percent": state["percent"],
             "step": state["step"],
             "logs": state["logs"][-60:],  # Return latest 60 logs
-            "result": state["result"],
+            "result": res_payload,
             "error": state["error"],
             "has_docx": bool(state.get("docx_path") and os.path.isfile(state["docx_path"])),
             "has_pdf": bool(state.get("pdf_path") and os.path.isfile(state["pdf_path"])),
@@ -359,7 +373,7 @@ def audit_stream(audit_id):
 
             if state["status"] in ("completed", "failed", "cancelled"):
                 if state["status"] == "completed":
-                    data["result"] = state["result"]
+                    data["result"] = state.get("result") or history_manager.get_audit(audit_id)
                 yield f"data: {json.dumps(data)}\n\n"
                 break
 
