@@ -53,6 +53,18 @@ APP_DIR = BUNDLE_DIR
 REPORTS_DIR = os.path.join(EXE_DIR, "reports")
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
+# Ensure stdout and stderr are valid streams in windowed (noconsole) mode
+if sys.stdout is None:
+    try:
+        sys.stdout = open(os.path.join(REPORTS_DIR, "server.log"), "a", encoding="utf-8")
+    except Exception:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    try:
+        sys.stderr = open(os.path.join(REPORTS_DIR, "server_err.log"), "a", encoding="utf-8")
+    except Exception:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 app = Flask(
     __name__,
     template_folder=os.path.join(BUNDLE_DIR, "templates"),
@@ -63,7 +75,7 @@ app.config["JSON_AS_ASCII"] = False
 # In-memory store for active/recent audits
 # audit_id -> { id, status, percent, step, logs, result, error, cancel_event, docx_path, pdf_path }
 ACTIVE_AUDITS = {}
-AUDITS_LOCK = threading.Lock()
+AUDITS_LOCK = threading.RLock()
 
 
 def _docx_to_pdf(docx_path, pdf_path):
@@ -202,12 +214,13 @@ def _execute_audit_thread(audit_id, params):
         except Exception as he:
             print(f"[audit] History save warning: {he}")
 
+        log_progress("Audit finished and saved.")
+
         with AUDITS_LOCK:
             state["status"] = "completed"
             state["percent"] = 100
             state["step"] = "Audit completed successfully!"
             state["result"] = result
-            log_progress("Audit finished and saved.")
 
     except RuntimeError as re_err:
         with AUDITS_LOCK:

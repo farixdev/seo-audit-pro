@@ -6,7 +6,7 @@
 const AppState = {
   currentAuditId: null,
   currentResult: null,
-  viewMode: 'layman', // 'layman' | 'expert'
+  viewMode: 'expert', // 'layman' | 'expert'
   cwvStrategy: 'mobile', // 'mobile' | 'desktop'
   serpDevice: 'mobile', // 'mobile' | 'desktop'
   activeTab: 'audit', // 'audit' | 'tracker' | 'history'
@@ -347,6 +347,8 @@ function displayAuditResults(result) {
     resultsContainer.style.display = 'flex';
   }
 
+  setAuditViewMode(AppState.viewMode || 'expert');
+
   const domainTitle = document.getElementById('result-domain-title');
   const dateBadge = document.getElementById('result-date-badge');
   const typeBadge = document.getElementById('result-type-badge');
@@ -595,6 +597,9 @@ function renderCategoryScorecards(dimensions) {
     card.className = 'cat-card';
     card.onclick = () => selectCategoryInDeepDive(dim.key);
 
+    const passCount = (dim.counts && dim.counts.pass != null) ? dim.counts.pass : (dim.passed || 0);
+    const issueCount = dim.counts ? ((dim.counts.fail || 0) + (dim.counts.warn || 0)) : (dim.issues || 0);
+
     card.innerHTML = `
       <div class="cat-card-header">
         <div class="cat-icon-title">
@@ -612,8 +617,8 @@ function renderCategoryScorecards(dimensions) {
         <div class="cat-fill" style="width: ${score}%; background-color: ${meta.color};"></div>
       </div>
       <div class="cat-card-footer">
-        <span>Passed: <strong style="color: #16a34a;">${dim.passed || 0}</strong></span>
-        <span>Issues: <strong style="color: #dc2626;">${dim.issues || 0}</strong></span>
+        <span>Passed: <strong style="color: #16a34a;">${passCount}</strong></span>
+        <span>Issues: <strong style="color: #dc2626;">${issueCount}</strong></span>
       </div>
     `;
     grid.appendChild(card);
@@ -753,9 +758,11 @@ function renderCategoryDeepDive(result) {
   const dims = (result.score || {}).dimensions || [];
   if (dims.length === 0) return;
 
+  const initialCat = AppState.selectedCategory || dims[0].key;
   dims.forEach((d, idx) => {
     const btn = document.createElement('button');
-    btn.className = `cat-nav-btn ${d.key === AppState.selectedCategory || idx === 0 ? 'active' : ''}`;
+    const isAct = d.key === initialCat;
+    btn.className = `cat-nav-btn ${isAct ? 'active' : ''}`;
     btn.id = `cat-tab-${d.key}`;
     btn.textContent = `${d.label} (${d.score || 0})`;
     btn.onclick = () => selectCategoryInDeepDive(d.key);
@@ -2135,9 +2142,9 @@ function setAuditViewMode(mode) {
   const headingsSection = document.getElementById('section-headings-content-row');
   const deepdiveSection = document.getElementById('section-category-deepdive');
 
+  if (deepdiveSection) deepdiveSection.style.display = 'flex';
   if (pagesSection) pagesSection.style.display = mode === 'expert' ? 'flex' : 'none';
   if (headingsSection) headingsSection.style.display = mode === 'expert' ? 'grid' : 'none';
-  if (deepdiveSection) deepdiveSection.style.display = mode === 'expert' ? 'flex' : 'none';
 }
 
 // ==========================================================================

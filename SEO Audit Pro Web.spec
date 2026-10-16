@@ -30,6 +30,7 @@ hiddenimports = [
     "werkzeug",
     "flask",
     "requests",
+    "certifi",
     "bs4",
     "lxml",
     "lxml.etree",
@@ -45,9 +46,10 @@ hiddenimports = [
     "tld",
 ]
 
-# Collect docx and matplotlib data
+# Collect docx, matplotlib and certifi data
 datas += collect_data_files("docx")
 datas += collect_data_files("matplotlib")
+datas += collect_data_files("certifi")
 
 # Dependencies with data / submodules
 for pkg in ["trafilatura", "courlan", "htmldate", "dateparser", "justext", "babel", "tld"]:
@@ -91,7 +93,36 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
-# 1) Standalone Single-File Executable
+# 1) Portable Folder Distribution Executable (fastest startup, no temp extraction)
+exe_dir = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='SEO Audit Pro',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=[icon_path],
+)
+coll = COLLECT(
+    exe_dir,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='SEO Audit Pro',
+)
+
+# 2) Standalone Single-File Executable (single self-contained .exe)
 exe_standalone = EXE(
     pyz,
     a.scripts,

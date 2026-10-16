@@ -59,7 +59,7 @@ CACHE_TTL_HISTORY = 30
 CACHE_TTL_TIMELINE = 30
 CACHE_TTL_TARGETS = 60
 
-_CACHE_LOCK = threading.Lock()
+_CACHE_LOCK = threading.RLock()
 _CACHE = {
     "history": None,       # (timestamp, list_of_summaries)
     "timelines": {},       # domain -> (timestamp, list_of_summaries)
