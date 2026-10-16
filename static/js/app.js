@@ -41,6 +41,29 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   loadSettingsAndCategories();
   loadAuditHistory();
+
+  // Explicitly prevent any native form submit page reload
+  const auditForm = document.getElementById('audit-form');
+  if (auditForm) {
+    auditForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handleStartAudit(e);
+      return false;
+    });
+  }
+
+  const urlInput = document.getElementById('target-url');
+  if (urlInput) {
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        handleStartAudit(e);
+        return false;
+      }
+    });
+  }
 });
 
 // ==========================================================================
@@ -107,22 +130,25 @@ function toggleAdvancedOptions() {
 // Audit Execution & Real-Time Streaming
 // ==========================================================================
 async function handleStartAudit(event) {
-  if (event) event.preventDefault();
+  if (event) {
+    try { if (typeof event.preventDefault === 'function') event.preventDefault(); } catch (e) {}
+    try { if (typeof event.stopPropagation === 'function') event.stopPropagation(); } catch (e) {}
+  }
 
   const urlInput = document.getElementById('target-url');
-  let url = (urlInput.value || '').trim();
+  let url = (urlInput ? urlInput.value || '' : '').trim();
   if (!url) {
     showToast('Please enter a website URL.', 'error');
-    return;
+    return false;
   }
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     url = 'https://' + url;
-    urlInput.value = url;
+    if (urlInput) urlInput.value = url;
   }
 
-  const isSingle = document.getElementById('check-single-page').checked;
-  const maxPages = parseInt(document.getElementById('crawl-depth-slider').value, 10) || 25;
-  const psiStrategy = document.getElementById('psi-strategy-select').value || 'both';
+  const isSingle = document.getElementById('check-single-page')?.checked ?? true;
+  const maxPages = parseInt(document.getElementById('crawl-depth-slider')?.value || '25', 10) || 25;
+  const psiStrategy = document.getElementById('psi-strategy-select')?.value || 'both';
   const proxy = (document.getElementById('proxy-input')?.value || '').trim();
   const competitorsRaw = (document.getElementById('competitors-input')?.value || '').trim();
   const competitors = competitorsRaw ? competitorsRaw.split(',').map((s) => s.trim()).filter(Boolean) : [];
@@ -179,6 +205,7 @@ async function handleStartAudit(event) {
       runBtn.style.pointerEvents = 'auto';
     }
   }
+  return false;
 }
 
 function connectAuditStream(auditId) {

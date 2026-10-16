@@ -81,7 +81,7 @@
 
         <!-- Search & Launch Card -->
         <div class="search-card">
-          <form id="audit-form" onsubmit="handleStartAudit(event)" style="display: flex; flex-direction: column; gap: 14px;">
+          <form id="audit-form" action="javascript:void(0);" onsubmit="event.preventDefault(); handleStartAudit(event); return false;" style="display: flex; flex-direction: column; gap: 14px;">
             <!-- URL Input Row -->
             <div class="search-row">
               <div class="url-input-wrapper">
@@ -96,7 +96,7 @@
                 />
               </div>
 
-              <button type="submit" id="btn-run-audit" class="btn-primary">
+              <button type="button" id="btn-run-audit" class="btn-primary" onclick="handleStartAudit(event)">
                 <i data-lucide="play" style="width: 16px; height: 16px;"></i>
                 <span>Run Deep Audit</span>
               </button>
@@ -1489,7 +1489,7 @@
           </button>
         </div>
 
-        <form id="settings-form" onsubmit="handleSaveSettings(event)" style="display: flex; flex-direction: column; gap: 14px;">
+        <form id="settings-form" action="javascript:void(0);" onsubmit="event.preventDefault(); handleSaveSettings(event); return false;" style="display: flex; flex-direction: column; gap: 14px;">
           <div style="background-color: var(--primary-subtle); border: 1px solid var(--primary-border); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 12px; color: var(--primary);">
             PageSpeed Insights runs keyless. Optional AI keys unlock the executive summary.
           </div>
