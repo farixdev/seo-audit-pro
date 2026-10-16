@@ -796,7 +796,6 @@ function renderCategoryDeepDive(result) {
     tabsContainer.appendChild(btn);
   });
 
-  const initialCat = AppState.selectedCategory || dims[0].key;
   displayCategoryChecks(initialCat);
 }
 
