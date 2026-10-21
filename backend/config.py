@@ -98,7 +98,10 @@ DAILY_EMAIL_LIMIT = int(os.environ.get("DAILY_EMAIL_LIMIT", 500))
 
 # Optional bootstrap of the very first Manager account (empty database only).
 BOOTSTRAP_MANAGER_EMAIL = (os.environ.get("BOOTSTRAP_MANAGER_EMAIL") or "").strip().lower()
-BOOTSTRAP_MANAGER_PASSWORD = os.environ.get("BOOTSTRAP_MANAGER_PASSWORD") or ""
+BOOTSTRAP_MANAGER_PASSWORD = (os.environ.get("BOOTSTRAP_MANAGER_PASSWORD") or "").strip()
+# Set to 1 (then redeploy) to give the BOOTSTRAP_MANAGER_EMAIL account the BOOTSTRAP_MANAGER_PASSWORD
+# again, as a Manager, unlocked, with a password change at sign-in. Remove it afterwards.
+BOOTSTRAP_MANAGER_RESET = (os.environ.get("BOOTSTRAP_MANAGER_RESET") or "").strip() == "1"
 BOOTSTRAP_MANAGER_NAME = os.environ.get("BOOTSTRAP_MANAGER_NAME") or "Agency Manager"
 
 APP_VERSION = "3.0.0"

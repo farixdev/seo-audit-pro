@@ -251,6 +251,8 @@ def ping():
 # while no account exists and only from the computer running the server.
 # ---------------------------------------------------------------------------
 def _from_this_computer():
+    if config.ENVIRONMENT == "production":  # behind a hosting proxy every request looks local
+        return False
     addr = (request.remote_addr or "").split("%")[0]
     try:
         return ipaddress.ip_address(addr).is_loopback

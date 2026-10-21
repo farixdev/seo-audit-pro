@@ -27,9 +27,12 @@ def bootstrap_manager():
     """Create the first Manager from BOOTSTRAP_MANAGER_* when the user table is empty."""
     from backend import db, security
     from backend.util import now_iso
+    email, password = config.BOOTSTRAP_MANAGER_EMAIL, config.BOOTSTRAP_MANAGER_PASSWORD
+    if config.BOOTSTRAP_MANAGER_RESET and email and password:
+        _reset_manager(email, password)
+        return
     if (db.scalar("SELECT COUNT(*) FROM users") or 0) > 0:
         return
-    email, password = config.BOOTSTRAP_MANAGER_EMAIL, config.BOOTSTRAP_MANAGER_PASSWORD
     if not email or not password:
         logging.getLogger("seo_audit_pro").warning(
             "No users exist. Create the first Manager with: python -m backend.manage create-manager")
@@ -38,6 +41,28 @@ def bootstrap_manager():
     db.execute("""INSERT INTO users (id, name, email, password_hash, role, is_active, must_change_password, created_at, updated_at)
                   VALUES (%s, %s, %s, %s, 'MANAGER', 1, 1, %s, %s)""",
                (security.new_id("usr_"), config.BOOTSTRAP_MANAGER_NAME, email, security.hash_password(password), now, now))
+
+
+def _reset_manager(email, password):
+    """BOOTSTRAP_MANAGER_RESET=1: sign-in help for the owner, from the hosting dashboard."""
+    from backend import db, security
+    from backend.util import now_iso
+    now = now_iso()
+    user = db.query_one("SELECT id FROM users WHERE email = %s", (email,))
+    with db.transaction() as tx:
+        if user:
+            tx.execute("""UPDATE users SET password_hash = %s, role = 'MANAGER', team_id = NULL, is_active = 1,
+                              must_change_password = 1, updated_at = %s WHERE id = %s""",
+                       (security.hash_password(password), now, user["id"]))
+            tx.execute("UPDATE sessions SET revoked_at = %s WHERE user_id = %s AND revoked_at IS NULL", (now, user["id"]))
+        else:
+            tx.execute("""INSERT INTO users (id, name, email, password_hash, role, is_active, must_change_password,
+                          created_at, updated_at) VALUES (%s, %s, %s, %s, 'MANAGER', 1, 1, %s, %s)""",
+                       (security.new_id("usr_"), config.BOOTSTRAP_MANAGER_NAME, email, security.hash_password(password),
+                        now, now))
+        tx.execute("DELETE FROM login_attempts WHERE email = %s", (email,))
+    logging.getLogger("seo_audit_pro").warning(
+        "BOOTSTRAP_MANAGER_RESET: the Manager account %s was reset. Remove BOOTSTRAP_MANAGER_RESET now.", email)
 
 
 def create_app(start_workers=True):
