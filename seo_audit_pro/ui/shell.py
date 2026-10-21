@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QAbstractButton, QFrame, QLabel, QListWidget, QLi
 
 from seo_audit_pro import APP_NAME, icons
 from seo_audit_pro.core import api, fmt, tasks
+from seo_audit_pro.core import pc_work
 from seo_audit_pro.core.realtime import get_hub
 from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C, ROLE_LABEL
@@ -585,8 +586,12 @@ class Workspace(QWidget):
         get_hub().start()
         self._unread_timer.start()
         self._refresh_counts()
+        pc_work.runner().start()  # audits this person queued run on this computer
+        pc_work.imports().start()  # lead files read here keep sending their rows
 
     def stop(self):
+        pc_work.runner().stop()
+        pc_work.imports().stop()
         get_hub().stop()
         self._unread_timer.stop()
 
@@ -689,6 +694,7 @@ class Workspace(QWidget):
 
     def _on_event(self, ev):
         kind = ev.get("type")
+        pc_work.runner().on_event(ev)
         if kind in ("notification", "audit_progress", "audit_batch", "import_progress", "message", "message_updated"):
             from seo_audit_pro.core import cache as client_cache
             if kind != "audit_progress" or ev.get("status") in ("completed", "failed", "cancelled"):

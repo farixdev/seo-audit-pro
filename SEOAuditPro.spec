@@ -49,6 +49,8 @@ a = Analysis(
         "seo_audit_pro.ui.pages.outreach", "seo_audit_pro.ui.pages.chat", "seo_audit_pro.ui.pages.notifications",
         "seo_audit_pro.ui.pages.audit_logs", "seo_audit_pro.ui.pages.settings_page", "seo_audit_pro.ui.pages.profile",
         "keyring.backends.Windows",
+        # Background jobs on this computer (started with --job): audits, report files, lead files.
+        "seo_audit_pro.pc_jobs", "seo_audit_pro.core.pc_work", "pdf_convert", "backend.lead_import",
         # Built-in server: imported only when started with --serve, and the engine
         # modules it loads inside functions.
         "web_app", "backend.app", "backend.routes.admin_routes", "backend.routes.audit_routes",

@@ -1,15 +1,70 @@
 # -*- coding: utf-8 -*-
-"""/api/chat/* — internal collaboration (direct messages and team channels)."""
+"""/api/chat/* — internal collaboration (direct messages and team channels).
+
+Chat carries only what is already in the workspace: messages can share a lead
+or an audit report (everyone in the conversation can open a shared report).
+Files from outside cannot be uploaded to chat.
+"""
+
+import json
 
 from flask import Blueprint, g, jsonify, request, send_file
 
-from backend import chat_access, db, events, realtime, security, uploads
-from backend.auth import MANAGER, idempotent, require
+from backend import chat_access, db, events, realtime, reports, security, uploads
+from backend.auth import MANAGER, idempotent, load_audit, load_lead, require
 from backend.errors import ApiError, conflict, not_found
 from backend.util import body, now_iso, rate_limit, text
 
 bp = Blueprint("chat", __name__)
 REACTIONS = ("ack", "like", "seen", "question")
+NO_FILES = "Files can't be uploaded to chat. Share a lead or an audit report instead."
+MAX_SHARES = 5
+
+
+def _shares(me, items):
+    """Validate shared leads / reports (the sender must be able to open them)
+    and keep a snapshot of what was shared. Returns [(kind, id, snapshot)]."""
+    if not isinstance(items, list) or len(items) > MAX_SHARES:
+        raise ApiError(422, f"Share at most {MAX_SHARES} items in one message.")
+    out, missing = [], []
+    for item in items:
+        item = item if isinstance(item, dict) else {}
+        kind, ref_id = item.get("kind"), str(item.get("id") or "")
+        if any(k == kind and i == ref_id for k, i, _s in out):
+            continue
+        if kind == "lead":
+            lead = load_lead(me, ref_id)
+            out.append(("lead", ref_id, {"company": lead["company"], "domain": lead["normalized_domain"],
+                                         "status": lead["status"], "score": lead["last_audit_score"],
+                                         "niche": lead.get("niche"), "area": lead.get("area")}))
+        elif kind == "report":
+            rep = db.query_one("SELECT * FROM reports WHERE id = %s", (ref_id,))
+            if not rep:
+                raise not_found("Report")
+            audit = load_audit(me, rep["audit_id"])
+            try:
+                reports.ensure_file(rep)  # the file must be on the server for the others to open it
+            except ApiError as e:
+                if e.code != "build_in_app":
+                    raise
+                missing.append({"id": rep["id"], "audit_id": rep["audit_id"], "kind": rep["kind"],
+                                "format": rep["format"]})
+            out.append(("report", ref_id, {"report_kind": rep["kind"], "format": rep["format"],
+                                           "company": audit["company"], "domain": audit["normalized_domain"],
+                                           "score": audit["score"], "grade": audit["grade"],
+                                           "audit_id": rep["audit_id"], "lead_id": audit["lead_id"],
+                                           "audited_at": audit["completed_at"]}))
+        else:
+            raise ApiError(422, "Only leads and audit reports can be shared.")
+    if missing:
+        raise ApiError(409, "The report has not been sent from your app yet. Try again.", code="report_not_uploaded",
+                       reports=missing)
+    return out
+
+
+def _share_summary(shares):
+    names = [s["company"] for _k, _i, s in shares]
+    return "Shared " + ", ".join(names) if names else "Shared an item"
 
 
 def _ensure_team_conversation(team_id):
@@ -117,6 +172,8 @@ def _messages_out(rows, me_id):
     reactions = db.query(f"SELECT message_id, user_id, reaction FROM message_reactions WHERE message_id IN ({ph})", ids)
     atts = db.query(f"""SELECT ma.message_id, up.id, up.original_name, up.mime, up.size_bytes FROM message_attachments ma
                         JOIN uploads up ON up.id = ma.upload_id WHERE ma.message_id IN ({ph})""", ids)
+    shares = db.query(f"SELECT message_id, kind, ref_id, snapshot FROM message_shares WHERE message_id IN ({ph}) "
+                      f"ORDER BY kind, ref_id", ids)
     out = []
     for r in rows:
         deleted = bool(r["deleted_at"])
@@ -136,6 +193,8 @@ def _messages_out(rows, me_id):
             "reactions": rx if not deleted else {},
             "attachments": [] if deleted else [{"id": a["id"], "name": a["original_name"], "mime": a["mime"],
                                                 "size_bytes": a["size_bytes"]} for a in atts if a["message_id"] == r["id"]],
+            "shares": [] if deleted else [dict(json.loads(x["snapshot"]), kind=x["kind"], id=x["ref_id"])
+                                          for x in shares if x["message_id"] == r["id"]],
         })
     return out
 
@@ -201,11 +260,11 @@ def send_message(conv_id):
         raise ApiError(403, "You can no longer message this person.")
     data = body()
     text_body = text(data, "body", max_len=5000, label="Message")
-    upload_ids = data.get("upload_ids") or []
-    if not isinstance(upload_ids, list) or len(upload_ids) > 5:
-        raise ApiError(422, "Attach at most 5 files.")
-    if not text_body and not upload_ids:
-        raise ApiError(422, "Type a message or attach a file.")
+    if data.get("upload_ids"):
+        raise ApiError(422, NO_FILES)
+    shares = _shares(me, data.get("shares") or [])
+    if not text_body and not shares:
+        raise ApiError(422, "Type a message or share a lead or report.")
     reply_to = data.get("reply_to_id") or None
     if reply_to and not db.query_one("SELECT 1 AS x FROM messages WHERE id = %s AND conversation_id = %s", (reply_to, conv_id)):
         raise ApiError(422, "The message you are replying to is not in this conversation.")
@@ -214,10 +273,9 @@ def send_message(conv_id):
     with db.transaction() as tx:
         tx.execute("""INSERT INTO messages (id, conversation_id, sender_id, body, reply_to_id, created_at)
                       VALUES (%s, %s, %s, %s, %s, %s)""", (mid, conv_id, me["id"], text_body, reply_to, now))
-        for uid in dict.fromkeys(map(str, upload_ids)):
-            if not tx.query_one("SELECT 1 AS x FROM uploads WHERE id = %s AND owner_id = %s AND purpose = 'chat'", (uid, me["id"])):
-                raise ApiError(422, "One of the attachments is not available.")
-            tx.execute("INSERT INTO message_attachments (message_id, upload_id) VALUES (%s, %s)", (mid, uid))
+        for kind, ref_id, snapshot in shares:
+            tx.execute("INSERT INTO message_shares (message_id, kind, ref_id, snapshot) VALUES (%s, %s, %s, %s)",
+                       (mid, kind, ref_id, json.dumps(snapshot)))
         tx.execute("UPDATE conversations SET last_message_at = %s WHERE id = %s", (now, conv_id))
     _mark_read(conv_id, me["id"])
     _publish_message(conv, mid, "message")
@@ -225,7 +283,7 @@ def send_message(conv_id):
         other = conv["_other"]
         if not realtime.is_online(other["id"]):
             events.notify([other["id"]], "new_message", f"New message from {me['name']}",
-                          (text_body or "Sent an attachment")[:140], "conversation", conv_id)
+                          (text_body or _share_summary(shares))[:140], "conversation", conv_id)
     row = db.query_one(_MSG_SELECT + " WHERE m.id = %s", (mid,))
     return jsonify({"message": _messages_out([row], me["id"])[0]}), 201
 
@@ -286,9 +344,32 @@ def toggle_reaction(msg_id):
 @bp.post("/api/chat/uploads")
 @require()
 def chat_upload():
-    rate_limit(f"upload:{g.user['id']}", 20, 300)
-    up = uploads.save_upload(request.files.get("file"), g.user["id"], "chat")
-    return jsonify({"upload": uploads.public_upload(up)}), 201
+    raise ApiError(410, NO_FILES, code="chat_files_off")
+
+
+@bp.get("/api/chat/messages/<msg_id>/reports/<report_id>")
+@require()
+def shared_report(msg_id, report_id):
+    """A report shared in a conversation: everyone in it may open the file."""
+    msg = db.query_one("SELECT * FROM messages WHERE id = %s AND deleted_at IS NULL", (msg_id,))
+    if not msg or not db.query_one("SELECT 1 AS x FROM message_shares WHERE message_id = %s AND kind = 'report' "
+                                   "AND ref_id = %s", (msg_id, report_id)):
+        raise not_found("Report")
+    _load_conversation(msg["conversation_id"])
+    rep = db.query_one("SELECT * FROM reports WHERE id = %s", (report_id,))
+    if not rep:
+        raise not_found("Report")
+    try:
+        rep = reports.ensure_file(rep)
+    except ApiError as e:
+        if e.code != "build_in_app":
+            raise
+        raise ApiError(410, "This shared report is no longer available. Ask for it to be shared again.", code="gone")
+    from backend.routes.audit_routes import _download_name
+    events.audit(g.user, "REPORT_DOWNLOADED", "report", rep["id"], {"audit_id": rep["audit_id"], "message_id": msg_id})
+    mime = "application/pdf" if rep["format"] == "pdf" else \
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return send_file(reports.report_path(rep), mimetype=mime, as_attachment=True, download_name=_download_name(rep))
 
 
 @bp.get("/api/chat/attachments/<upload_id>")

@@ -2,14 +2,15 @@
 # Render dashboard > New > Blueprint > pick this repository. It asks for the
 # values marked "sync: false"; everything else is set here.
 #
-# Free plan: the service sleeps after 15 minutes without use (the next request
-# wakes it in about a minute), has about a tenth of a CPU (so audits run one at
-# a time and slower), and has no disk (files on it vanish on every restart).
-# Everything that matters lives in the Neon database: leads, audit results,
-# people, chat, settings and uploaded files; report files are re-created
-# from the stored results when someone opens them.
-#
-# To upgrade later: set "plan: starter", raise MAX_CONCURRENT_AUDITS to 2.
+# The server only connects the team: it signs people in, stores and shares the
+# data in the Neon database, relays chat and sends email. All heavy work runs
+# on each person's own computer in the desktop app: audits, Word/PDF reports and
+# reading lead files. So the free plan is enough:
+# * it sleeps after 15 minutes without requests (the app waits up to 90 seconds
+#   while it wakes); an uptime monitor on /api/ping keeps it awake without
+#   waking the database;
+# * it has no disk, so files on it vanish on every restart: nothing permanent is
+#   kept there (uploaded files and report files are in the database too).
 services:
   - type: web
     name: mindcob-seo-audit-pro
@@ -17,7 +18,7 @@ services:
     region: ohio            # next to the Neon database (AWS us-east-2)
     plan: free
     buildCommand: pip install -r requirements.txt
-    # One process only: the live-event hub, audit queue and email worker are in-process.
+    # One process only: the live-event hub and the email queue are in-process.
     startCommand: gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 32 --timeout 180
     healthCheckPath: /api/health
     autoDeploy: true
@@ -28,8 +29,10 @@ services:
         value: production
       - key: SEO_DATA_DIR
         value: /tmp/seo-audit-pro   # temporary on the free plan; nothing permanent is kept here
+      - key: AUDITS_RUN_ON
+        value: app                  # audits and report files are made on each person's computer
       - key: MAX_CONCURRENT_AUDITS
-        value: "1"
+        value: "2"                  # audits at a time on each computer (Managers can change it in Settings)
       # The Neon connection string (Neon console > Connection details).
       - key: DATABASE_URL
         sync: false

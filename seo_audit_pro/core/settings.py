@@ -4,6 +4,7 @@ non-secret values such as the API address and UI state."""
 
 import os
 import sys
+import uuid
 
 from PySide6.QtCore import QSettings
 
@@ -55,6 +56,16 @@ def last_email():
 
 def set_last_email(email):
     _store().setValue("last_email", email)
+
+
+def device_id():
+    """A random id for this installation, so the server knows which computer runs an audit."""
+    store = _store()
+    value = store.value("device_id") or ""
+    if len(value) < 16:
+        value = uuid.uuid4().hex
+        store.setValue("device_id", value)
+    return value
 
 
 def get(key, default=None):

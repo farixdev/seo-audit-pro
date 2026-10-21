@@ -10,6 +10,7 @@ matching" action can never reach leads outside the caller's permissions.
 import csv
 import io
 import json
+import zlib
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
@@ -685,11 +686,66 @@ def _load_batch(batch_id):
 def preview_import():
     """Upload one scraped file; returns detected columns and a niche/area guess.
     Nothing is imported until the batch is started."""
+    from backend import config
+    if config.AUDITS_RUN_ON == "app":  # the server only handles data: files are read by the desktop apps
+        raise ApiError(409, "Lead files are read by the desktop app on your computer. Update the app.",
+                       code="read_in_app")
     rate_limit(f"import-upload:{g.user['id']}", 300, 600)
     request.max_content_length = lead_import.MAX_FILE_BYTES + 1024 * 1024
     form = request.form
     return jsonify(lead_import.create_preview(g.user, request.files.get("file"), form.get("niche", ""),
                                               form.get("area", ""))), 201
+
+
+@bp.post("/api/lead-imports/local")
+@require(MANAGER, TEAM_LEAD)
+def preview_local_import():
+    """A file the desktop app read on its own computer: only its column names,
+    row count and a sample arrive here. Nothing is imported until it starts."""
+    rate_limit(f"import-upload:{g.user['id']}", 300, 600)
+    return jsonify(lead_import.create_from_app(g.user, body())), 201
+
+
+def _gunzip_rows(raw, limit=60 * 1024 * 1024):
+    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        out = d.decompress(raw, limit)
+    except zlib.error:
+        raise ApiError(422, "The rows could not be read.")
+    if d.unconsumed_tail:
+        raise ApiError(413, "Too many rows at once.")
+    if not d.eof:
+        raise ApiError(422, "The rows could not be read.")
+    try:
+        return json.loads(out.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise ApiError(422, "The rows could not be read.")
+
+
+@bp.post("/api/lead-batches/<batch_id>/rows")
+@require(MANAGER, TEAM_LEAD)
+def import_rows(batch_id):
+    """One chunk of rows (gzip-compressed JSON list) from the app reading the file."""
+    try:
+        first = int(request.args.get("first") or 0)
+    except ValueError:
+        first = 0
+    if first < 1:
+        raise ApiError(422, "Say which row the chunk starts at.")
+    rows = _gunzip_rows(request.get_data(cache=False))
+    return jsonify({"batch": lead_import.commit_rows(g.user, batch_id, first, rows)})
+
+
+@bp.post("/api/lead-batches/<batch_id>/finish")
+@require(MANAGER, TEAM_LEAD)
+def finish_import(batch_id):
+    return jsonify({"batch": lead_import.finish_from_app(g.user, batch_id)})
+
+
+@bp.post("/api/lead-batches/<batch_id>/failed")
+@require(MANAGER, TEAM_LEAD)
+def import_failed(batch_id):
+    return jsonify({"batch": lead_import.fail_from_app(g.user, batch_id, text(body(), "error", max_len=2000))})
 
 
 @bp.post("/api/lead-batches/<batch_id>/start")

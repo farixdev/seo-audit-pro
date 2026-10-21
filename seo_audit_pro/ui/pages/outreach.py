@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QLabel, QLineEdit
                                QWidget)
 
 from seo_audit_pro import icons
-from seo_audit_pro.core import api, fmt, tasks
+from seo_audit_pro.core import api, fmt, pc_work, tasks
 from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C, STATUS
 from seo_audit_pro.ui.pages.base import Page
@@ -298,12 +298,14 @@ class ComposePanel(QWidget):
             _clear(self.reports_layout)
             self.report_boxes = {}
             items = data.get("items") or []
+            self.report_rows = {r["id"]: r for r in items}
+            self.reports_made_in_app = bool(data.get("made_in_app"))
             if not items:
                 self.reports_layout.addWidget(label("No audit reports for this lead yet. Run an audit to attach one.", "Meta"))
                 return
             for r in items[:8]:
                 kind = "Client report" if r["kind"] == "client" else "Technical report"
-                size = "created when sent" if r["format"] == "pdf" and not r.get("ready", 1) else fmt.size(r["size_bytes"])
+                size = "created when sent" if not r.get("ready", 1) else fmt.size(r["size_bytes"])
                 cb = QCheckBox(f"{kind} · {r['format'].upper()} · {size} · {fmt.date(r['created_at'])}")
                 cb.setChecked(r["id"] in selected)
                 cb.toggled.connect(lambda _c: self._update_state())
@@ -552,11 +554,16 @@ class ComposePanel(QWidget):
         self._send_key = self._send_key or api.new_idempotency_key()
         key = self._send_key
         email_id = self.email_id
+        rows = getattr(self, "report_rows", {})
+        to_upload = [rows[rid] for rid in payload["report_ids"]
+                     if getattr(self, "reports_made_in_app", False) and rid in rows and not rows[rid].get("ready", 1)]
 
         def work():
+            for row in to_upload:  # report files are made on this computer; the server needs a copy to send them
+                pc_work.upload_report(row)
             if email_id:
                 api.patch(f"/api/outreach/emails/{email_id}", payload)
-                return api.post(f"/api/outreach/emails/{email_id}/send", idempotency_key=key)
+                return send_email(email_id, key)
             return api.post("/api/outreach/emails", dict(payload, send=True), idempotency_key=key)
 
         def done(res):
@@ -573,6 +580,19 @@ class ComposePanel(QWidget):
             self.notice.show_message(err.message, "error")
 
         tasks.run(work, on_done=done, on_error=fail, owner=self)
+
+
+def send_email(email_id, key):
+    """Queue an email for delivery (blocking). When its reports were made on this
+    computer and the server has no copy yet, upload them and try once more."""
+    try:
+        return api.post(f"/api/outreach/emails/{email_id}/send", idempotency_key=key)
+    except api.ApiError as e:
+        if e.code != "report_not_uploaded":
+            raise
+        for row in e.data.get("reports") or []:
+            pc_work.upload_report(row)
+        return api.post(f"/api/outreach/emails/{email_id}/send", idempotency_key=api.new_idempotency_key())
 
 
 # ---------------------------------------------------------------------------
@@ -779,8 +799,7 @@ class ActivityPanel(QWidget):
             btn.busy(False)
             show_error(self, err)
 
-        tasks.run(api.post, f"/api/outreach/emails/{e['id']}/send", idempotency_key=key, on_done=done, on_error=fail,
-                  owner=self)
+        tasks.run(send_email, e["id"], key, on_done=done, on_error=fail, owner=self)
 
     def _delete(self, e):
         if not confirm(self, "Delete this draft?", "The draft and its attachment list are removed. Sent and failed "

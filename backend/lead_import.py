@@ -16,6 +16,13 @@ Flow
        * otherwise inserted into the lead bank
      Counters and rejected rows are committed with each chunk, so progress is
      exact and an interrupted import resumes where it stopped.
+
+Files read by the desktop app (the usual way): the app reads the file on the
+person's own computer and sends only what the server needs. ``create_from_app``
+makes the pending batch from the headers, row count and a sample; after
+``start`` the app sends the rows in chunks (``commit_rows``) and then calls
+``finish_from_app``. The server only checks them against the lead bank and
+stores them. Such batches have no stored file (``stored_name`` is NULL).
 """
 
 import csv
@@ -294,7 +301,8 @@ def _audience(batch):
 
 def start(batch_id):
     db.execute("UPDATE lead_batches SET status = 'queued' WHERE id = %s AND status = 'pending'", (batch_id,))
-    _submit(batch_id)
+    if (get_batch(batch_id) or {}).get("stored_name"):  # a file read by the app arrives in chunks instead
+        _submit(batch_id)
 
 
 def _submit(batch_id):
@@ -307,7 +315,8 @@ def _submit(batch_id):
 
 def resume_interrupted():
     """Continue imports that were running when the server stopped."""
-    for row in db.query("SELECT id FROM lead_batches WHERE status IN ('queued', 'processing') ORDER BY created_at"):
+    for row in db.query("SELECT id FROM lead_batches WHERE status IN ('queued', 'processing') "
+                        "AND stored_name IS NOT NULL ORDER BY created_at"):
         _submit(row["id"])
 
 
@@ -504,6 +513,16 @@ def _run(batch_id):
             realtime.publish(audience, {"type": "import_progress", "batch": batch_out(get_batch(batch_id))})
     if chunk:
         _commit_chunk(batch, chunk, seen_domains, seen_phones, first)
+    _completed(batch, audience)
+    try:
+        os.remove(path)  # the leads and rejected rows are stored; the raw file is no longer needed
+        db.execute("UPDATE lead_batches SET stored_name = NULL WHERE id = %s", (batch_id,))
+    except OSError:
+        pass
+
+
+def _completed(batch, audience):
+    batch_id = batch["id"]
     cache.bump()  # before "completed" is visible, so nobody reads stale counts after seeing it
     db.execute("UPDATE lead_batches SET status = 'completed', completed_at = %s WHERE id = %s", (now_iso(), batch_id))
     cache.bump()
@@ -522,11 +541,117 @@ def _run(batch_id):
         events.notify([batch["agent_id"]], "lead_assigned", "Leads assigned",
                       f"{done['imported']:,} {batch['niche'] or ''} leads in {batch['area'] or 'a new area'} were "
                       "assigned to you.", "lead_batch", batch_id)
+
+
+# ---------------------------------------------------------------------------
+# Files read by the desktop app
+# ---------------------------------------------------------------------------
+MAX_CHUNK_ROWS = 2000
+_SEEN = {}                # batch id -> (domains, phones) already in this file, while the app sends it
+_SEEN_LOCK = threading.Lock()
+
+
+def _clean_row(raw):
+    if not isinstance(raw, dict):
+        raise ApiError(422, "The rows could not be read.")
+    return {str(k)[:200]: str(v if v is not None else "")[:4000] for k, v in list(raw.items())[:300]}
+
+
+def create_from_app(user, data):
+    """A pending batch for a file the app read on its own computer: headers,
+    row count and a sample of rows. Same answer as ``create_preview``."""
+    name = os.path.basename(str(data.get("file_name") or "").replace("\\", "/"))[:200]
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in (".csv", ".tsv", ".txt", ".xlsx"):
+        raise ApiError(422, f"{name or 'This file'}: only .csv, .tsv and .xlsx files can be imported.")
+    headers = data.get("headers")
+    if not isinstance(headers, list) or not headers or len(headers) > 300:
+        raise ApiError(422, f"{name}: the column names could not be read.")
+    headers = [str(h).strip()[:200] for h in headers]
     try:
-        os.remove(path)  # the leads and rejected rows are stored; the raw file is no longer needed
-        db.execute("UPDATE lead_batches SET stored_name = NULL WHERE id = %s", (batch_id,))
-    except OSError:
-        pass
+        total = int(data.get("total_rows") or 0)
+        size = max(0, int(data.get("file_size") or 0))
+    except (TypeError, ValueError):
+        raise ApiError(422, f"{name}: the row count could not be read.")
+    if total <= 0:
+        raise ApiError(422, f"{name} has no data rows.")
+    if total > MAX_ROWS:
+        raise ApiError(422, f"{name} has more than {MAX_ROWS:,} rows. Split it into smaller files.")
+    sample = [_clean_row(r) for r in (data.get("sample") or [])[:200]]
+    mapping = detect_columns(headers)
+    guess_niche, guess_area = guess_niche_area(name, sample, mapping)
+    niche = (str(data.get("niche") or "") or guess_niche).strip()[:80]
+    area = (str(data.get("area") or "") or guess_area).strip()[:120]
+    batch_id = security.new_id("bat_")
+    db.execute("""INSERT INTO lead_batches (id, file_name, stored_name, file_size, niche, area, niche_key, area_key, source,
+                  status, headers, mapping, total_rows, created_by, created_at)
+                  VALUES (%s, %s, NULL, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s)""",
+               (batch_id, name, size, niche or None, area or None, (niche or "").lower() or None,
+                (area or "").lower() or None, "File import", json.dumps(headers), json.dumps(mapping), total,
+                user["id"], now_iso()))
+    with_site = sum(1 for r in sample if mapping.get("website") and (r.get(mapping["website"]) or "").strip())
+    return {"batch": batch_out(get_batch(batch_id)), "headers": headers, "mapping": mapping,
+            "sample": sample[:6], "sample_with_website": with_site, "sample_size": len(sample)}
+
+
+def _app_batch(user, batch_id):
+    batch = get_batch(batch_id)
+    if not batch or batch["created_by"] != user["id"] or batch.get("stored_name"):
+        raise ApiError(404, "Import not found.")
+    return batch
+
+
+def commit_rows(user, batch_id, first_row, rows):
+    """Store one chunk of rows the app read (in file order, starting at row
+    ``first_row``). A chunk that was already stored is accepted again as is."""
+    batch = _app_batch(user, batch_id)
+    if batch["status"] not in ("queued", "processing"):
+        raise ApiError(409, "This import is no longer running.", code="not_running")
+    if not isinstance(rows, list) or len(rows) > MAX_CHUNK_ROWS:
+        raise ApiError(422, f"Send at most {MAX_CHUNK_ROWS:,} rows at a time.")
+    done = int(batch["processed_rows"] or 0)
+    if first_row <= done:
+        return batch_out(batch)  # sent again after a lost answer
+    if first_row != done + 1:
+        raise ApiError(409, "Rows arrived out of order.", code="out_of_order", processed_rows=done)
+    if batch["status"] == "queued":
+        db.execute("UPDATE lead_batches SET status = 'processing', started_at = COALESCE(started_at, %s) WHERE id = %s",
+                   (now_iso(), batch_id))
+    batch["mapping"] = json.loads(batch["mapping"] or "{}")
+    with _SEEN_LOCK:
+        seen = _SEEN.get(batch_id)
+        if seen is None:  # first chunk, or the server restarted: what this file already added
+            known = db.query("SELECT normalized_domain, phone_key FROM leads WHERE batch_id = %s", (batch_id,))
+            seen = _SEEN[batch_id] = ({r["normalized_domain"] for r in known},
+                                      {r["phone_key"] for r in known if r["phone_key"]})
+    _commit_chunk(batch, [_clean_row(r) for r in rows], seen[0], seen[1], first_row)
+    cache.bump()
+    out = batch_out(get_batch(batch_id))
+    realtime.publish(_audience(batch), {"type": "import_progress", "batch": out})
+    return out
+
+
+def finish_from_app(user, batch_id):
+    batch = _app_batch(user, batch_id)
+    with _SEEN_LOCK:
+        _SEEN.pop(batch_id, None)
+    if batch["status"] not in ("queued", "processing"):
+        return batch_out(batch)
+    _completed(batch, _audience(batch))
+    return batch_out(get_batch(batch_id))
+
+
+def fail_from_app(user, batch_id, message):
+    batch = _app_batch(user, batch_id)
+    with _SEEN_LOCK:
+        _SEEN.pop(batch_id, None)
+    db.execute("UPDATE lead_batches SET status = 'failed', error = %s, completed_at = %s "
+               "WHERE id = %s AND status IN ('queued', 'processing')",
+               ((message or "").strip()[:300] or "The import stopped. Already imported rows were kept.", now_iso(),
+                batch_id))
+    out = batch_out(get_batch(batch_id))
+    realtime.publish(_audience(batch), {"type": "import_progress", "batch": out})
+    return out
 
 
 def rejects_csv(batch_id):

@@ -10,6 +10,7 @@ import json
 import math
 import os
 import re
+import zlib
 
 from flask import Blueprint, Response, g, jsonify, request, send_file
 
@@ -117,7 +118,11 @@ def get_audit(audit_id):
         data["queue_position"] = ahead
         data["eta_seconds"] = audit_runner.eta_seconds(ahead, snap["workers"], snap["running"])
         waiting = f"Waiting in the queue · {ahead:,} ahead" if ahead else "Next in the queue"
-        data["step"] = f"{waiting} · {snap['workers']} audits run at a time"
+        if audit_runner.runs_in_app():
+            who = row["requested_by_name"] or "the requester"
+            data["step"] = f"{waiting} · runs on {who}'s computer, {snap['workers']} at a time"
+        else:
+            data["step"] = f"{waiting} · {snap['workers']} audits run at a time"
     return jsonify({"audit": data})
 
 
@@ -426,6 +431,10 @@ def regenerate_reports(audit_id):
     rate_limit(f"regen:{g.user['id']}", 5, 600)
     row = load_audit(g.user, audit_id)
     res = _load_result(row)
+    if reports.made_in_app():  # the apps build the files again the next time they are opened
+        reports.forget_files(audit_id)
+        events.audit(g.user, "REPORT_GENERATED", "audit", audit_id, {"formats": [], "made_in_app": True})
+        return jsonify({"generated": [], "warnings": [], "made_in_app": True})
     made, errors = reports.generate_all(audit_id, res)
     if not made:
         raise ApiError(500, "Reports could not be generated. " + "; ".join(errors))
@@ -437,11 +446,11 @@ def _legacy_download(audit_id, kind, fmt):
     load_audit(g.user, audit_id)
     rep = db.query_one("SELECT * FROM reports WHERE audit_id = %s AND kind = %s AND format = %s", (audit_id, kind, fmt))
     if not rep:
-        if fmt == "pdf" and not reports.pdf_supported():
+        if fmt == "pdf" and not reports.made_in_app() and not reports.pdf_supported():
             raise ApiError(409, "PDF rendering is not available on this server (Word or LibreOffice is required). "
                                 "Download the DOCX report instead.", code="pdf_unavailable")
         raise not_found("Report")
-    return _send_report(reports.ensure_pdf(rep))
+    return _send_report(_ready_file(rep))
 
 
 @bp.get("/api/audit/<audit_id>/client-docx")
@@ -496,7 +505,26 @@ def list_reports():
     rows = db.query(f"""SELECT r.id, r.audit_id, r.kind, r.format, r.size_bytes, r.ready, r.created_at, a.score, a.grade,
                                a.lead_id, l.company, l.normalized_domain, u.name AS agent_name, t.name AS team_name
                         {base} WHERE {clause} ORDER BY r.created_at DESC LIMIT %s OFFSET %s""", params + [size, offset])
-    return jsonify(paged(rows, total, page, size) | {"pdf_supported": reports.pdf_supported()})
+    return jsonify(paged(rows, total, page, size) | {"pdf_supported": reports.pdf_supported(),
+                                                    "made_in_app": reports.made_in_app()})
+
+
+def _download_name(rep):
+    domain = db.scalar("SELECT l.normalized_domain FROM audits a JOIN leads l ON l.id = a.lead_id WHERE a.id = %s",
+                       (rep["audit_id"],)) or "site"
+    label = "SEO-Audit" if rep["kind"] == "client" else "SEO-Technical-Audit"
+    return f"{label}-{domain}-{rep['created_at'][:10]}.{rep['format']}"
+
+
+def _ready_file(rep):
+    """The report row once its file is on disk, or a ``build_in_app`` answer
+    telling the desktop app to build it on its own computer."""
+    try:
+        return reports.ensure_file(rep)
+    except ApiError as e:
+        if e.code == "build_in_app":
+            e.extra["download_name"] = _download_name(rep)
+        raise
 
 
 def _send_report(rep):
@@ -504,13 +532,9 @@ def _send_report(rep):
     if not path:
         raise ApiError(410, "This report file is no longer available. Regenerate the reports from the audit.", code="gone")
     events.audit(g.user, "REPORT_DOWNLOADED", "report", rep["id"], {"audit_id": rep["audit_id"]})
-    domain = db.scalar("SELECT l.normalized_domain FROM audits a JOIN leads l ON l.id = a.lead_id WHERE a.id = %s",
-                       (rep["audit_id"],)) or "site"
-    label = "SEO-Audit" if rep["kind"] == "client" else "SEO-Technical-Audit"
     mime = "application/pdf" if rep["format"] == "pdf" else \
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    return send_file(path, mimetype=mime, as_attachment=True,
-                     download_name=f"{label}-{domain}-{rep['created_at'][:10]}.{rep['format']}")
+    return send_file(path, mimetype=mime, as_attachment=True, download_name=_download_name(rep))
 
 
 @bp.get("/api/reports/<report_id>/download")
@@ -522,4 +546,138 @@ def download_report(report_id):
     load_audit(g.user, rep["audit_id"])  # IDOR guard via the lead
     if not os.path.basename(rep["stored_name"]) == rep["stored_name"]:
         raise not_found("Report")
-    return _send_report(reports.ensure_pdf(rep))
+    return _send_report(_ready_file(rep))
+
+
+@bp.put("/api/reports/<report_id>/file")
+@require()
+def upload_report_file(report_id):
+    """A report file an app built, kept so the server can email and share it."""
+    rep = db.query_one("SELECT * FROM reports WHERE id = %s", (report_id,))
+    if not rep:
+        raise not_found("Report")
+    load_audit(g.user, rep["audit_id"])  # IDOR guard via the lead
+    rate_limit(f"report-file:{g.user['id']}", 60, 600)
+    rep = reports.store_file(rep, request.get_data(cache=False))
+    return jsonify({"report": {"id": rep["id"], "ready": rep["ready"], "size_bytes": rep["size_bytes"]}})
+
+
+@bp.post("/api/reports/<report_id>/opened")
+@require()
+def report_opened(report_id):
+    """Audit trail for a report file an app built on its own computer."""
+    rep = db.query_one("SELECT * FROM reports WHERE id = %s", (report_id,))
+    if not rep:
+        raise not_found("Report")
+    load_audit(g.user, rep["audit_id"])
+    events.audit(g.user, "REPORT_DOWNLOADED", "report", rep["id"], {"audit_id": rep["audit_id"], "made_in_app": True})
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Audits run by the desktop apps (AUDITS_RUN_ON = "app")
+# ---------------------------------------------------------------------------
+MAX_RESULT_BYTES = 60 * 1024 * 1024   # an unpacked engine result is 1–2 MB
+
+
+def _apps_only():
+    if not audit_runner.runs_in_app():
+        raise ApiError(409, "Audits run on the server here.", code="server_runs_audits")
+
+
+def _device():
+    device = (request.headers.get("X-Device-Id") or "").strip()
+    if not re.match(r"^[A-Za-z0-9_-]{8,64}$", device):
+        raise ApiError(422, "This app did not identify itself. Update the app.")
+    return device
+
+
+def _gunzip(raw):
+    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        out = d.decompress(raw, MAX_RESULT_BYTES)
+    except zlib.error:
+        raise ApiError(422, "The audit result could not be read.")
+    if d.unconsumed_tail:
+        raise ApiError(413, "The audit result is too large.")
+    if not d.eof:
+        raise ApiError(422, "The audit result could not be read.")
+    return out
+
+
+@bp.post("/api/audit-jobs/claim")
+@require()
+def claim_audit_jobs():
+    _apps_only()
+    return jsonify(audit_runner.claim_jobs(g.user, _device(), restart=bool(body().get("restart"))))
+
+
+@bp.post("/api/audit-jobs/<audit_id>/progress")
+@require()
+def audit_job_progress(audit_id):
+    _apps_only()
+    messages = body().get("messages") or []
+    if not isinstance(messages, list):
+        raise ApiError(422, "Messages must be a list.")
+    return jsonify(audit_runner.job_progress(g.user, audit_id, _device(), messages))
+
+
+@bp.post("/api/audit-jobs/<audit_id>/result")
+@require()
+def audit_job_result(audit_id):
+    """The finished engine result (gzip-compressed JSON) from the app that ran it,
+    either as the whole body or as the ``result`` part of a form that also holds
+    the Word reports the app wrote (``client_docx``, ``technical_docx``)."""
+    _apps_only()
+    docx_files = {}
+    if request.files:
+        part = request.files.get("result")
+        raw = part.read() if part else b""
+        for kind in ("client", "technical"):
+            f = request.files.get(f"{kind}_docx")
+            if f:
+                docx_files[kind] = f.read(reports.MAX_FILE_BYTES + 1)
+    else:
+        raw = request.get_data(cache=False)
+    try:
+        result = json.loads(_gunzip(raw).decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise ApiError(422, "The audit result could not be read.")
+    if not isinstance(result, dict) or not isinstance(result.get("score"), dict):
+        raise ApiError(422, "The audit result is incomplete.")
+    rows = audit_runner.job_result(g.user, audit_id, _device(), result, docx_files)
+    return jsonify({"ok": True, "reports": rows})
+
+
+@bp.post("/api/audit-jobs/<audit_id>/failed")
+@require()
+def audit_job_failed(audit_id):
+    _apps_only()
+    audit_runner.job_failed(g.user, audit_id, _device(), text(body(), "error", max_len=2000))
+    return jsonify({"ok": True})
+
+
+@bp.post("/api/pagespeed")
+@require()
+def pagespeed_for_app():
+    """Google PageSpeed for an audit running in an app (the API key stays here)."""
+    _apps_only()
+    rate_limit(f"psi:{g.user['id']}", 120, 600)
+    data = body()
+    url = text(data, "url", required=True, max_len=2000, label="URL")
+    if not re.match(r"^https?://", url, re.I):
+        raise ApiError(422, "Only web addresses can be checked.")
+    return jsonify(audit_runner.pagespeed_for_app(url, data.get("strategy")))
+
+
+@bp.get("/api/audits/<audit_id>/result-data")
+@require()
+def result_data(audit_id):
+    """The stored result exactly as kept (gzip-compressed JSON), for an app to
+    build report files from. The server only reads it out."""
+    row = load_audit(g.user, audit_id)
+    _load_result(row)  # completed, and copies a legacy result into the store
+    stored = db.query_one("SELECT data FROM audit_results WHERE audit_id = %s", (audit_id,))
+    if not stored:
+        raise ApiError(410, "The stored result for this audit is no longer available.", code="gone")
+    return Response(bytes(stored["data"]), mimetype="application/gzip")

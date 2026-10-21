@@ -447,10 +447,54 @@ def _m003_audit_queue():
     ]
 
 
+def _m004_upload_data():
+    """A database copy of every uploaded file, so uploads survive on a server
+    whose disk is wiped on every restart (Render's free plan)."""
+    blob = "BYTEA" if db.DIALECT == "postgres" else "BLOB"
+    return [
+        f"""CREATE TABLE upload_data (
+            upload_id TEXT PRIMARY KEY REFERENCES uploads(id),
+            data {blob} NOT NULL
+        )""",
+    ]
+
+
+def _m005_work_in_apps():
+    """Audits run by each person's desktop app: which app runs an audit and when
+    it last reported. Report files the apps upload are kept in the database."""
+    blob = "BYTEA" if db.DIALECT == "postgres" else "BLOB"
+    return [
+        "ALTER TABLE audits ADD COLUMN runner TEXT",
+        "ALTER TABLE audits ADD COLUMN heartbeat_at TEXT",
+        f"""CREATE TABLE report_data (
+            report_id TEXT PRIMARY KEY REFERENCES reports(id),
+            data {blob} NOT NULL
+        )""",
+    ]
+
+
+def _m006_chat_shares():
+    """Chat carries leads and audit reports from the workspace instead of
+    uploaded files. ``snapshot`` keeps what the sender shared (JSON)."""
+    return [
+        """CREATE TABLE message_shares (
+            message_id TEXT NOT NULL REFERENCES messages(id),
+            kind TEXT NOT NULL CHECK (kind IN ('lead', 'report')),
+            ref_id TEXT NOT NULL,
+            snapshot TEXT NOT NULL,
+            PRIMARY KEY (message_id, kind, ref_id)
+        )""",
+        "CREATE INDEX ix_message_shares_ref ON message_shares(kind, ref_id)",
+    ]
+
+
 MIGRATIONS = [
     (1, "initial schema", _m001_initial),
     (2, "lead bank", _m002_lead_bank),
     (3, "audit queue", _m003_audit_queue),
+    (4, "upload data", _m004_upload_data),
+    (5, "work in apps", _m005_work_in_apps),
+    (6, "chat shares", _m006_chat_shares),
 ]
 
 # Best-effort performance objects (run outside migrations; failures are logged,

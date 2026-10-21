@@ -25,7 +25,8 @@ List endpoints accept `page` and `page_size` and return
 | POST | `/api/auth/change-password` | `{current_password, new_password}`; signs out other devices |
 | POST | `/api/auth/forgot-password` | `{email}`; always 200 |
 | POST | `/api/auth/reset-password` | `{email, code, new_password}` |
-| GET | `/api/health` | public; `{status, version, app}` |
+| GET | `/api/health` | public; `{status, version, app, audits_run_on}` (checks the database) |
+| GET | `/api/ping` | public; `{ok, app}` without touching the database — for uptime monitors |
 
 ## Users & teams
 | Method | Path | Role |
@@ -73,8 +74,12 @@ Chicago IL"). CSV, TSV, TXT and XLSX up to 200 MB.
 
 | Method | Path | Notes |
 |---|---|---|
+| POST | `/api/lead-imports/local` | the desktop app's way: the app read the file on its computer and sends `{file_name, file_size, headers, total_rows, sample}` (≤ 200 rows) → same answer as below; the batch has no stored file |
 | POST | `/api/lead-imports` | multipart `file` (+ optional `niche`, `area`) → `{batch, headers, mapping, sample, sample_with_website, sample_size}`; stores a *pending* batch with detected columns and a niche/area guessed from the file name. Nothing is imported yet |
-| POST **(I)** | `/api/lead-batches/<id>/start` | `{niche, area, mapping?, team_id?, agent_id?}` → queues the import; a website column is required |
+| POST **(I)** | `/api/lead-batches/<id>/start` | `{niche, area, mapping?, team_id?, agent_id?}` → queues the import; a website column is required. A stored file is processed on the server; a file read by the app waits for its rows |
+| POST | `/api/lead-batches/<id>/rows?first=N` | creator's app only: gzip JSON list of row dicts (≤ 2,000) starting at file row `N`; checked and stored like a server import. A chunk already stored is accepted again; a gap → 409 `out_of_order` with `processed_rows` |
+| POST | `/api/lead-batches/<id>/finish` | all rows sent: completes the import (audit log, notifications) |
+| POST | `/api/lead-batches/<id>/failed` | `{error}`; rows already stored are kept |
 | DELETE | `/api/lead-batches/<id>` | discard a pending preview |
 | GET | `/api/lead-batches` | `search, status` → batches with counters + `totals` |
 | GET | `/api/lead-batches/<id>` | status, `processed_rows`, `imported`, `duplicates`, `no_website`, `invalid` |
@@ -98,14 +103,29 @@ duplicate. Progress is pushed over the WebSocket as `import_progress`.
 | GET | `/api/audits/<id>/client-data` | client report view model |
 | GET | `/api/audits/<id>/client-html` | standalone HTML client report (download) |
 | GET | `/api/audits/<id>/export` | full result JSON (download) |
-| POST | `/api/audits/<id>/reports` | regenerate the DOCX files (PDFs are re-created on their next open) |
-| GET | `/api/reports` | `audit_id, lead_id, kind, format, search`; includes `pdf_supported`; `ready: 0` marks a PDF that has not been created yet |
-| GET | `/api/reports/<id>/download` | file; a PDF that is not `ready` is created first (one conversion at a time; 503 `busy` if others take longer than 4 minutes) |
+| POST | `/api/audits/<id>/reports` | regenerate: app mode drops the stored files (`made_in_app: true`; apps build them again when opened); server mode writes the DOCX files again |
+| GET | `/api/audits/<id>/result-data` | the stored result as kept (gzip JSON), for an app to build report files from |
+| GET | `/api/reports` | `audit_id, lead_id, kind, format, search`; includes `pdf_supported` (the server's) and `made_in_app`; `ready: 0` marks a file that has not been made yet |
+| GET | `/api/reports/<id>/download` | the file. App mode, file not made yet: 409 `build_in_app` with `{report_id, audit_id, kind, format, download_name}` (the app builds it here, then uploads it). Server mode: a PDF that is not `ready` is created first (503 `busy` if others take longer than 4 minutes) |
+| PUT | `/api/reports/<id>/file` | raw DOCX/PDF bytes an app built; kept in `report_data` for the team |
+| POST | `/api/reports/<id>/opened` | audit trail for a file an app built for itself |
+
+### Audits run by the desktop apps (`AUDITS_RUN_ON=app`, default)
+Every call sends `X-Device-Id` (a random id per installation).
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/audit-jobs/claim` | `{restart?}` → `{jobs: [{audit_id, url, max_pages, psi_strategy}], slots}`: the caller's own queued audits, up to `slots` running on this computer. `restart`: audits this computer was running go back to the queue first (twice interrupted → failed). Audits whose app went silent for 10 minutes are given back too. 409 `server_runs_audits` in server mode |
+| POST | `/api/audit-jobs/<id>/progress` | `{messages: [engine progress lines]}` → `{stop}` (true when cancelled or taken over) |
+| POST | `/api/audit-jobs/<id>/result` | gzip JSON result as the body, or a form with `result` (gzip JSON) and optional `client_docx`, `technical_docx` → `{reports}`; 409 when the audit is no longer running on this computer |
+| POST | `/api/audit-jobs/<id>/failed` | `{error}` |
+| POST | `/api/pagespeed` | `{url, strategy}` → Google PageSpeed result fetched with the server's key |
 
 ### Bulk audits and the queue
-Audits run on the server, `workers` at a time (Settings → audit defaults →
-`concurrent`, 1–4, default 2). Single audits go ahead of bulk audits; bulk
-audits take turns between the people who queued them.
+Audits run `workers` at a time (Settings → audit defaults → `concurrent`, 1–4,
+default 2): on each computer in app mode, on the server in server mode. Single
+audits go ahead of bulk audits; in server mode bulk audits take turns between
+the people who queued them.
 
 | Method | Path | Notes |
 |---|---|---|
@@ -133,8 +153,8 @@ Legacy paths kept as authenticated aliases: `POST /api/audit`,
 | GET | `/api/outreach/emails` | `status, lead_id, batch_id, search`; includes `counts` |
 | GET / PATCH / DELETE | `/api/outreach/emails/<id>` | edit/delete drafts only |
 | POST **(I)** | `/api/outreach/emails` | `{lead_id, to_email, subject, body, audit_id?, report_ids?, upload_ids?, send?}` |
-| POST **(I)** | `/api/outreach/emails/<id>/send` | queue a draft or retry a failed email |
-| POST | `/api/outreach/uploads` | multipart attachment |
+| POST **(I)** | `/api/outreach/emails/<id>/send` | queue a draft or retry a failed email; app mode: 409 `report_not_uploaded` with `reports` when an attached report file is not on the server yet (the app uploads it and sends again) |
+| POST | `/api/outreach/uploads` | multipart attachment (also kept in `upload_data`) |
 | POST | `/api/outreach/bulk/preview` | `{lead_ids}` → eligible count, skipped reasons, sample |
 | POST **(I)** | `/api/outreach/bulk` | `{lead_ids, confirm_count}` |
 
@@ -145,11 +165,15 @@ and replies are not tracked and are never displayed.
 `GET /api/chat/contacts`, `GET /api/chat/conversations`,
 `POST /api/chat/conversations/direct {user_id}`,
 `GET /api/chat/conversations/<id>/messages?before=&limit=`,
-`POST (I) /api/chat/conversations/<id>/messages {body, reply_to_id?, upload_ids?}`,
+`POST (I) /api/chat/conversations/<id>/messages {body, reply_to_id?, shares?: [{kind: lead|report, id}]}`
+(at most 5 shares, only what the sender can open; 409 `report_not_uploaded` with `reports` when a
+shared report file is not on the server yet; `upload_ids` → 422),
 `POST /api/chat/conversations/<id>/read`, `PATCH|DELETE /api/chat/messages/<id>`,
 `POST /api/chat/messages/<id>/reactions {reaction: ack|like|seen|question}`,
-`POST /api/chat/uploads`, `GET /api/chat/attachments/<upload_id>`,
-`GET /api/chat/search?q=`.
+`GET /api/chat/messages/<id>/reports/<report_id>` (a report shared in that message: anyone in the
+conversation may open it), `GET /api/chat/search?q=`. Files cannot be uploaded to chat
+(`POST /api/chat/uploads` → 410 `chat_files_off`); `GET /api/chat/attachments/<upload_id>` still
+serves attachments of older messages.
 
 ## Notifications, dashboard, search
 `GET /api/notifications?unread=1`, `POST /api/notifications/read {ids | all}`,

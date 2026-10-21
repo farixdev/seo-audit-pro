@@ -22,6 +22,17 @@ from seo_audit_pro.widgets.table import Column, DataTable
 
 PDF_UNAVAILABLE = ("PDF rendering is not available on this server (it needs Microsoft Word or LibreOffice). "
                    "DOCX reports are available for every audit.")
+PDF_UNAVAILABLE_HERE = ("PDF reports are made on this computer and need Microsoft Word or LibreOffice, which is not "
+                        "installed here. Word (DOCX) reports are available for every audit.")
+
+
+def pdf_notice(data):
+    """(PDF available, notice text) for a reports listing. Report files are made
+    either on this computer (app mode) or on the server."""
+    if data.get("made_in_app"):
+        from seo_audit_pro.core import pc_work
+        return pc_work.pdf_supported(), PDF_UNAVAILABLE_HERE
+    return data.get("pdf_supported", True), PDF_UNAVAILABLE
 
 
 # ---------------------------------------------------------------------------
@@ -31,13 +42,14 @@ def report_label(row):
     return f"{(row.get('kind') or '').title()} · {(row.get('format') or '').upper()}"
 
 
-def pending_pdf(row):
-    """PDFs are rendered on the server the first time they are opened."""
-    return row.get("format") == "pdf" and not row.get("ready", 1)
+def pending_file(row):
+    """Not made yet: the file is created the first time it is opened (on this
+    computer, or for a PDF on a server that makes reports)."""
+    return not row.get("ready", 1)
 
 
 def report_size(row):
-    return "Made when first opened" if pending_pdf(row) else fmt.size(row.get("size_bytes"))
+    return "Made when first opened" if pending_file(row) else fmt.size(row.get("size_bytes"))
 
 
 def suggested_name(row):
@@ -91,8 +103,8 @@ def export_json(page, audit_id, domain):
 
 def report_menu(page, row, pos, include_audit=True):
     rid = row["id"]
-    if pending_pdf(row):
-        note = lambda: toast(page, "Creating the PDF on the server — the first open takes a few seconds.", "info", 5000)
+    if pending_file(row):
+        note = lambda: toast(page, "Creating the report — the first open takes a few seconds.", "info", 5000)
     else:
         note = lambda: None
     fmt_filter = "PDF document (*.pdf)" if row.get("format") == "pdf" else "Word document (*.docx)"
@@ -189,15 +201,15 @@ class ReportsPage(Page):
 
     def _render(self, data):
         self.table.set_page(data)
-        pdf_ok = data.get("pdf_supported", True)
-        self.notice.text.setText(PDF_UNAVAILABLE)
+        pdf_ok, notice = pdf_notice(data)
+        self.notice.text.setText(notice)
         self.notice.setVisible(not pdf_ok)
         if not data["items"]:
             if any(self.params.get(k) for k in ("search", "kind", "format")):
                 self.area.empty("No reports match these filters", "Clear the search or change the filters.")
             else:
-                self.area.empty("No reports yet", "Word reports are generated when an audit completes; PDFs are "
-                                "created the first time they are opened.",
+                self.area.empty("No reports yet", "Reports are listed when an audit completes; each file is "
+                                "created the first time it is opened.",
                                 icon_name="report")
             return
         self.area.ready()

@@ -3,25 +3,28 @@
 Internal collaboration: team channels and direct messages between people the
 server allows to talk to each other. Realtime over the WebSocket hub, with a
 slow poll only while the hub is disconnected.
+
+Messages carry only what is already in the workspace: a lead or an audit
+report can be shared; files from outside cannot be uploaded.
 """
 
-import mimetypes
 import os
 import time
 from datetime import date, timedelta
 
 from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QFontMetrics, QGuiApplication
-from PySide6.QtWidgets import (QFileDialog, QFrame, QLabel, QMenu, QPlainTextEdit, QPushButton, QScrollArea,
-                               QSizePolicy, QToolButton, QWidget)
+from PySide6.QtWidgets import (QFrame, QLabel, QMenu, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy,
+                               QToolButton, QWidget)
 
 from seo_audit_pro import icons
-from seo_audit_pro.core import api, fmt, tasks
+from seo_audit_pro.core import api, fmt, pc_work, tasks
 from seo_audit_pro.core.realtime import get_hub
 from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C, ROLE_LABEL
 from seo_audit_pro.ui.pages.base import Page
-from seo_audit_pro.widgets.common import (Avatar, StatefulArea, button, hbox, icon_button, label, scaled_pixmap, vbox)
+from seo_audit_pro.widgets.common import (Avatar, Segmented, StatefulArea, button, hbox, icon_button, label,
+                                          scaled_pixmap, vbox)
 from seo_audit_pro.widgets.feedback import Dialog, SearchBox, confirm, show_error, text_area, toast
 
 REACTIONS = [("ack", "check", "Acknowledged"), ("like", "thumbs_up", "Like"), ("seen", "eye", "Seen"),
@@ -29,8 +32,7 @@ REACTIONS = [("ack", "check", "Acknowledged"), ("like", "thumbs_up", "Like"), ("
 REACTION_ICON = {k: i for k, i, _t in REACTIONS}
 REACTION_LABEL = {k: t for k, _i, t in REACTIONS}
 BUBBLE_MAX = 520
-MAX_UPLOAD = 10 * 1024 * 1024
-_UPLOAD_TYPES = "Documents, images and data (*.pdf *.doc *.docx *.png *.jpg *.jpeg *.txt *.csv *.xlsx)"
+MAX_SHARES = 5
 
 _AVATAR_CACHE = {}
 
@@ -191,6 +193,7 @@ class MessageWidget(QWidget):
     edit = Signal(dict)
     remove = Signal(dict)
     open_attachment = Signal(dict)
+    open_share = Signal(dict, dict)
 
     def __init__(self, msg, show_sender, compact, is_team):
         super().__init__()
@@ -279,6 +282,9 @@ class MessageWidget(QWidget):
             chip.clicked.connect(lambda _c=False, a=att: self.open_attachment.emit(a))
             bl.addWidget(chip)
 
+        for sh in ([] if deleted else (msg.get("shares") or [])):
+            bl.addWidget(self._share_card(sh, mine))
+
         meta = hbox(spacing=6)
         meta.addStretch(1)
         stamp = fmt.time_(msg.get("created_at")) + ("  · edited" if msg.get("edited_at") and not deleted else "")
@@ -341,6 +347,21 @@ class MessageWidget(QWidget):
             outer.addStretch(1)
         bubble.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         bubble.customContextMenuRequested.connect(lambda pos: self._menu(bubble.mapToGlobal(pos)))
+
+    def _share_card(self, sh, mine):
+        title, sub = share_text(sh)
+        card = QPushButton(f"{title}\n{sub}" if sub else title)
+        card.setIcon(icons.icon("leads" if sh["kind"] == "lead" else "report", "#FFFFFF" if mine else C["text_2"], 16))
+        card.setIconSize(QSize(16, 16))
+        card.setCursor(Qt.CursorShape.PointingHandCursor)
+        card.setToolTip("Open this lead" if sh["kind"] == "lead" else "Open this report")
+        card.setStyleSheet(
+            f"QPushButton {{ text-align: left; min-height: 40px; padding: 6px 12px; border-radius: 8px; font-weight: 500;"
+            f" background: {'#2E2E33' if mine else C['surface_alt']}; color: {'#FFFFFF' if mine else C['text']};"
+            f" border: 1px solid {'#3F3F46' if mine else C['border']}; }}"
+            f"QPushButton:hover {{ background: {'#3F3F46' if mine else '#F0F0F2'}; }}")
+        card.clicked.connect(lambda _c=False, s=sh: self.open_share.emit(self.msg, s))
+        return card
 
     def enterEvent(self, e):
         if not self.msg.get("deleted"):
@@ -490,6 +511,110 @@ class ContactPickerDialog(Dialog):
         self.accept()
 
 
+def share_text(sh):
+    """(title, details) for a shared lead or report."""
+    score = sh.get("score")
+    if sh["kind"] == "lead":
+        details = [sh.get("domain"), f"Score {score}/100" if score is not None else "",
+                   (sh.get("status") or "").replace("_", " ").capitalize()]
+        return sh.get("company") or "Lead", " · ".join(d for d in details if d)
+    kind = "Client report" if sh.get("report_kind") == "client" else "Technical report"
+    details = [sh.get("company"), f"Score {score}/100" if score is not None else ""]
+    return f"{kind} · {(sh.get('format') or '').upper()}", " · ".join(d for d in details if d)
+
+
+class SharePickerDialog(Dialog):
+    """Pick a lead or an audit report (from what this person can open) to share."""
+
+    def __init__(self, parent):
+        super().__init__(parent, "Share in chat", "Share a lead or an audit report with this conversation.", 520)
+        self.chosen = None
+        self.kind = "lead"
+        self.seg = Segmented([("Leads", "lead"), ("Audit reports", "report")], "lead")
+        self.seg.changed.connect(self._set_kind)
+        self.body.addWidget(self.seg, 0, Qt.AlignmentFlag.AlignLeft)
+        self.search = SearchBox("Search company or website", 300)
+        self.search.search.connect(lambda _t: self._load())
+        self.body.addWidget(self.search)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setMinimumHeight(340)
+        self.scroll.setStyleSheet(f"QScrollArea {{ border: 1px solid {C['border']}; border-radius: 8px; background: {C['surface']}; }}")
+        self.host = QWidget()
+        self.list = vbox(self.host, (6, 6, 6, 6), 2)
+        self.scroll.setWidget(self.host)
+        self.body.addWidget(self.scroll, 1)
+        cancel = button("Cancel")
+        cancel.clicked.connect(self.reject)
+        self.footer.addWidget(cancel)
+        self._seq = 0
+        self._load()
+
+    def _set_kind(self, kind):
+        self.kind = kind
+        self._load()
+
+    def _clear(self):
+        while self.list.count():
+            it = self.list.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+
+    def _load(self):
+        self._seq += 1
+        seq, kind = self._seq, self.kind
+        self._clear()
+        self.list.addWidget(label("Loading…", "Muted"))
+        params = {"page_size": 30}
+        if self.search.text().strip():
+            params["search"] = self.search.text().strip()
+        path = "/api/leads" if kind == "lead" else "/api/reports"
+        tasks.run(api.get, path, params=params, on_done=lambda d: seq == self._seq and self._show(kind, d),
+                  on_error=lambda e: seq == self._seq and self.show_error(e), owner=self)
+
+    def _show(self, kind, data):
+        self._clear()
+        rows = data.get("items") or []
+        if not rows:
+            self.list.addWidget(label("Nothing matches." if self.search.text().strip() else
+                                      ("No leads yet." if kind == "lead" else "No audit reports yet."), "Muted"))
+        for r in rows:
+            if kind == "lead":
+                sh = {"kind": "lead", "id": r["id"], "company": r.get("company"), "domain": r.get("normalized_domain"),
+                      "score": r.get("last_audit_score"), "status": r.get("status")}
+            else:
+                sh = {"kind": "report", "id": r["id"], "report_kind": r.get("kind"), "format": r.get("format"),
+                      "company": r.get("company"), "score": r.get("score")}
+            self.list.addWidget(self._row(sh, r))
+        self.list.addStretch(1)
+
+    def _row(self, sh, r):
+        w = QFrame()
+        w.setObjectName("PickRow")
+        w.setCursor(Qt.CursorShape.PointingHandCursor)
+        w.setStyleSheet("#PickRow { border-radius: 6px; } #PickRow:hover { background: #F4F4F6; }"
+                        "#PickRow QLabel { background: transparent; }")
+        row = hbox(w, (8, 6, 8, 6), 10)
+        ic = QLabel()
+        ic.setPixmap(icons.pixmap("leads" if sh["kind"] == "lead" else "report", C["text_2"], 16))
+        row.addWidget(ic)
+        col = vbox(spacing=1)
+        title, sub = share_text(sh)
+        if sh["kind"] == "report":
+            title, sub = r.get("company") or "", f"{title} · {fmt.date(r.get('created_at'))}"
+        n = label(title)
+        n.setStyleSheet("font-weight: 600;")
+        col.addWidget(n)
+        col.addWidget(label(sub, "Meta"))
+        row.addLayout(col, 1)
+        w.mouseReleaseEvent = lambda _e, s=sh: self._pick(s)
+        return w
+
+    def _pick(self, sh):
+        self.chosen = sh
+        self.accept()
+
+
 # ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
@@ -505,7 +630,7 @@ class ChatPage(Page):
         self.messages = []
         self.has_more = False
         self.reply_to = None
-        self.pending = []           # uploads waiting to be sent
+        self.pending = []           # leads / reports to share with the next message
         self._send_key = None
         self._last_typing = 0.0
         self._pending_open = None
@@ -599,9 +724,9 @@ class ChatPage(Page):
         self.pending_host.setVisible(False)
         bt.addWidget(self.pending_host)
         crow = hbox(spacing=8)
-        self.attach_btn = icon_button("paperclip", "Attach a file (max 10 MB)", 18)
-        self.attach_btn.clicked.connect(self.attach_file)
-        crow.addWidget(self.attach_btn, 0, Qt.AlignmentFlag.AlignBottom)
+        self.share_btn = icon_button("link", "Share a lead or an audit report", 18)
+        self.share_btn.clicked.connect(self.share_item)
+        crow.addWidget(self.share_btn, 0, Qt.AlignmentFlag.AlignBottom)
         self.composer = Composer()
         self.composer.send.connect(self.send)
         self.composer.typing.connect(self._typing)
@@ -796,7 +921,7 @@ class ChatPage(Page):
             else:
                 self.head_sub.setText(f"{ROLE_LABEL.get(other.get('role'), '')} · {'Online' if other.get('online') else 'Offline'}")
                 can_send, note = True, ""
-        for w in (self.composer, self.send_btn, self.attach_btn):
+        for w in (self.composer, self.send_btn, self.share_btn):
             w.setEnabled(can_send)
         self.disabled_note.setText(note)
         self.disabled_note.setVisible(bool(note))
@@ -881,6 +1006,7 @@ class ChatPage(Page):
         w.edit.connect(self.edit_message)
         w.remove.connect(self.delete_message)
         w.open_attachment.connect(self.download_attachment)
+        w.open_share.connect(self.open_share)
         return w
 
     def _near_bottom(self):
@@ -923,36 +1049,33 @@ class ChatPage(Page):
         self.reply_to = None
         self.reply_bar.setVisible(False)
 
-    def attach_file(self):
+    def share_item(self):
         if not self.current:
             return
-        if len(self.pending) >= 5:
-            toast(self, "Attach at most 5 files per message.", "warning")
+        if len(self.pending) >= MAX_SHARES:
+            toast(self, f"Share at most {MAX_SHARES} items per message.", "warning")
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Attach file", os.path.expanduser("~"), _UPLOAD_TYPES)
-        if not path:
-            return
-        if os.path.getsize(path) > MAX_UPLOAD:
-            toast(self, "The file is larger than 10 MB.", "error")
-            return
-        self.attach_btn.setEnabled(False)
-
-        def upload():
-            name = os.path.basename(path)
-            mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
-            with open(path, "rb") as fh:
-                return api.request("POST", "/api/chat/uploads", files={"file": (name, fh, mime)}, timeout=120)["upload"]
-
-        def done(up):
-            self.attach_btn.setEnabled(True)
-            self.pending.append(up)
+        dlg = SharePickerDialog(self)
+        if dlg.exec() and dlg.chosen:
+            if not any(p["kind"] == dlg.chosen["kind"] and p["id"] == dlg.chosen["id"] for p in self.pending):
+                self.pending.append(dlg.chosen)
             self._render_pending()
+            self.composer.setFocus()
 
-        def fail(err):
-            self.attach_btn.setEnabled(True)
-            show_error(self, err, "Attachment not added")
-
-        tasks.run(upload, on_done=done, on_error=fail, owner=self)
+    def open_share(self, msg, sh):
+        if sh["kind"] == "lead":
+            def fail(err):
+                if err.status == 404:
+                    toast(self, "This lead is not in your lead list. Ask your Team Lead to assign it to you.", "info", 5000)
+                else:
+                    show_error(self, err)
+            tasks.run(api.get, f"/api/leads/{sh['id']}", on_done=lambda _r: self.ws.navigate("lead", lead_id=sh["id"]),
+                      on_error=fail, owner=self)
+            return
+        toast(self, "Opening the report…", "info", 1800)
+        tasks.run(api.download, f"/api/chat/messages/{msg['id']}/reports/{sh['id']}",
+                  on_done=lambda path: QDesktopServices.openUrl(QUrl.fromLocalFile(path)),
+                  on_error=lambda e: show_error(self, e, "Report not opened"), owner=self)
 
     def _render_pending(self):
         _clear(self.pending_layout)
@@ -963,18 +1086,19 @@ class ChatPage(Page):
                                "#PendChip QLabel { background: transparent; }")
             row = hbox(chip, (8, 2, 2, 2), 6)
             ic = QLabel()
-            ic.setPixmap(icons.pixmap("paperclip", C["text_2"], 13))
+            ic.setPixmap(icons.pixmap("leads" if up["kind"] == "lead" else "report", C["text_2"], 13))
             row.addWidget(ic)
-            row.addWidget(label(f"{up['name']} · {fmt.size(up['size_bytes'])}", "Meta"))
+            title, sub = share_text(up)
+            row.addWidget(label(f"{title} · {sub}" if sub else title, "Meta"))
             rm = icon_button("x", "Remove", 12)
-            rm.clicked.connect(lambda _c=False, uid=up["id"]: self._remove_pending(uid))
+            rm.clicked.connect(lambda _c=False, key=(up["kind"], up["id"]): self._remove_pending(key))
             row.addWidget(rm)
             self.pending_layout.addWidget(chip)
         self.pending_layout.addStretch(1)
         self.pending_host.setVisible(bool(self.pending))
 
-    def _remove_pending(self, upload_id):
-        self.pending = [p for p in self.pending if p["id"] != upload_id]
+    def _remove_pending(self, key):
+        self.pending = [p for p in self.pending if (p["kind"], p["id"]) != key]
         self._render_pending()
 
     def send(self):
@@ -984,7 +1108,7 @@ class ChatPage(Page):
         if not text and not self.pending:
             return
         conv_id = self.current["id"]
-        payload = {"body": text, "upload_ids": [p["id"] for p in self.pending]}
+        payload = {"body": text, "shares": [{"kind": p["kind"], "id": p["id"]} for p in self.pending]}
         if self.reply_to:
             payload["reply_to_id"] = self.reply_to["id"]
         self._send_key = self._send_key or api.new_idempotency_key()
@@ -1013,8 +1137,20 @@ class ChatPage(Page):
                 self._send_key = None
             show_error(self, err, "Message not sent")
 
-        tasks.run(api.post, f"/api/chat/conversations/{conv_id}/messages", payload, idempotency_key=self._send_key,
-                  on_done=done, on_error=fail, owner=self)
+        key = self._send_key
+
+        def work():
+            path = f"/api/chat/conversations/{conv_id}/messages"
+            try:
+                return api.post(path, payload, idempotency_key=key)
+            except api.ApiError as e:
+                if e.code != "report_not_uploaded":
+                    raise
+                for row in e.data.get("reports") or []:  # made on this computer: give the team a copy first
+                    pc_work.upload_report(row)
+                return api.post(path, payload, idempotency_key=api.new_idempotency_key())
+
+        tasks.run(work, on_done=done, on_error=fail, owner=self)
 
     # -- message actions -----------------------------------------------------------
     def _after_mutation(self):

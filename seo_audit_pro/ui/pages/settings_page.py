@@ -214,7 +214,7 @@ class SettingsPage(Page):
         self.concurrent.setValue(2)
         row.addWidget(Field("Pages to crawl", self.max_pages, "Between 1 and 500 pages per audit."), 1)
         row.addWidget(Field("PageSpeed Insights", self.psi, "Mobile only halves PageSpeed time."), 1)
-        row.addWidget(Field("Audits at the same time", self.concurrent, "2 for 4 GB of memory; 3–4 need 8 GB."), 1)
+        row.addWidget(Field("Audits at the same time", self.concurrent, "On each computer. 2 for 4 GB of memory; 3–4 need 8 GB."), 1)
         row.setAlignment(Qt.AlignmentFlag.AlignTop)
         card.body.addLayout(row)
         pdf = hbox(spacing=8)
@@ -236,7 +236,12 @@ class SettingsPage(Page):
         self.max_pages.setValue(int(d.get("max_pages") or 50))
         self.psi.setCurrentIndex(max(0, self.psi.findData(d.get("psi_strategy") or "both")))
         self.concurrent.setValue(int(d.get("concurrent") or 2))
-        if data.get("pdf_supported"):
+        if data.get("made_in_app"):
+            self.pdf_icon.setPixmap(icons.pixmap("info", C["text_3"], 16))
+            self.pdf_text.setText("Audits and report files are made on each person's own computer; the server only "
+                                  "stores and shares them. PDF reports need Microsoft Word or LibreOffice on that "
+                                  "computer, otherwise reports are delivered as DOCX.")
+        elif data.get("pdf_supported"):
             self.pdf_icon.setPixmap(icons.pixmap("check_circle", C["success"], 16))
             self.pdf_text.setText("PDF reports are available: the server has Microsoft Word or LibreOffice installed. "
                                   "Each PDF is created the first time someone opens or emails it.")

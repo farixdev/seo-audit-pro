@@ -7,14 +7,21 @@ messages; nothing is simulated.
 Queue
 -----
 Every audit is a row in ``audits``; ``status = 'queued'`` *is* the queue, so it
-survives a server restart. One scheduler thread starts queued audits while
-fewer than ``concurrency()`` are running (2 by default — sized for a 4 GB
-server; Managers can change it in Settings):
+survives a restart. Single audits started from a lead (``priority = 1``) go
+before bulk audits (``priority = 0``), oldest first.
 
-1. Single audits started from a lead (``priority = 1``) go first, oldest first.
-2. Bulk audits (``priority = 0``) take turns between the people who queued them:
-   the person with the fewest audits running, then the one served longest ago,
-   goes next — so one agent's batch of 100 never blocks a teammate.
+Where audits run (``config.AUDITS_RUN_ON``):
+
+* ``"app"`` (default): on the computer of the person who queued them. Their
+  desktop app asks for its next audits (``claim_jobs``), runs the engine on that
+  computer, sends the engine's progress messages and finally the result. The
+  server only stores and shares: it turns the messages into percent / step,
+  tells everyone watching, and saves the result. ``concurrency()`` audits run at
+  a time on each computer.
+* ``"server"``: one scheduler thread here starts queued audits while fewer than
+  ``concurrency()`` are running; bulk audits take turns between the people who
+  queued them (fewest running, then served longest ago), so one agent's batch
+  never blocks a teammate.
 """
 
 import ipaddress
@@ -33,7 +40,7 @@ from urllib.parse import urlparse
 
 from backend import cache, config, db, events, realtime, reports, results, security
 from backend.errors import ApiError, conflict
-from backend.util import now_iso
+from backend.util import iso_ago, now_iso
 
 log = logging.getLogger("seo_audit_pro.audits")
 
@@ -134,7 +141,7 @@ def start(user, lead, max_pages=None):
     except db.IntegrityError:
         running = db.query_one("SELECT id FROM audits WHERE lead_id = %s AND status IN ('queued', 'running')", (lead["id"],))
         raise conflict("An audit is already running for this lead.", audit_id=running["id"] if running else None)
-    wake()
+    _queued(user["id"])
     return audit_id
 
 
@@ -158,12 +165,44 @@ def enqueue_bulk(user, leads, label, skipped):
     except db.IntegrityError:
         raise conflict("Some of these leads started auditing a moment ago. Review the selection again.",
                        code_detail="in_progress")
-    wake()
+    _queued(user["id"])
     return batch_id
+
+
+def _queued(user_id):
+    """New audits are waiting: start them here, or tell that person's app."""
+    if runs_in_app():
+        realtime.publish([user_id], {"type": "audit_jobs"})
+    else:
+        wake()
+
+
+def _cancel_in_app(audit_ids):
+    """App mode: cancel queued or running audits; the app running one stops it
+    when it hears about it (live event, or the answer to its next progress)."""
+    stopped = []
+    for audit_id in audit_ids:
+        with db.transaction() as tx:
+            tx.execute("UPDATE audits SET status = 'cancelled', step = 'Cancelled', error = %s, completed_at = %s "
+                       "WHERE id = %s AND status IN ('queued', 'running')",
+                       ("The audit was cancelled.", now_iso(), audit_id))
+            changed = tx.rowcount == 1
+        if changed:
+            ctx = _context(audit_id)
+            realtime.publish(ctx["targets"], {"type": "audit_progress", "audit_id": audit_id,
+                                              "lead_id": ctx["row"]["lead_id"], "status": "cancelled",
+                                              "error": "The audit was cancelled."})
+            stopped.append(audit_id)
+    return stopped
 
 
 def cancel(audit_id):
     """Cancel a queued audit, or ask a running one to stop."""
+    if runs_in_app():
+        done = bool(_cancel_in_app([audit_id]))
+        if done:
+            _after_finish(audit_id)
+        return done
     with _LIVE_LOCK:
         live = _LIVE.get(audit_id) if audit_id in _RUNNING else None
     if live:
@@ -181,6 +220,9 @@ def cancel_batch(batch_id):
     """Cancel every queued audit of a batch and stop its running ones.
     Returns how many queued audits were cancelled."""
     now = now_iso()
+    if runs_in_app():
+        _cancel_in_app([r["id"] for r in db.query("SELECT id FROM audits WHERE batch_id = %s AND status = 'running'",
+                                                  (batch_id,))])
     with db.transaction() as tx:
         tx.execute("UPDATE audits SET status = 'cancelled', step = 'Cancelled', completed_at = %s "
                    "WHERE batch_id = %s AND status = 'queued'", (now, batch_id))
@@ -207,6 +249,8 @@ def live_logs(audit_id):
 # Scheduler
 # ---------------------------------------------------------------------------
 def wake():
+    if runs_in_app():  # no scheduler: the apps ask for their audits
+        return
     _ensure_scheduler()
     _WAKE.set()
 
@@ -232,6 +276,8 @@ def _loop():
 
 
 def _dispatch():
+    if runs_in_app():  # the apps run the audits; never take one here
+        return
     limit = concurrency()
     while True:
         with _LIVE_LOCK:
@@ -335,10 +381,13 @@ def snapshot():
 
 def queue_position(row):
     """How many queued audits are ahead of this one (first come, first served
-    within a priority; bulk turns between people make it an estimate)."""
-    return db.scalar("""SELECT COUNT(*) FROM audits WHERE status = 'queued' AND id <> %s AND (priority > %s OR
-                        (priority = %s AND (created_at < %s OR (created_at = %s AND id < %s))))""",
-                     (row["id"], row["priority"], row["priority"], row["created_at"], row["created_at"], row["id"])) or 0
+    within a priority; bulk turns between people make it an estimate). In app
+    mode only the same person's audits count: they run on that person's computer."""
+    mine = " AND requested_by = %s" if runs_in_app() else ""
+    params = (row["id"], row["priority"], row["priority"], row["created_at"], row["created_at"], row["id"])
+    return db.scalar(f"""SELECT COUNT(*) FROM audits WHERE status = 'queued' AND id <> %s AND (priority > %s OR
+                         (priority = %s AND (created_at < %s OR (created_at = %s AND id < %s)))){mine}""",
+                     params + ((row["requested_by"],) if mine else ())) or 0
 
 
 def batch_counts(batch_ids):
@@ -412,16 +461,117 @@ def _run_safe(audit_id):
                    ("The audit could not be completed because of an unexpected error.", now_iso(), audit_id))
 
 
+def _new_state(row=None):
+    row = row or {}
+    return {"percent": row.get("percent") or 2, "step": row.get("step") or "Starting audit",
+            "pages_processed": row.get("pages_processed") or 0, "pages_discovered": row.get("pages_discovered") or 0}
+
+
+def _apply_message(state, msg):
+    """Update percent / step / page counts from one engine progress message.
+    Returns True when a new stage began."""
+    low = msg.lower()
+    stage_changed = False
+    m = _CRAWL_RE.search(msg)
+    if m:
+        done, total = int(m.group(1)), int(m.group(2))
+        state["pages_processed"] = done
+        if m.group(3):
+            state["pages_discovered"] = int(m.group(3))
+        state["percent"] = max(state["percent"], min(54, 12 + int(done / max(1, total) * 42)))
+    else:
+        for needle, pct in _STAGES:
+            if needle in low and pct > state["percent"]:
+                state["percent"] = pct
+                stage_changed = True
+                break
+    state["step"] = msg.rstrip("…. ")
+    return stage_changed
+
+
+def _context(audit_id):
+    row = db.query_one("SELECT * FROM audits WHERE id = %s", (audit_id,))
+    lead = db.query_one("SELECT * FROM leads WHERE id = %s", (row["lead_id"],))
+    requester = db.query_one("SELECT * FROM users WHERE id = %s", (row["requested_by"],))
+    return {"row": row, "lead": lead, "requester": requester, "targets": audience(lead, row["requested_by"])}
+
+
+def _write_progress(ctx, state):
+    audit_id, lead_id = ctx["row"]["id"], ctx["row"]["lead_id"]
+    db.execute("UPDATE audits SET percent = %s, step = %s, pages_processed = %s, pages_discovered = %s, heartbeat_at = %s "
+               "WHERE id = %s AND status = 'running'",
+               (state["percent"], state["step"][:300], state["pages_processed"], state["pages_discovered"], now_iso(),
+                audit_id))
+    realtime.publish(ctx["targets"], {"type": "audit_progress", "audit_id": audit_id, "lead_id": lead_id,
+                                      "status": "running", "percent": state["percent"], "step": state["step"],
+                                      "pages_processed": state["pages_processed"],
+                                      "pages_discovered": state["pages_discovered"]})
+
+
+def _complete(ctx, result, docx_files=None):
+    """Store a finished engine result and update the audit, the lead and everyone watching."""
+    row, lead, requester, targets = ctx["row"], ctx["lead"], ctx["requester"], ctx["targets"]
+    audit_id, lead_id = row["id"], row["lead_id"]
+    results.save(audit_id, result)
+    if reports.made_in_app():
+        made, report_errors = reports.register_for_app(audit_id, result, docx_files), []
+    else:
+        _write_progress(ctx, dict(_new_state(), percent=98, step="Generating reports"))
+        made, report_errors = reports.generate_all(audit_id, result)
+    sc = result.get("score") or {}
+    pc = result.get("priority_counts") or {}
+    now = now_iso()
+    with db.transaction() as tx:
+        tx.execute("""UPDATE audits SET status = 'completed', percent = 100, step = 'Completed', completed_at = %s,
+                          score = %s, grade = %s, pages_processed = %s, issues_found = %s,
+                          critical_count = %s, high_count = %s, medium_count = %s, low_count = %s
+                      WHERE id = %s""",
+                   (now, sc.get("score"), sc.get("grade"), result.get("pages_crawled") or 0,
+                    len(result.get("action_items") or []), pc.get("Critical", 0), pc.get("High", 0),
+                    pc.get("Medium", 0), pc.get("Low", 0), audit_id))
+        tx.execute("""UPDATE leads SET last_audit_id = %s, last_audit_score = %s, last_audit_at = %s, updated_at = %s,
+                          version = version + 1,
+                          status = CASE WHEN status IN ('new', 'assigned') THEN 'audited' ELSE status END
+                      WHERE id = %s""", (audit_id, sc.get("score"), now, now, lead_id))
+        events.audit(requester, "AUDIT_COMPLETED", "audit", audit_id,
+                     {"lead_id": lead_id, "score": sc.get("score"), "batch_id": row["batch_id"]}, tx=tx)
+        if made:
+            events.audit(requester, "REPORT_GENERATED", "audit", audit_id, {"formats": made}, tx=tx)
+    cache.bump()  # after commit: lead status / score changed
+    realtime.publish(targets, {"type": "audit_progress", "audit_id": audit_id, "lead_id": lead_id,
+                               "status": "completed", "percent": 100, "step": "Completed"})
+    if not row["batch_id"]:  # a batch sends one summary notification instead of one per lead
+        events.notify(targets, "audit_completed", "Audit completed",
+                      f"{lead['company']} scored {sc.get('score')}/100 ({sc.get('grade')}).", "audit", audit_id)
+        if made:
+            events.notify([row["requested_by"]], "report_ready", "Report ready",
+                          f"Reports for {lead['company']} are ready to view and download.", "audit", audit_id)
+    if report_errors:
+        log.warning("Audit %s report issues: %s", audit_id, report_errors)
+
+
+def _fail(ctx, message, cancelled=False):
+    row, lead = ctx["row"], ctx["lead"]
+    status = "cancelled" if cancelled else "failed"
+    db.execute("UPDATE audits SET status = %s, error = %s, step = %s, completed_at = %s WHERE id = %s",
+               (status, message, "Cancelled" if cancelled else "Failed", now_iso(), row["id"]))
+    events.audit(ctx["requester"], "AUDIT_CANCELLED" if cancelled else "AUDIT_FAILED", "audit", row["id"],
+                 {"lead_id": row["lead_id"], "error": message, "batch_id": row["batch_id"]})
+    realtime.publish(ctx["targets"], {"type": "audit_progress", "audit_id": row["id"], "lead_id": row["lead_id"],
+                                      "status": status, "error": message})
+    if not cancelled and not row["batch_id"]:
+        events.notify([row["requested_by"]], "audit_failed", "Audit failed", f"{lead['company']}: {message}",
+                      "audit", row["id"])
+
+
 def _run(audit_id):
+    """Server mode: run one claimed audit in this process."""
     import audit as engine
 
     with _LIVE_LOCK:
         live = _LIVE[audit_id]
-    row = db.query_one("SELECT * FROM audits WHERE id = %s", (audit_id,))
-    lead_id, requested_by, in_batch = row["lead_id"], row["requested_by"], bool(row["batch_id"])
-    lead = db.query_one("SELECT * FROM leads WHERE id = %s", (lead_id,))
-    requester = db.query_one("SELECT * FROM users WHERE id = %s", (requested_by,))
-    targets = audience(lead, requested_by)
+    ctx = _context(audit_id)
+    row = ctx["row"]
     try:
         params = json.loads(row.get("params") or "{}")
     except ValueError:
@@ -430,7 +580,7 @@ def _run(audit_id):
     params = {"url": row["url"], "max_pages": params.get("max_pages") or defaults["max_pages"],
               "psi_strategy": params.get("psi_strategy") or defaults.get("psi_strategy", "both"),
               "psi_key": pagespeed_key()}
-    state = {"percent": 2, "step": "Starting audit", "pages_processed": 0, "pages_discovered": 0, "last_write": 0.0}
+    state = dict(_new_state(), last_write=0.0)
     flush_lock = threading.Lock()
 
     def push(force=False):
@@ -446,34 +596,12 @@ def _run(audit_id):
                 return
             state["pending"] = False
             state["last_write"] = now
-        db.execute("UPDATE audits SET percent = %s, step = %s, pages_processed = %s, pages_discovered = %s "
-                   "WHERE id = %s AND status = 'running'",
-                   (state["percent"], state["step"][:300], state["pages_processed"], state["pages_discovered"], audit_id))
-        realtime.publish(targets, {"type": "audit_progress", "audit_id": audit_id, "lead_id": lead_id,
-                                   "status": "running", "percent": state["percent"], "step": state["step"],
-                                   "pages_processed": state["pages_processed"],
-                                   "pages_discovered": state["pages_discovered"]})
+        _write_progress(ctx, state)
 
     def progress(msg):
         msg = str(msg)
         live["logs"].append(f"{time.strftime('%H:%M:%S')}  {msg}")
-        low = msg.lower()
-        stage_changed = False
-        m = _CRAWL_RE.search(msg)
-        if m:
-            done, total = int(m.group(1)), int(m.group(2))
-            state["pages_processed"] = done
-            if m.group(3):
-                state["pages_discovered"] = int(m.group(3))
-            state["percent"] = max(state["percent"], min(54, 12 + int(done / max(1, total) * 42)))
-        else:
-            for needle, pct in _STAGES:
-                if needle in low and pct > state["percent"]:
-                    state["percent"] = pct
-                    stage_changed = True
-                    break
-        state["step"] = msg.rstrip("…. ")
-        push(force=stage_changed)
+        push(force=_apply_message(state, msg))
 
     try:
         push(force=True)
@@ -481,45 +609,9 @@ def _run(audit_id):
         result = engine.run_audit(dict(params, cancel=live["cancel"]), progress=progress)
         state.update(percent=97, step="Saving results")
         push(force=True)
-        results.save(audit_id, result)
-
-        state.update(percent=98, step="Generating reports")
-        push(force=True)
-        made, report_errors = reports.generate_all(audit_id, result)
-
-        sc = result.get("score") or {}
-        pc = result.get("priority_counts") or {}
-        now = now_iso()
-        with db.transaction() as tx:
-            tx.execute("""UPDATE audits SET status = 'completed', percent = 100, step = 'Completed', completed_at = %s,
-                              score = %s, grade = %s, pages_processed = %s, issues_found = %s,
-                              critical_count = %s, high_count = %s, medium_count = %s, low_count = %s
-                          WHERE id = %s""",
-                       (now, sc.get("score"), sc.get("grade"), result.get("pages_crawled") or 0,
-                        len(result.get("action_items") or []), pc.get("Critical", 0), pc.get("High", 0),
-                        pc.get("Medium", 0), pc.get("Low", 0), audit_id))
-            tx.execute("""UPDATE leads SET last_audit_id = %s, last_audit_score = %s, last_audit_at = %s, updated_at = %s,
-                              version = version + 1,
-                              status = CASE WHEN status IN ('new', 'assigned') THEN 'audited' ELSE status END
-                          WHERE id = %s""", (audit_id, sc.get("score"), now, now, lead_id))
-            events.audit(requester, "AUDIT_COMPLETED", "audit", audit_id,
-                         {"lead_id": lead_id, "score": sc.get("score"), "batch_id": row["batch_id"]}, tx=tx)
-            if made:
-                events.audit(requester, "REPORT_GENERATED", "audit", audit_id, {"formats": made}, tx=tx)
-        cache.bump()  # after commit: lead status / score changed
-        realtime.publish(targets, {"type": "audit_progress", "audit_id": audit_id, "lead_id": lead_id,
-                                   "status": "completed", "percent": 100, "step": "Completed"})
-        if not in_batch:  # a batch sends one summary notification instead of one per lead
-            events.notify(targets, "audit_completed", "Audit completed",
-                          f"{lead['company']} scored {sc.get('score')}/100 ({sc.get('grade')}).", "audit", audit_id)
-            if made:
-                events.notify([requested_by], "report_ready", "Report ready",
-                              f"Reports for {lead['company']} are ready to view and download.", "audit", audit_id)
-        if report_errors:
-            log.warning("Audit %s report issues: %s", audit_id, report_errors)
+        _complete(ctx, result)
     except Exception as e:  # noqa: BLE001
         cancelled = live["cancel"].is_set() or (isinstance(e, RuntimeError) and "cancel" in str(e).lower())
-        status = "cancelled" if cancelled else "failed"
         if cancelled:
             message = "The audit was cancelled."
         elif isinstance(e, ApiError):
@@ -529,27 +621,153 @@ def _run(audit_id):
         else:
             log.exception("Audit %s failed", audit_id)
             message = "The audit could not be completed because of an unexpected error."
-        db.execute("UPDATE audits SET status = %s, error = %s, step = %s, completed_at = %s WHERE id = %s",
-                   (status, message, "Cancelled" if cancelled else "Failed", now_iso(), audit_id))
-        events.audit(requester, "AUDIT_CANCELLED" if cancelled else "AUDIT_FAILED", "audit", audit_id,
-                     {"lead_id": lead_id, "error": message, "batch_id": row["batch_id"]})
-        realtime.publish(targets, {"type": "audit_progress", "audit_id": audit_id, "lead_id": lead_id,
-                                   "status": status, "error": message})
-        if not cancelled and not in_batch:
-            events.notify([requested_by], "audit_failed", "Audit failed", f"{lead['company']}: {message}", "audit", audit_id)
+        _fail(ctx, message, cancelled)
+
+
+# ---------------------------------------------------------------------------
+# App mode: each person's desktop app runs the audits they queued
+# ---------------------------------------------------------------------------
+APP_SILENT_SECONDS = 600   # an app that has not reported for this long has lost its audit
+
+
+def runs_in_app():
+    return config.AUDITS_RUN_ON == "app"
+
+
+def _requeue_or_fail(audit_id, attempts, reason):
+    if attempts >= 2:
+        ctx = _context(audit_id)
+        if ctx["row"]["status"] == "running":
+            _fail(ctx, f"The audit was interrupted twice ({reason}). Start it again.")
+            _after_finish(audit_id)
+        return
+    db.execute("UPDATE audits SET status = 'queued', percent = 0, pages_processed = 0, pages_discovered = 0, "
+               "runner = NULL, step = %s WHERE id = %s AND status = 'running'",
+               (f"{WAITING} (restarted: {reason})", audit_id))
+
+
+def claim_jobs(user, device, restart=False):
+    """Give this person's app the next audits they queued, up to the number
+    that run at a time on one computer. ``restart``: the app has just started,
+    so audits it was running before are put back in the queue first."""
+    for r in db.query("SELECT id, attempts, runner, heartbeat_at FROM audits WHERE requested_by = %s AND status = 'running'",
+                      (user["id"],)):
+        if restart and r["runner"] == device:
+            _requeue_or_fail(r["id"], r["attempts"], "the app was closed")
+        elif not r["heartbeat_at"] or r["heartbeat_at"] < iso_ago(APP_SILENT_SECONDS):
+            _requeue_or_fail(r["id"], r["attempts"], "the app stopped responding")
+    slots = concurrency()
+    running = db.scalar("SELECT COUNT(*) FROM audits WHERE requested_by = %s AND status = 'running' AND runner = %s",
+                        (user["id"], device)) or 0
+    jobs = []
+    if running < slots:
+        defaults = audit_settings()
+        for row in db.query("SELECT * FROM audits WHERE requested_by = %s AND status = 'queued' "
+                            "ORDER BY priority DESC, created_at, id LIMIT %s", (user["id"], slots - running)):
+            now = now_iso()
+            with db.transaction() as tx:
+                tx.execute("UPDATE audits SET status = 'running', started_at = %s, heartbeat_at = %s, runner = %s, "
+                           "percent = 2, step = 'Starting audit', attempts = attempts + 1 "
+                           "WHERE id = %s AND status = 'queued'", (now, now, device, row["id"]))
+                if tx.rowcount != 1:
+                    continue
+            try:
+                params = json.loads(row.get("params") or "{}")
+            except ValueError:
+                params = {}
+            jobs.append({"audit_id": row["id"], "url": row["url"],
+                         "max_pages": params.get("max_pages") or defaults["max_pages"],
+                         "psi_strategy": params.get("psi_strategy") or defaults.get("psi_strategy", "both")})
+            ctx = _context(row["id"])
+            with _LIVE_LOCK:
+                _LIVE[row["id"]] = {"cancel": threading.Event(), "logs": deque(maxlen=300), "state": _new_state(),
+                                    "ctx": ctx}
+            _write_progress(ctx, _new_state())
+    return {"jobs": jobs, "slots": slots}
+
+
+def _app_job(user, audit_id, device):
+    row = db.query_one("SELECT * FROM audits WHERE id = %s AND requested_by = %s", (audit_id, user["id"]))
+    if not row:
+        raise ApiError(404, "Audit not found.")
+    return row, row["status"] == "running" and row["runner"] == device
+
+
+def _app_live(row):
+    with _LIVE_LOCK:
+        live = _LIVE.get(row["id"])
+        if live is None:  # the server restarted while the app kept running the audit
+            live = _LIVE[row["id"]] = {"cancel": threading.Event(), "logs": deque(maxlen=300),
+                                       "state": _new_state(row), "ctx": None}
+    if live["ctx"] is None:
+        live["ctx"] = _context(row["id"])
+    return live
+
+
+def job_progress(user, audit_id, device, messages):
+    """Progress from the app running an audit. Returns whether it should stop."""
+    row, mine = _app_job(user, audit_id, device)
+    if not mine:
+        return {"stop": True, "status": row["status"]}
+    live = _app_live(row)
+    for msg in messages[:300]:
+        msg = str(msg)[:500]
+        live["logs"].append(f"{time.strftime('%H:%M:%S')}  {msg}")
+        _apply_message(live["state"], msg)
+    _write_progress(live["ctx"], live["state"])
+    return {"stop": False}
+
+
+def job_result(user, audit_id, device, result, docx_files=None):
+    row, mine = _app_job(user, audit_id, device)
+    if not mine:
+        raise conflict("This audit is no longer running on this computer.", code="not_running")
+    ctx = _context(audit_id)
+    _write_progress(ctx, dict(_app_live(row)["state"], percent=97, step="Saving results"))
+    _complete(ctx, result, docx_files)
+    _job_done(audit_id)
+    # The app uploads the report files it already wrote to these rows.
+    return db.query("SELECT id, kind, format FROM reports WHERE audit_id = %s ORDER BY kind, format", (audit_id,))
+
+
+def job_failed(user, audit_id, device, message):
+    row, mine = _app_job(user, audit_id, device)
+    if mine:
+        _fail(_context(audit_id), (message or "").strip()[:300] or
+              "The audit could not be completed because of an unexpected error.")
+        _job_done(audit_id)
+
+
+def _job_done(audit_id):
+    t = threading.Timer(600, _drop_live, args=(audit_id,))
+    t.daemon = True
+    t.start()
+    _after_finish(audit_id)
+
+
+def pagespeed_for_app(url, strategy):
+    """Google PageSpeed for an audit running in an app, with the key that stays
+    on the server. The server only waits on Google; it does no processing."""
+    import pagespeed
+    return pagespeed.run_pagespeed(url, strategy if strategy in ("mobile", "desktop") else "mobile",
+                                   api_key=pagespeed_key())
 
 
 def recover_interrupted():
-    """After a restart: audits that were running go back to the queue (once);
-    queued audits simply stay queued. Then start the scheduler."""
+    """After a restart. Server mode: audits that were running go back to the
+    queue (once) and the scheduler starts. App mode: nothing to recover, the
+    audits keep running in the apps (an app that went silent loses its audit
+    when that person's app next asks for work)."""
     now = now_iso()
-    db.execute("UPDATE audits SET status = 'failed', error = %s, step = 'Failed', completed_at = %s "
-               "WHERE status = 'running' AND attempts >= 2",
-               ("The audit was interrupted twice by a server restart. Start it again.", now))
-    db.execute("UPDATE audits SET status = 'queued', percent = 0, pages_processed = 0, pages_discovered = 0, "
-               "step = %s WHERE status = 'running'", (WAITING + " (restarted after a server restart)",))
+    if not runs_in_app():
+        db.execute("UPDATE audits SET status = 'failed', error = %s, step = 'Failed', completed_at = %s "
+                   "WHERE status = 'running' AND attempts >= 2",
+                   ("The audit was interrupted twice by a server restart. Start it again.", now))
+        db.execute("UPDATE audits SET status = 'queued', percent = 0, pages_processed = 0, pages_discovered = 0, "
+                   "step = %s WHERE status = 'running'", (WAITING + " (restarted after a server restart)",))
     for b in db.query("SELECT id FROM audit_batches WHERE status = 'active'"):
         c = batch_counts([b["id"]])[b["id"]]
         if not c["queued"] and not c["running"]:
             db.execute("UPDATE audit_batches SET status = 'completed', completed_at = %s WHERE id = %s", (now, b["id"]))
-    wake()
+    if not runs_in_app():
+        wake()

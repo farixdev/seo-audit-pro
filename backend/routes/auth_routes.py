@@ -236,7 +236,14 @@ def health():
         db_ok = False
     status = 200 if db_ok else 503
     return jsonify({"status": "ok" if db_ok else "degraded", "version": config.APP_VERSION,
-                    "app": "SEO Audit Pro"}), status
+                    "app": "SEO Audit Pro", "audits_run_on": config.AUDITS_RUN_ON}), status
+
+
+@bp.get("/api/ping")
+def ping():
+    """For uptime monitors (e.g. UptimeRobot): answers without touching the
+    database, so keeping the server awake does not keep Neon awake."""
+    return jsonify({"ok": True, "app": "SEO Audit Pro"})
 
 
 # ---------------------------------------------------------------------------

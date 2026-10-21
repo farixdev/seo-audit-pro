@@ -40,10 +40,34 @@ def _postgres_test_url():
         url = open(path, encoding="utf-8").read().strip()
     if not url:
         sys.exit("SEO_TEST_POSTGRES=1 needs SEO_TEST_DATABASE_URL or server_data/test_database_url.txt")
-    host = urlparse(url).hostname
-    if not host or host == _live_database_host():
+    def endpoint(h):  # Neon: the pooled and direct hosts of one database differ only by "-pooler"
+        return (h or "").split(".")[0].replace("-pooler", "")
+    host, live = urlparse(url).hostname, _live_database_host()
+    if not host or host == live or (live and endpoint(host) == endpoint(live)):
         sys.exit("Refusing to run tests: the test database URL points at the live database in .env.")
     return url
+
+
+def _one_postgres_run():
+    """Two runs on the same test database would wipe each other's tables."""
+    import atexit
+    path = os.path.join(ROOT, "server_data", "postgres_tests.lock")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            other = int(fh.read().strip() or 0)
+    except (OSError, ValueError):
+        other = 0
+    if other and other != os.getpid():
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, other) if sys.platform == "win32" else None
+        alive = bool(handle) if sys.platform == "win32" else os.path.exists(f"/proc/{other}")
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+        if alive:
+            sys.exit(f"Another PostgreSQL test run (process {other}) is using the test database.")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(str(os.getpid()))
+    atexit.register(lambda: os.path.exists(path) and os.remove(path))
 
 
 def _wipe_postgres(url):
@@ -60,6 +84,7 @@ def _wipe_postgres(url):
 _TMP = tempfile.mkdtemp(prefix="seo_audit_pro_test_")
 os.environ["SEO_DATA_DIR"] = _TMP
 POSTGRES = os.environ.get("SEO_TEST_POSTGRES") == "1"
+WAIT_SCALE = 10 if POSTGRES else 1  # a remote test database answers far slower than a local file
 if POSTGRES:
     _url = _postgres_test_url()
     os.environ["DATABASE_URL"] = _url
@@ -68,6 +93,7 @@ else:
     os.environ["DATABASE_URL"] = ""      # never touch a real database from tests
     os.environ["SEO_DB"] = "sqlite"
 os.environ["SEO_ENV"] = "test"
+os.environ["AUDITS_RUN_ON"] = "server"  # the queue tests drive the server's runner; test_app_runner switches to "app"
 os.environ["SECRET_KEY"] = "test-secret-key-" + uuid.uuid4().hex
 os.environ["DATA_ENCRYPTION_KEY"] = "test-data-key-" + uuid.uuid4().hex
 os.environ["EMAIL_SEND_INTERVAL_SECONDS"] = "0"
@@ -76,6 +102,7 @@ for key in ("GROQ_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_A
     os.environ[key] = ""
 
 if POSTGRES:
+    _one_postgres_run()
     _wipe_postgres(_url)
 
 from backend import db, security  # noqa: E402

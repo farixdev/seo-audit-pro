@@ -86,6 +86,11 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 MAX_CONCURRENT_AUDITS = int(os.environ.get("MAX_CONCURRENT_AUDITS", 2))  # default; Managers can change it in Settings
 
+# Where audits and report files are made. "app": on each person's own computer —
+# their desktop app runs the audits they queued and builds report files, and the
+# server only stores and shares the data. "server": the server does that work.
+AUDITS_RUN_ON = "server" if (os.environ.get("AUDITS_RUN_ON") or "").strip().lower() == "server" else "app"
+
 # Bulk outreach safety controls
 BULK_MAX_RECIPIENTS = int(os.environ.get("BULK_MAX_RECIPIENTS", 200))
 EMAIL_SEND_INTERVAL_SECONDS = float(os.environ.get("EMAIL_SEND_INTERVAL_SECONDS", 4))

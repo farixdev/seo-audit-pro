@@ -3,7 +3,7 @@
 
 from flask import Blueprint, g, jsonify, request
 
-from backend import config, db, events, mailer, security, uploads
+from backend import config, db, events, mailer, reports, security, uploads
 from backend.auth import AGENT, MANAGER, TEAM_LEAD, can_access_lead, idempotent, load_lead, require
 from backend.errors import ApiError, conflict, not_found
 from backend.util import EMAIL_RE, body, email_value, iso_ago, now_iso, page_args, paged, text
@@ -266,6 +266,14 @@ def _email_fields(data):
 
 
 def _queue(tx, email_id):
+    if reports.made_in_app():  # report files come from the sender's app; the server needs its copy to send them
+        missing = tx.query(
+            """SELECT r.id, r.audit_id, r.kind, r.format FROM email_attachments ea JOIN reports r ON r.id = ea.report_id
+               WHERE ea.email_id = %s AND NOT EXISTS (SELECT 1 FROM report_data d WHERE d.report_id = r.id)""",
+            (email_id,))
+        if missing:
+            raise ApiError(409, "The attached reports have not been sent from your app yet. Try again.",
+                           code="report_not_uploaded", reports=missing)
     tx.execute("UPDATE emails SET status = 'queued', queued_at = %s, updated_at = %s, error = NULL "
                "WHERE id = %s AND status IN ('draft', 'failed')", (now_iso(), now_iso(), email_id))
     if tx.rowcount != 1:

@@ -13,7 +13,7 @@ from seo_audit_pro.core import api, fmt, settings, tasks
 from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C, STATUS, score_color
 from seo_audit_pro.ui.pages.base import Page
-from seo_audit_pro.ui.pages.reports import pending_pdf, report_size
+from seo_audit_pro.ui.pages.reports import pending_file, report_size
 from seo_audit_pro.ui.pages.lead_dialogs import (AssignDialog, LeadFormDialog, load_assignees, set_archived,
                                                  start_audit)
 from seo_audit_pro.widgets.charts import ScoreRing
@@ -46,8 +46,8 @@ def download_report(page, row, open_after=False):
                 os.remove(target)  # the user confirmed overwriting in the save dialog
             except OSError:
                 pass
-    if pending_pdf(row):
-        toast(page, "Creating the PDF on the server — the first open takes a few seconds.", "info", 5000)
+    if pending_file(row):
+        toast(page, "Creating the report — the first open takes a few seconds.", "info", 5000)
     else:
         toast(page, "Downloading report…", "info", 1800)
 

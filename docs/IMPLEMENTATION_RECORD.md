@@ -261,12 +261,65 @@ fresh profile, started its own server in local mode and showed the Manager
 setup; closing the app normally or killing it stopped the server; a second
 launch exited and focused the first window.
 
+### Iteration 5: team server on Render, all heavy work on each computer (2026-10-22)
+
+The owner chose one shared team workspace (a server on Render's free plan with
+the Neon database) and asked that all processing run on each person's own
+computer, with the server only connecting the team; chat must not take files
+from outside, only leads and audit reports from the workspace.
+
+* **Audits run in the apps** (`AUDITS_RUN_ON=app`, the default). The app
+  claims the audits its user queued (`/api/audit-jobs/claim`, 2 at a time per
+  computer by default) and runs each in a background process at below-normal
+  priority (`seo_audit_pro/pc_jobs.py`, started as `SEOAuditPro.exe --job`).
+  The server turns the engine's progress messages into percent / step for
+  everyone watching and stores the result. PageSpeed goes through the server
+  so its key stays there. A closed app gives its audits back when it starts
+  again; a silent one loses them after 10 minutes; twice interrupted → failed.
+* **Reports made in the apps.** The auditing app sends both Word reports with
+  the result (one request), stored in `report_data` for the team. A PDF is made
+  by whoever opens it first (Word or LibreOffice on that computer) and stored
+  for everyone. Email and chat ask the app for its copy when the server has
+  none (`report_not_uploaded`).
+* **Lead files read in the apps.** Preview from headers, row count and a
+  sample; rows sent in gzip chunks of 1,000 in file order, resumable; the file
+  never leaves the computer. The server checks duplicates and stores.
+* **Chat**: no uploads (410 / 422); messages can share leads and audit reports
+  (`message_shares`); anyone in the conversation can open a shared report.
+* **Free-plan hosting**: no disk, so uploads and report files live in the
+  database (`upload_data`, `report_data`) and the disk is only a cache;
+  `/api/ping` for uptime monitors without touching the database; the idle email
+  worker no longer queries the database every 30 s (woken when an email is
+  queued), so Neon can suspend; the app waits up to 90 s for a sleeping server.
+* Fixes found on the way: regenerating reports deleted and re-inserted report
+  rows, which broke the foreign key from emails that had attached them (rows are
+  now updated in place); PDF conversion now works in a short temporary folder
+  (Word failed to open files in some folders); a background job's last lines
+  could be missed if it ended between two checks; a queued audit's page showed
+  "Waiting" for a few seconds after it started; the segmented control did not
+  paint its track; engine fetch errors are shown in plain words; two test
+  modules assumed SQLite.
+
+Verified: 82 automated tests on SQLite (new: `test_app_runner` 10,
+`test_app_imports` 3). In the real app against a local server: a real audit
+(debian.org, 3 pages) ran on this computer in 60 s with live progress and its
+Word reports stored for the team; a 2,301-row file was read here in 1.9 s and
+imported in 2.4 s (duplicates and the row without a website removed); a lead
+and a report were shared in the team channel (0.5 s) and the shared report
+opened by a teammate (0.2 s); a site that refuses connections fails with a clear
+message.
+
 ## 6. Known limitations
 
 * SSRF: the existing crawler follows redirects; a public site redirecting to an
   internal address is not blocked mid-crawl. Mitigated by the initial check.
-* Single API process by design (in-memory realtime hub, audit pool, email queue).
-* PDF requires Word or LibreOffice on the server.
+* Single API process by design (in-memory realtime hub, live audit logs, email queue).
+* Audits run only while the app of the person who queued them is open; queued
+  audits wait until then. The server trusts the result an app sends (it checks
+  its form and size, not that the engine produced it).
+* PDF requires Microsoft Word or LibreOffice on the computer that makes it
+  (or on the server in server mode); otherwise reports are delivered as DOCX.
+* An app left open overnight keeps Neon awake (presence pings every 25 s).
 * The Windows installer requires Inno Setup 6 at build time (script provided).
 * Engine authority and traffic figures are model estimates; the UI labels them
   "Estimated".

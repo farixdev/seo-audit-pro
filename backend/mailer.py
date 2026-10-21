@@ -124,27 +124,24 @@ def send_password_reset(user, code):
 # Outbound queue
 # ---------------------------------------------------------------------------
 def _attachments_for(email_id):
-    rows = db.query("""SELECT ea.report_id, ea.upload_id, r.stored_name AS r_stored, r.kind, r.format,
-                              up.stored_name AS u_stored, up.original_name, up.mime
+    rows = db.query("""SELECT ea.report_id, ea.upload_id, up.stored_name, up.original_name, up.mime
                        FROM email_attachments ea
-                       LEFT JOIN reports r ON r.id = ea.report_id
                        LEFT JOIN uploads up ON up.id = ea.upload_id
                        WHERE ea.email_id = %s""", (email_id,))
-    from backend import reports
+    from backend import reports, uploads
 
     out = []
     for r in rows:
         if r["report_id"]:
-            mime = "application/pdf" if r["format"] == "pdf" else \
+            # Rendered on first use (PDF) or rebuilt after a restart wiped the disk.
+            rep = reports.ensure_file(db.query_one("SELECT * FROM reports WHERE id = %s", (r["report_id"],)))
+            mime = "application/pdf" if rep["format"] == "pdf" else \
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            if r["format"] == "pdf":  # PDFs are rendered on first use
-                rep = reports.ensure_pdf(db.query_one("SELECT * FROM reports WHERE id = %s", (r["report_id"],)))
-                r["r_stored"] = rep["stored_name"]
-            path = os.path.join(config.REPORTS_DIR, r["r_stored"])
-            label = "SEO-Audit-Report" if r["kind"] == "client" else "SEO-Technical-Audit"
-            out.append((f"{label}.{r['format']}", mime, path))
+            label = "SEO-Audit-Report" if rep["kind"] == "client" else "SEO-Technical-Audit"
+            out.append((f"{label}.{rep['format']}", mime, reports.report_path(rep)))
         else:
-            out.append((r["original_name"], r["mime"], os.path.join(config.UPLOAD_DIR, r["u_stored"])))
+            path = uploads.upload_path({"id": r["upload_id"], "stored_name": r["stored_name"]})
+            out.append((r["original_name"], r["mime"], path))
     return out
 
 
@@ -216,7 +213,9 @@ def _worker():
         elif outcome == "raced":
             continue
         else:
-            _WAKE.wait(60 if outcome in ("limited", "error") else 30)
+            # Idle: sleep until an email is queued (wake()), so an idle server leaves the
+            # database alone and Neon can suspend it. The daily limit is checked again later.
+            _WAKE.wait({"limited": 900, "error": 60}.get(outcome, 6 * 3600))
             _WAKE.clear()
 
 

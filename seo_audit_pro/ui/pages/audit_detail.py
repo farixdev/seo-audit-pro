@@ -22,7 +22,7 @@ from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C, MONO_FAMILY, SEVERITY, STATUS, score_color
 from seo_audit_pro.ui.pages.base import Page
 from seo_audit_pro.ui.pages.lead_dialogs import start_audit
-from seo_audit_pro.ui.pages.reports import (PDF_UNAVAILABLE, export_json, notice_frame, open_remote, report_label,
+from seo_audit_pro.ui.pages.reports import (export_json, pdf_notice, notice_frame, open_remote, report_label,
                                             report_menu, report_size, view_client_report)
 from seo_audit_pro.widgets.charts import ScoreRing
 from seo_audit_pro.widgets.common import (Badge, BusyButton, Card, MetricStrip, StatefulArea, StateView, button, hbox,
@@ -521,6 +521,9 @@ class AuditDetailPage(Page):
         if status in ("completed", "failed", "cancelled"):
             self.load_audit()
             return
+        if status == "running" and self.audit.get("status") == "queued":
+            self.load_audit()  # it just started: fetch the start time and first log lines now
+            return
         for k in ("status", "percent", "step", "pages_processed", "pages_discovered"):
             if k in ev:
                 self.audit[k] = ev[k]
@@ -557,6 +560,12 @@ class AuditDetailPage(Page):
 
         def done(res):
             self.btn_regen.busy(False)
+            if res.get("made_in_app"):
+                from seo_audit_pro.core import pc_work
+                pc_work.forget_reports(self.audit_id)
+                toast(self, "Reports will be made again on this computer when you open them.", "success")
+                self.load_reports()
+                return
             warn = res.get("warnings") or []
             toast(self, "Reports regenerated." + (f" Note: {'; '.join(warn)}." if warn else ""),
                   "success" if not warn else "warning")
@@ -997,9 +1006,9 @@ class AuditDetailPage(Page):
             for row in rows:
                 row.setdefault("normalized_domain", (self.audit or {}).get("normalized_domain"))
             self.r_table.set_rows(rows)
-            has_pdf = any(r.get("format") == "pdf" for r in rows)
-            self.r_notice.text.setText(PDF_UNAVAILABLE)
-            self.r_notice.setVisible(not has_pdf and not data.get("pdf_supported", True))
+            pdf_ok, notice = pdf_notice(data)
+            self.r_notice.text.setText(notice)
+            self.r_notice.setVisible(not pdf_ok)
             if rows:
                 self.r_area.ready()
             else:

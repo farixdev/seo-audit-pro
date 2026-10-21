@@ -14,7 +14,7 @@ from tests import helpers
 import crawler
 from backend import realtime
 
-assert helpers.os.environ["SEO_DB"] == "sqlite"  # importing helpers isolated the environment
+assert helpers.POSTGRES or helpers.os.environ["SEO_DB"] == "sqlite"  # importing helpers isolated the environment
 
 BIG = b"<!doctype html><html><head><title>Big</title></head><body>" + b"<p>row</p>" * 600_000 + b"</body></html>"
 SERVED = {}

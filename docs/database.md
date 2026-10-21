@@ -19,20 +19,23 @@ both engines.
 | `sessions` | Refresh-token sessions | `refresh_hash` unique; FK user |
 | `password_resets` | Emailed reset codes (hashed) | FK user |
 | `login_attempts` | Lockout accounting | index (email, created_at) |
-| `uploads` | Stored files (chat/email attachments, avatars) | `stored_name` unique; purpose check |
+| `uploads` | Stored files (email attachments, avatars; chat attachments of older messages) | `stored_name` unique; purpose check |
+| `upload_data` | A database copy of every upload (the server's uploads folder is only a cache) | PK/FK upload_id |
 | `leads` | Lead bank: company, website, `niche`/`area` (+ lower-case `niche_key`/`area_key`), address, category, Google `rating`/`review_count`, `maps_url`, `extra` (unmapped columns as JSON), `batch_id` (source file) | `normalized_domain` unique; status check; agent requires team; `version` for optimistic locking; indexes on agent, team, status, email_key, phone_key, company_key, created_at, (niche_key, area_key), area_key, batch_id, (team, status), last_contact_at |
 | `lead_batches` | One imported file: status (`pending → queued → processing → completed/failed/cancelled`), column mapping, counters (`total_rows`, `processed_rows`, `imported`, `duplicates`, `no_website`, `invalid`), target team/agent | status check |
 | `lead_batch_rejects` | Every row removed from an import, with its row number, raw values and reason (`no_website`, `invalid_website`, `duplicate_in_file`, `duplicate_existing`) | reason check; FK batch |
 | `lead_assignments` | Assignment history (who/when/from/to/reason) | FK lead, changed_by |
-| `audits` | Audit runs + live progress + summary; `status = 'queued'` rows are the audit queue (`priority` 1 = single audit, 0 = bulk; `params` = crawl settings; `attempts` counts starts; `batch_id`) | status check; partial unique index: one queued/running audit per lead; indexes on lead, status, created_at, requested_by, (status, priority, created_at), (batch_id, status) |
+| `audits` | Audit runs + live progress + summary; `status = 'queued'` rows are the audit queue (`priority` 1 = single audit, 0 = bulk; `params` = crawl settings; `attempts` counts starts; `batch_id`; `runner` = the computer running it, `heartbeat_at` = its last report) | status check; partial unique index: one queued/running audit per lead; indexes on lead, status, created_at, requested_by, (status, priority, created_at), (batch_id, status) |
 | `audit_batches` | One bulk audit: label, creator, team, `total`, skipped counts (JSON), status `active → completed/cancelled` | status check |
 | `audit_results` | Full engine result per audit, gzip-compressed JSON (`raw_size`, `stored_size`) | PK audit_id |
 | `audit_issue_states` | Resolved/unresolved per finding | PK (audit_id, check_id) |
-| `reports` | Generated report files; `ready = 0` marks a PDF created on first open | unique (audit_id, kind, format) |
+| `reports` | Report files of an audit; `ready = 0` marks a file not made yet (made on first open) | unique (audit_id, kind, format) |
+| `report_data` | The file bytes of a report (sent by the app that made it); the server's reports folder is only a cache | PK/FK report_id |
 | `smtp_settings` | Single row; encrypted password | `id = 'default'` check; port range check |
 | `app_settings` | JSON settings (audit defaults) | PK key |
 | `email_batches`, `emails`, `email_attachments` | Outreach | status check; attachment is exactly one of report/upload |
 | `conversations`, `conversation_reads`, `messages`, `message_attachments`, `message_reactions` | Chat | one team channel per team; one direct conversation per user pair (`user_a < user_b`); reaction check |
+| `message_shares` | A lead or audit report shared in a message, with a JSON `snapshot` of what was shared | PK (message_id, kind, ref_id); kind check |
 | `notifications` | Per-user notifications | index (user_id, is_read, created_at) |
 | `audit_logs` | Immutable audit trail | UPDATE/DELETE rejected by trigger; indexes on user, created_at, action, entity |
 | `idempotency_keys` | Replay protection | PK (user_id, key) |
@@ -51,6 +54,9 @@ and `server_data/history/`; they are still readable and are copied into
 | 1 | Initial schema |
 | 2 | Lead bank: renames `leads.industry` → `niche` and `location` → `area`, adds the GMB columns and indexes above, creates `lead_batches` and `lead_batch_rejects`, drops the CV bank (`candidates`). On PostgreSQL it also tries to enable `pg_trgm` and add trigram indexes for fast company/domain search; if the extension is not allowed the server logs it and search still works (just slower on very large banks) |
 | 3 | Audit queue: `audit_batches`, `audit_results`, `audits.batch_id / priority / params / attempts`, `reports.ready` |
+| 4 | `upload_data`: a database copy of every uploaded file |
+| 5 | Work in the apps: `audits.runner / heartbeat_at`, `report_data` |
+| 6 | Chat shares: `message_shares` |
 
 ## Integrity rules worth knowing
 

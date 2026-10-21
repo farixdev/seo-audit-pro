@@ -103,7 +103,7 @@ class AuditQueueTests(unittest.TestCase):
         """Let audits from an earlier test finish so each test starts with an empty queue."""
         for url in list(self.engine.gates):
             self.engine.release(url)
-        for _ in range(400):
+        for _ in range(400 * h.WAIT_SCALE):
             if not db.scalar("SELECT COUNT(*) FROM audits WHERE status IN ('queued', 'running')"):
                 return
             time.sleep(0.05)
@@ -128,7 +128,7 @@ class AuditQueueTests(unittest.TestCase):
         return pv, r
 
     def wait_for(self, cond, what):
-        for _ in range(400):
+        for _ in range(400 * h.WAIT_SCALE):
             if cond():
                 return
             time.sleep(0.025)

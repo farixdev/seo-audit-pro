@@ -2,14 +2,14 @@
 """
 Import scraped lead files (Google Maps / GMB exports) into the lead bank.
 
-Many files can be added at once (picker or drag and drop). Each file is
-uploaded for a server-side preview, which detects the columns and guesses the
-niche and area from the file name; both stay editable. Nothing is imported
-until "Import" — then each file becomes an import batch processed on the
-server, which removes rows without a website and duplicates and reports them.
+Many files can be added at once (picker or drag and drop). Each file is read
+on this computer for a preview, which detects the columns and guesses the niche
+and area from the file name; both stay editable. Nothing is imported until
+"Import" — then this computer sends the rows in chunks and the server checks
+them against the lead bank, removing rows without a website and duplicates and
+reporting them. The file itself never leaves this computer.
 """
 
-import mimetypes
 import os
 
 from PySide6.QtCore import Signal
@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QHeade
                                QToolButton, QWidget)
 
 from seo_audit_pro import icons
-from seo_audit_pro.core import api, fmt, tasks
+from seo_audit_pro.core import api, fmt, pc_work, tasks
 from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C
 from seo_audit_pro.ui.pages.lead_dialogs import AssigneePicker
@@ -30,10 +30,7 @@ COL_FILE, COL_STATUS, COL_NICHE, COL_AREA, COL_SITE, COL_REMOVE = range(6)
 
 
 def _upload(path):
-    name = os.path.basename(path)
-    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
-    with open(path, "rb") as fh:
-        return api.request("POST", "/api/lead-imports", files={"file": (name, fh, mime)}, data={}, timeout=600)
+    return pc_work.import_preview(path)  # read here; only column names, row count and a sample go to the server
 
 
 class _FileRow:
@@ -265,6 +262,7 @@ class ImportFilesDialog(Dialog):
 
             def done(res, row=row):
                 row.state = "started"
+                pc_work.imports().add(res["batch"]["id"])  # this computer sends the rows
                 self.started.append(res["batch"])
                 row.status.setText("Importing in the background")
                 self._finish_one()

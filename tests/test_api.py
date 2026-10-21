@@ -17,7 +17,7 @@ import time
 import unittest
 
 from tests import helpers as h
-from backend import audit_runner, db, mailer
+from backend import audit_runner, config, db, mailer
 
 import audit as engine
 import history_manager
@@ -417,6 +417,7 @@ class AuditWorkflowTests(Base):
             dl = self.c.get(f"/api/reports/{rep['id']}/download", headers=self.H["agent_a1"])
             self.assertEqual(dl.status_code, 200)
             self.assertTrue(dl.data.startswith(b"PK" if rep["format"] == "docx" else b"%PDF"))
+            dl.close()
         rep_id = reps[0]["id"]
         self.assertEqual(self.c.get(f"/api/reports/{rep_id}/download", headers=self.H["agent_b1"]).status_code, 404)
         html = self.c.get(f"/api/audits/{audit_id}/client-html", headers=self.H["agent_a1"])
@@ -473,6 +474,20 @@ class AuditWorkflowTests(Base):
             self.assertEqual(self.c.get(f"/api/outreach/emails/{eid}", headers=self.H["agent_a2"]).status_code, 404)
             lead_now = self.c.get(f"/api/leads/{lead['id']}", headers=self.H["agent_a1"]).get_json()["lead"]
             self.assertEqual(lead_now["status"], "contacted")
+
+            # The reports folder is only a cache: Word reports wiped from disk are made again
+            # from the stored result, and regenerating keeps the ids the sent email points at.
+            for name in glob.glob(os.path.join(config.REPORTS_DIR, f"{audit_id}-*.docx")):
+                os.remove(name)
+            for rep in (r for r in reps if r["format"] == "docx"):
+                dl = self.c.get(f"/api/reports/{rep['id']}/download", headers=self.H["agent_a1"])
+                self.assertEqual(dl.status_code, 200, dl.get_json(silent=True))
+                self.assertTrue(dl.data.startswith(b"PK"))
+                dl.close()
+            regen = self.c.post(f"/api/audits/{audit_id}/reports", headers=self.H["agent_a1"])
+            self.assertEqual(regen.status_code, 200, regen.get_json())
+            again = self.c.get(f"/api/reports?audit_id={audit_id}", headers=self.H["agent_a1"]).get_json()["items"]
+            self.assertEqual({r["id"] for r in again}, {r["id"] for r in reps})
 
             # Bulk: preview + explicit confirmation; recently contacted lead is skipped.
             prev = self.c.post("/api/outreach/bulk/preview", json={"lead_ids": [lead["id"]]}, headers=self.H["agent_a1"]).get_json()
@@ -543,26 +558,44 @@ class ChatTests(Base):
         self.assertGreaterEqual(len([c for c in mgr if c["type"] == "team"]), 2)
 
     def test_upload_validation(self):
+        # Chat takes no files at all (people share leads and audit reports instead).
+        good = (io.BytesIO(b"%PDF-1.4\n%test\n"), "notes.pdf")
+        r = self.c.post("/api/chat/uploads", data={"file": good}, headers=self.H["agent_a1"], content_type="multipart/form-data")
+        self.assertEqual((r.status_code, r.get_json()["code"]), (410, "chat_files_off"))
+        conv = self.c.get("/api/chat/conversations", headers=self.H["agent_a1"]).get_json()["items"][0]
+        r = self.c.post(f"/api/chat/conversations/{conv['id']}/messages", json={"body": "x", "upload_ids": ["upl_1"]},
+                        headers=self.H["agent_a1"])
+        self.assertEqual(r.status_code, 422)
+
+        # Email attachments: content sniffing, allow-list, safe names.
         fake_pdf = (io.BytesIO(b"MZ\x90\x00 this is an exe"), "cv.pdf")
-        r = self.c.post("/api/chat/uploads", data={"file": fake_pdf}, headers=self.H["agent_a1"],
+        r = self.c.post("/api/outreach/uploads", data={"file": fake_pdf}, headers=self.H["agent_a1"],
                         content_type="multipart/form-data")
         self.assertEqual(r.status_code, 422)
         exe = (io.BytesIO(b"MZ\x90\x00"), "tool.exe")
-        r = self.c.post("/api/chat/uploads", data={"file": exe}, headers=self.H["agent_a1"], content_type="multipart/form-data")
+        r = self.c.post("/api/outreach/uploads", data={"file": exe}, headers=self.H["agent_a1"],
+                        content_type="multipart/form-data")
         self.assertEqual(r.status_code, 422)
         good = (io.BytesIO(b"%PDF-1.4\n%test\n"), "../../etc/passwd.pdf")
-        r = self.c.post("/api/chat/uploads", data={"file": good}, headers=self.H["agent_a1"], content_type="multipart/form-data")
-        self.assertEqual(r.status_code, 201)
+        r = self.c.post("/api/outreach/uploads", data={"file": good}, headers=self.H["agent_a1"],
+                        content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 201, r.get_json())
         self.assertEqual(r.get_json()["upload"]["name"], "passwd.pdf")
-        up_id = r.get_json()["upload"]["id"]
-        self.assertEqual(self.c.get(f"/api/chat/attachments/{up_id}", headers=self.H["agent_b1"]).status_code, 404)
+        row = db.query_one("SELECT * FROM uploads WHERE id = %s", (r.get_json()["upload"]["id"],))
+
+        # The uploads folder is only a cache: a file wiped from disk (a restart on a host
+        # without a persistent disk) comes back from the database copy.
+        from backend import uploads
+        os.remove(os.path.join(config.UPLOAD_DIR, row["stored_name"]))
+        with open(uploads.upload_path(row), "rb") as fh:
+            self.assertEqual(fh.read(), b"%PDF-1.4\n%test\n")
 
 
 class NotificationsAndDashboardTests(Base):
     def test_cv_bank_removed(self):
         self.assertEqual(self.c.get("/api/cv-bank", headers=self.H["manager"]).status_code, 404)
-        self.assertNotIn("candidates", [r["name"] for r in db.query(
-            "SELECT name FROM sqlite_master WHERE type = 'table'")])
+        tables = "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public'"             if db.DIALECT == "postgres" else "SELECT name FROM sqlite_master WHERE type = 'table'"
+        self.assertNotIn("candidates", [r["name"] for r in db.query(tables)])
 
     def test_notifications_scoped_and_mark_read(self):
         self.create_lead("manager", agent_id=self.agent_a1["id"])

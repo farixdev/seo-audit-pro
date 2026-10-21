@@ -600,7 +600,7 @@ class AuthView(QWidget):
                 settings.set_api_url(previous)
             self.pages["server"].notice(err.message)
 
-        tasks.run(api.health, on_done=done, on_error=fail, owner=self)
+        tasks.run(api.health, timeout=90, on_done=done, on_error=fail, owner=self)  # a sleeping server wakes slowly
 
     def set_offline_notice(self, text):
         self.show_page("signin", text, "error")

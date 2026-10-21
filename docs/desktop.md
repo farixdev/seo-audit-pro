@@ -100,8 +100,10 @@ millions of rows.
   Audits › Queue; you get one notification when the batch finishes.
 * **Import files**: drop or pick many CSV/XLSX files at once. Each file's niche
   and area are read from its name (editable) and its website column is detected.
-  Imports run on the server in the background with live progress; rows without
-  a website and leads already in the bank are removed.
+  Files are read on this computer (only the rows go to the server) in the
+  background with live progress; rows without a website and leads already in
+  the bank are removed. Closing the app pauses an import; it continues from the
+  last stored row the next time the app starts (if the file is still there).
 * **Imports tab**: every file with rows read, leads added, duplicates and
   no-website counts; open a file's leads, see each removed row and why, or
   download the removed rows as CSV.
@@ -111,17 +113,23 @@ millions of rows.
 
 ## Audits and the queue
 
-Audits run on the server, never on the laptop. The **Queue** tab of Audits
-shows how many run at a time, how many are waiting (and how many are yours),
-the average audit time and when the queue will be empty; every bulk audit with
-its progress and time left (cancel it from its menu); and every audit that is
-running or waiting, with its place in line. A single **Start audit** goes ahead
-of bulk audits. Managers set how many audits run at a time in Settings (2 suits
-a 4 GB server).
+Audits run on the computer of the person who queued them (`core/pc_work.py`
+asks the server for that person's next audits; each runs in its own background
+process at below-normal priority, `pc_jobs.py`). Everyone with access sees the
+progress live. The app must be open for its audits to run: queued audits wait,
+and audits that were running when the app closed go back to the queue (once)
+when it starts again. The **Queue** tab of Audits shows how many run at a time,
+how many are waiting (and how many are yours), the average audit time and when
+the queue will be empty; every bulk audit with its progress and time left
+(cancel it from its menu); and every audit that is running or waiting, with its
+place in line. A single **Start audit** goes ahead of bulk audits. Managers set
+how many audits run at a time on each computer in Settings (2 suits 4 GB of
+memory).
 
-Word reports are ready when an audit completes. PDFs are created on the server
-the first time someone opens or emails them (a few seconds); lists show "Made
-when first opened" until then. Actions
+Both Word reports are made on the auditing computer and stored for the whole
+team when the audit completes. A PDF is made by the computer of whoever opens
+or emails it first (it needs Microsoft Word or LibreOffice there) and is then
+stored for everyone; lists show "Made when first opened" until then. Actions
 that create or send are disabled while running and carry idempotency keys, so
 double-clicks cannot duplicate work.
 

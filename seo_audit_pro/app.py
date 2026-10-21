@@ -95,10 +95,21 @@ class Startup:
         server = settings.api_url()
         self.step("Initializing secure session…", 0.62)
         stored = session.stored_refresh()
-        where = "this computer" if settings.mode() == settings.LOCAL else server.split("://", 1)[-1]
+        local = settings.mode() == settings.LOCAL
+        where = "this computer" if local else server.split("://", 1)[-1]
         self.step(f"Connecting to {where}…", 0.7)
+        answered = []
+
+        def slow():  # a free cloud server sleeps when nobody uses it and needs up to a minute to wake
+            if not answered:
+                self.step("Waking the team server, this can take up to a minute…", 0.75)
+
+        if not local:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(6000, slow)
 
         def connected(_health):
+            answered.append(True)
             if stored and stored.get("refresh_token"):
                 self.step("Restoring your session…", 0.8)
                 session.refresh_token = stored["refresh_token"]
@@ -120,9 +131,10 @@ class Startup:
                 self.finish("workspace")
 
         def offline(err):
+            answered.append(True)
             self.finish("signin", f"Server unavailable — {err.message} You can retry signing in or change the server address.")
 
-        tasks.run(api.health, timeout=30, on_done=connected, on_error=offline)  # a cloud server can be slow to wake
+        tasks.run(api.health, timeout=10 if local else 90, on_done=connected, on_error=offline)
 
     def finish(self, target, notice=None, kind="error"):
         self.step("Ready", 1.0)

@@ -484,6 +484,7 @@ class Segmented(QWidget):
     def __init__(self, options, current=None):
         super().__init__()
         self.setObjectName("Segmented")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # paint the track from the stylesheet
         self.setStyleSheet(
             f"#Segmented {{ background: #EDEDF0; border-radius: 7px; }}"
             f"#Segmented QPushButton {{ border: none; background: transparent; min-height: 26px; padding: 0 12px;"

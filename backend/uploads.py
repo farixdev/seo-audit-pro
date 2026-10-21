@@ -7,11 +7,15 @@ Safe file uploads.
 * Size limits
 * Random stored names; the original filename is only kept as display text
 * Files are always served as attachments by id, never by path
+* A copy of every file is kept in the database (``upload_data``); the uploads
+  folder is only a cache, so files survive on a server whose disk is wiped on
+  every restart (Render's free plan)
 """
 
 import hashlib
 import os
 import re
+import threading
 import zipfile
 
 from backend import config, db, security
@@ -107,20 +111,34 @@ def save_upload(file_storage, owner_id, purpose):
     if not _sniff_ok(ext, head, path):
         os.remove(path)
         raise ApiError(422, "The file content does not match its type.")
+    with open(path, "rb") as fh:
+        data = fh.read()
     row = {"id": upload_id, "owner_id": owner_id, "purpose": purpose, "original_name": display,
            "stored_name": stored, "mime": _MIME[ext], "size_bytes": size, "sha256": sha.hexdigest(),
            "created_at": now_iso()}
-    db.execute("INSERT INTO uploads (id, owner_id, purpose, original_name, stored_name, mime, size_bytes, sha256, created_at) "
-               "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-               tuple(row[k] for k in ("id", "owner_id", "purpose", "original_name", "stored_name", "mime",
-                                      "size_bytes", "sha256", "created_at")))
+    with db.transaction() as tx:
+        tx.execute("INSERT INTO uploads (id, owner_id, purpose, original_name, stored_name, mime, size_bytes, sha256, "
+                   "created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                   tuple(row[k] for k in ("id", "owner_id", "purpose", "original_name", "stored_name", "mime",
+                                          "size_bytes", "sha256", "created_at")))
+        tx.execute("INSERT INTO upload_data (upload_id, data) VALUES (%s, %s)", (upload_id, data))
     return row
 
 
 def upload_path(row):
+    """The upload's file on disk, written back from the database copy when the
+    disk no longer has it."""
     path = os.path.realpath(os.path.join(config.UPLOAD_DIR, row["stored_name"]))
-    if not path.startswith(os.path.realpath(config.UPLOAD_DIR) + os.sep) or not os.path.isfile(path):
+    if not path.startswith(os.path.realpath(config.UPLOAD_DIR) + os.sep):
         raise not_found("File")
+    if not os.path.isfile(path):
+        copy = db.query_one("SELECT data FROM upload_data WHERE upload_id = %s", (row["id"],))
+        if not copy:
+            raise not_found("File")
+        part = f"{path}.{threading.get_ident()}.part"
+        with open(part, "wb") as fh:
+            fh.write(bytes(copy["data"]))
+        os.replace(part, path)
     return path
 
 

@@ -20,6 +20,7 @@ bp = Blueprint("admin", __name__)
 @require(MANAGER)
 def get_settings():
     return jsonify({"audit_defaults": audit_runner.audit_settings(), "pdf_supported": reports.pdf_supported(),
+                    "made_in_app": reports.made_in_app(),
                     "pagespeed_key_set": bool(audit_runner.pagespeed_key())})
 
 

@@ -46,6 +46,7 @@ def _http():
     if s is None:
         s = requests.Session()
         s.headers["User-Agent"] = f"SEOAuditPro-Desktop/{APP_VERSION}"
+        s.headers["X-Device-Id"] = settings.device_id()  # which computer runs an audit
         _local.s = s
     return s
 
@@ -170,14 +171,9 @@ def delete(path, **kw):
     return request("DELETE", path, **kw)
 
 
-def download(path, dest_dir=None, filename=None, params=None):
-    """Stream a file to disk. Returns the saved path."""
-    resp = request("GET", path, params=params, stream=True, timeout=300)  # first PDF open renders it on the server
-    name = filename
-    if not name:
-        cd = resp.headers.get("Content-Disposition", "")
-        if "filename=" in cd:
-            name = cd.split("filename=", 1)[1].strip().strip('"').split(";")[0]
+def unique_target(name, dest_dir=None):
+    """A path in ``dest_dir`` (default: the downloads folder) for ``name`` that
+    does not overwrite an existing file."""
     name = os.path.basename(name or "download")
     name = "".join(ch for ch in name if ch not in '<>:"/\\|?*') or "download"
     dest_dir = dest_dir or settings.downloads_dir()
@@ -188,6 +184,25 @@ def download(path, dest_dir=None, filename=None, params=None):
     while os.path.exists(target):
         target = f"{base} ({n}){ext}"
         n += 1
+    return target
+
+
+def download(path, dest_dir=None, filename=None, params=None):
+    """Stream a file to disk. Returns the saved path. A report the server asks
+    this app to make (``build_in_app``) is built on this computer instead."""
+    try:
+        resp = request("GET", path, params=params, stream=True, timeout=300)  # a server may render a PDF first
+    except ApiError as e:
+        if e.code != "build_in_app":
+            raise
+        from seo_audit_pro.core import pc_work
+        return pc_work.save_report(e.data, dest_dir, filename)
+    name = filename
+    if not name:
+        cd = resp.headers.get("Content-Disposition", "")
+        if "filename=" in cd:
+            name = cd.split("filename=", 1)[1].strip().strip('"').split(";")[0]
+    target = unique_target(name, dest_dir)
     tmp = target + ".part"
     with open(tmp, "wb") as fh:
         for chunk in resp.iter_content(64 * 1024):
