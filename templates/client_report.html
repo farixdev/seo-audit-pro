@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Executive SEO Risk & Vulnerability Audit — {{ client_data.domain }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>{{ lucide_js|safe }}</script>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --primary-subtle: #eff6ff;
+      --bg-base: #f8fafc;
+      --bg-surface: #ffffff;
+      --bg-subtle: #f1f5f9;
+      --border-subtle: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --text-subtle: #94a3b8;
+      --color-critical: #dc2626;
+      --color-critical-dark: #991b1b;
+      --color-critical-bg: #fef2f2;
+      --color-high: #ea580c;
+      --color-high-bg: #fff7ed;
+      --color-medium: #d97706;
+      --color-medium-bg: #fffbeb;
+      --color-pass: #16a34a;
+      --color-pass-bg: #f0fdf4;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+      --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.04);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---- Floating Action Header ---- */
+    .client-nav-bar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 10px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: var(--shadow-sm);
+    }
+    .client-nav-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .client-nav-brand {
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--color-critical);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .client-nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s ease;
+      border: 1px solid transparent;
+    }
+    .btn-primary {
+      background: var(--color-critical);
+      color: #ffffff;
+    }
+    .btn-primary:hover {
+      background: var(--color-critical-dark);
+    }
+    .btn-secondary {
+      background: #ffffff;
+      color: var(--text-main);
+      border-color: var(--border-subtle);
+    }
+    .btn-secondary:hover {
+      background: var(--bg-subtle);
+      border-color: var(--border-strong);
+    }
+
+    /* ---- Page Container ---- */
+    .report-wrap {
+      max-width: 1100px;
+      margin: 24px auto 60px;
+      padding: 0 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 22px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* ---- Hero Header Card ---- */
+    .hero-card {
+      background: linear-gradient(135deg, #ffffff 0%, #fef2f2 100%);
+      border: 1px solid rgba(220, 38, 38, 0.25);
+      border-radius: var(--radius-lg);
+      padding: 24px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+    .hero-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #dc2626 0%, #ea580c 50%, #d97706 100%);
+    }
+    .hero-title-area h1 {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: var(--text-main);
+      margin-bottom: 6px;
+    }
+    .hero-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px;
+      border-radius: 9999px;
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .badge-primary { background: var(--primary-subtle); color: var(--primary); }
+    .badge-critical { background: var(--color-critical-bg); color: var(--color-critical); border: 1px solid rgba(220, 38, 38, 0.3); }
+    .badge-high { background: var(--color-high-bg); color: var(--color-high); border: 1px solid rgba(234, 88, 12, 0.3); }
+    .badge-medium { background: var(--color-medium-bg); color: var(--color-medium); border: 1px solid rgba(217, 119, 6, 0.3); }
+    .badge-pass { background: var(--color-pass-bg); color: var(--color-pass); border: 1px solid rgba(22, 163, 74, 0.3); }
+    .badge-subtle { background: var(--bg-subtle); color: var(--text-muted); }
+
+    /* ---- Grid 2 Columns ---- */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 860px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+
+    /* ---- Threat Hero Box ---- */
+    .threat-hero-box {
+      background: linear-gradient(135deg, #450a0a 0%, #7f1d1d 50%, #991b1b 100%);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 4px 14px rgba(153, 27, 27, 0.35);
+    }
+    .threat-tag {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 3px 12px;
+      border-radius: 9999px;
+      margin-bottom: 8px;
+    }
+    .threat-number {
+      font-size: 56px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      margin: 4px 0;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+    .threat-label {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #fecaca;
+    }
+
+    /* Stat Pills Row */
+    .stat-pills-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 10px;
+      margin-top: 12px;
+    }
+    .stat-pill {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .stat-pill-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .stat-pill-val {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--text-main);
+      margin-top: 2px;
+    }
+
+    /* ---- Defect Category Section Card ---- */
+    .section-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 22px;
+      box-shadow: var(--shadow-sm);
+      border-left: 4px solid var(--color-critical);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .section-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .section-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-alert-box {
+      font-size: 12.5px;
+      color: #991b1b;
+      background: #fef2f2;
+      border: 1px solid rgba(220, 38, 38, 0.2);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      line-height: 1.5;
+    }
+
+    /* Defect Items Grid */
+    .defect-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .defect-card {
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: all 0.15s ease;
+    }
+    .defect-card:hover {
+      border-color: var(--border-strong);
+      box-shadow: var(--shadow-sm);
+    }
+    .defect-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .defect-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .defect-detail {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .defect-urls {
+      font-size: 11px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 6px 10px;
+      color: var(--text-muted);
+      word-break: break-all;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .defect-solution {
+      font-size: 12px;
+      background: var(--primary-subtle);
+      border-left: 3px solid var(--primary);
+      padding: 6px 10px;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      color: var(--primary-dark);
+      line-height: 1.45;
+    }
+    .defect-solution strong {
+      color: var(--text-main);
+    }
+
+    /* ---- Recommended Priority Order Section ---- */
+    .tier-block {
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      background: #ffffff;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .tier-header {
+      background: var(--bg-subtle);
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .tier-header-left {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .tier-name {
+      font-size: 14.5px;
+      font-weight: 800;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tier-objective {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .tier-items-container {
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* Action Item Card */
+    .action-card {
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: border-color 0.15s ease;
+    }
+    .action-card:hover {
+      border-color: var(--border-strong);
+    }
+    .action-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .action-card-left {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .action-card-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .action-card-detail {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .action-urls-box {
+      font-size: 11px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 6px 10px;
+      color: var(--text-muted);
+      word-break: break-all;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .action-solution-box {
+      font-size: 12px;
+      background: var(--primary-subtle);
+      border-left: 3px solid var(--primary);
+      padding: 6px 10px;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      color: var(--primary-dark);
+    }
+    .action-impact-box {
+      font-size: 12px;
+      background: var(--color-critical-bg);
+      border-left: 3px solid var(--color-critical);
+      padding: 6px 10px;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      color: #7f1d1d;
+    }
+
+    /* ---- Implementation Roadmap ---- */
+    .roadmap-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    @media (max-width: 768px) {
+      .roadmap-grid { grid-template-columns: 1fr; }
+    }
+    .roadmap-col {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .roadmap-phase-num {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .roadmap-phase-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .roadmap-phase-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* ---- Turnkey Partner Box ---- */
+    .agency-partner-box {
+      background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+      border: 1px solid #bfdbfe;
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    /* ---- Footer ---- */
+    .client-footer {
+      text-align: center;
+      padding: 24px 0 10px;
+      font-size: 11.5px;
+      color: var(--text-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    /* ---- Print Stylesheet ---- */
+    @media print {
+      .client-nav-bar,
+      .no-print {
+        display: none !important;
+      }
+      body {
+        background: #ffffff !important;
+        color: #0f172a !important;
+        font-size: 11pt !important;
+      }
+      .report-wrap {
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        gap: 14px !important;
+      }
+      .card, .tier-block, .action-card, .section-card {
+        box-shadow: none !important;
+        border: 1px solid #cbd5e1 !important;
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+      }
+      .hero-card, .threat-hero-box {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .badge, .action-solution-box, .action-impact-box, .defect-solution {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .tier-block {
+        margin-bottom: 14px !important;
+      }
+      @page {
+        margin: 12mm 15mm;
+        size: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Floating Toolbar (Screen only) -->
+  <header class="client-nav-bar no-print">
+    <div class="client-nav-left">
+      <div class="client-nav-brand">
+        <i data-lucide="shield-alert" style="width: 18px; height: 18px;"></i>
+        <span>MINDCOB SEO AUDIT PRO</span>
+      </div>
+      <span class="badge" style="background: {{ client_data.threat_badge_color }}; color: #fff;">{{ client_data.threat_level }}</span>
+    </div>
+
+    <div class="client-nav-actions">
+      <button class="btn btn-primary" onclick="window.print()">
+        <i data-lucide="printer" style="width: 14px; height: 14px;"></i>
+        <span>Print / Save to PDF</span>
+      </button>
+
+    </div>
+  </header>
+
+  <!-- Main Report Wrap -->
+  <div class="report-wrap">
+
+    <!-- Hero Card: Target & Scope -->
+    <div class="hero-card">
+      <div class="hero-title-area">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+          <span class="badge badge-critical">⚠️ CRITICAL VULNERABILITY &amp; RISK REPORT</span>
+          <span class="badge badge-subtle">{{ client_data.date }}</span>
+        </div>
+        <h1>{{ client_data.domain }}</h1>
+        <div class="hero-meta">
+          <span>Target URL: <strong style="color: var(--text-main); font-family: 'JetBrains Mono', monospace;">{{ client_data.final_url }}</strong></span>
+          <span>•</span>
+          <span>Crawl Scope: <strong>{{ client_data.pages_crawled }} Page(s) Scanned</strong></span>
+          <span>•</span>
+          <span>Audit Type: <strong>Security, Technical &amp; On-Page Vulnerability Scan</strong></span>
+        </div>
+      </div>
+
+      <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+        <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.04em;">Audited By</span>
+        <strong style="font-size: 14px; color: var(--color-critical);">MINDCOB SEO PRO</strong>
+        <span style="font-size: 11.5px; color: var(--text-muted);">Digital Growth Agency</span>
+      </div>
+    </div>
+
+    <!-- Row 1: Threat Assessment Hero (NO SCORING) & Risk Summary -->
+    <div class="grid-2">
+      <!-- Threat Hero Card -->
+      <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+        <div>
+          <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: var(--color-critical); letter-spacing: 0.05em;">Vulnerability Assessment</span>
+          <div class="threat-hero-box" style="margin-top: 8px;">
+            <span class="threat-tag">{{ client_data.threat_level }}</span>
+            <span class="threat-number">{{ client_data.total_issues }}</span>
+            <span class="threat-label">Active Vulnerabilities Detected</span>
+            <span style="font-size: 11px; color: #fecaca; margin-top: 6px;">Immediate remediation required to prevent organic de-indexing</span>
+          </div>
+        </div>
+
+        <div class="stat-pills-row">
+          <div class="stat-pill">
+            <span class="stat-pill-label">Critical</span>
+            <span class="stat-pill-val" style="color: var(--color-critical);">{{ client_data.critical_count }}</span>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-pill-label">High Severity</span>
+            <span class="stat-pill-val" style="color: var(--color-high);">{{ client_data.high_count }}</span>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-pill-label">Security Flaws</span>
+            <span class="stat-pill-val" style="color: {% if client_data.security_count > 0 %}var(--color-critical){% else %}var(--text-muted){% endif %};">{{ client_data.security_count }}</span>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-pill-label">Pages Audited</span>
+            <span class="stat-pill-val" style="color: var(--primary);">{{ client_data.pages_crawled }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Executive Risk Brief Card -->
+      <div class="card" style="display: flex; flex-direction: column; justify-content: space-between; gap: 12px;">
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: var(--color-critical); letter-spacing: 0.04em;">Executive Risk Brief</span>
+            <span class="badge badge-critical">Active Exposure</span>
+          </div>
+          <p style="font-size: 12.5px; color: var(--text-main); line-height: 1.5;">
+            Passive diagnostic audit of <strong>{{ client_data.domain }}</strong> identified critical security flaws, crawl obstacles, and on-page defects requiring immediate technical remediation.
+          </p>
+        </div>
+
+        <!-- Major Threat Exposure Warnings -->
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <div style="background: var(--color-critical-bg); border-left: 3px solid var(--color-critical); padding: 7px 10px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 11.5px;">
+            <strong style="color: var(--color-critical);">🔒 Security &amp; Data Exposure:</strong> Insecure SSL/TLS protocols, missing defensive headers (HSTS/CSP), exposed sensitive files, and missing SPF/DMARC leave the domain open to automated scanning and browser "Not Secure" alerts.
+          </div>
+          <div style="background: var(--color-high-bg); border-left: 3px solid var(--color-high); padding: 7px 10px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 11.5px;">
+            <strong style="color: var(--color-high);">⚠️ Search Indexing Barrier:</strong> Crawl failures, redirect chains, and canonical misconfigurations block search engine bots from discovering and ranking priority revenue pages.
+          </div>
+          <div style="background: var(--color-medium-bg); border-left: 3px solid var(--color-medium); padding: 7px 10px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 11.5px;">
+            <strong style="color: var(--color-medium);">📱 Mobile Conversion Bleed:</strong> Responsive viewport defects and Core Web Vitals latency (LCP/CLS) trigger mobile ranking drops and high bounce rates.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 1: Website Security Audit (Guide Section 8) -->
+    {% if client_data.security_issues and client_data.security_issues|length > 0 %}
+    <div class="section-card" style="border-left-color: #dc2626;">
+      <div class="section-header-row">
+        <div class="section-title">
+          <i data-lucide="shield-alert" style="width: 20px; height: 20px; color: #dc2626;"></i>
+          <span>1. Website Security Audit</span>
+        </div>
+        <span class="badge badge-critical">
+          {{ client_data.security_issues|length }} Security Vulnerability(ies)
+        </span>
+      </div>
+
+      <div class="section-alert-box">
+        <strong>Vulnerability Scope:</strong> SSL/TLS handshake protocols, defensive HTTP headers, cookie security flags, sensitive file exposures, and email domain trust.
+      </div>
+
+      <div class="defect-list">
+        {% for it in client_data.security_issues %}
+        <div class="defect-card">
+          <div class="defect-top-row">
+            <span class="defect-title">{{ it.label }}</span>
+            <span class="badge {% if it.priority == 'Critical' %}badge-critical{% elif it.priority == 'High' %}badge-high{% else %}badge-medium{% endif %}">
+              {{ it.priority }}
+            </span>
+          </div>
+          <p class="defect-detail"><strong>Vulnerability / Defect:</strong> {{ it.detail }}</p>
+          {% if it.urls and it.urls|length > 0 %}
+          <div class="defect-urls">
+            <strong>Affected Endpoint:</strong> {{ it.urls[:2]|join(', ') }}{% if it.urls|length > 2 %} (+{{ it.urls|length - 2 }} more){% endif %}
+          </div>
+          {% endif %}
+          <div class="defect-solution">
+            <strong>Remediation:</strong> {{ it.fix }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Section 2: Technical SEO Audit (Guide Section 5) -->
+    {% if client_data.technical_issues and client_data.technical_issues|length > 0 %}
+    <div class="section-card" style="border-left-color: #ea580c;">
+      <div class="section-header-row">
+        <div class="section-title">
+          <i data-lucide="cpu" style="width: 20px; height: 20px; color: #ea580c;"></i>
+          <span>2. Technical SEO Audit</span>
+        </div>
+        <span class="badge badge-high">
+          {{ client_data.technical_issues|length }} Technical Defect(s)
+        </span>
+      </div>
+
+      <div class="section-alert-box" style="color: #9a3412; background: #fff7ed; border-color: rgba(234, 88, 12, 0.2);">
+        <strong>Crawl &amp; Indexing Scope:</strong> HTTP status errors, redirect chains, robots.txt crawler rules, and XML sitemap validity.
+      </div>
+
+      <div class="defect-list">
+        {% for it in client_data.technical_issues %}
+        <div class="defect-card">
+          <div class="defect-top-row">
+            <span class="defect-title">{{ it.label }}</span>
+            <span class="badge {% if it.priority == 'Critical' %}badge-critical{% elif it.priority == 'High' %}badge-high{% else %}badge-medium{% endif %}">
+              {{ it.priority }}
+            </span>
+          </div>
+          <p class="defect-detail"><strong>Vulnerability / Defect:</strong> {{ it.detail }}</p>
+          {% if it.urls and it.urls|length > 0 %}
+          <div class="defect-urls">
+            <strong>Affected Endpoint:</strong> {{ it.urls[:2]|join(', ') }}{% if it.urls|length > 2 %} (+{{ it.urls|length - 2 }} more){% endif %}
+          </div>
+          {% endif %}
+          <div class="defect-solution">
+            <strong>Remediation:</strong> {{ it.fix }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Section 3: On-Page SEO Audit (Guide Section 4) -->
+    {% if client_data.onpage_issues and client_data.onpage_issues|length > 0 %}
+    <div class="section-card" style="border-left-color: #2563eb;">
+      <div class="section-header-row">
+        <div class="section-title">
+          <i data-lucide="file-search" style="width: 20px; height: 20px; color: #2563eb;"></i>
+          <span>3. On-Page SEO Audit</span>
+        </div>
+        <span class="badge badge-primary">
+          {{ client_data.onpage_issues|length }} On-Page Defect(s)
+        </span>
+      </div>
+
+      <div class="section-alert-box" style="color: #1e40af; background: #eff6ff; border-color: rgba(37, 99, 235, 0.2);">
+        <strong>On-Page Architecture:</strong> Metadata lengths, heading structure (H1-H6), internal linking paths, and thin content flags.
+      </div>
+
+      <div class="defect-list">
+        {% for it in client_data.onpage_issues %}
+        <div class="defect-card">
+          <div class="defect-top-row">
+            <span class="defect-title">{{ it.label }}</span>
+            <span class="badge {% if it.priority == 'Critical' %}badge-critical{% elif it.priority == 'High' %}badge-high{% else %}badge-medium{% endif %}">
+              {{ it.priority }}
+            </span>
+          </div>
+          <p class="defect-detail"><strong>Vulnerability / Defect:</strong> {{ it.detail }}</p>
+          {% if it.urls and it.urls|length > 0 %}
+          <div class="defect-urls">
+            <strong>Affected Endpoint:</strong> {{ it.urls[:2]|join(', ') }}{% if it.urls|length > 2 %} (+{{ it.urls|length - 2 }} more){% endif %}
+          </div>
+          {% endif %}
+          <div class="defect-solution">
+            <strong>Remediation:</strong> {{ it.fix }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Section 4: Mobile Visibility and Usability (Guide Section 9) -->
+    {% if client_data.mobile_issues and client_data.mobile_issues|length > 0 %}
+    <div class="section-card" style="border-left-color: #d97706;">
+      <div class="section-header-row">
+        <div class="section-title">
+          <i data-lucide="smartphone" style="width: 20px; height: 20px; color: #d97706;"></i>
+          <span>4. Mobile Visibility and Usability</span>
+        </div>
+        <span class="badge badge-medium">
+          {{ client_data.mobile_issues|length }} Mobile Finding(s)
+        </span>
+      </div>
+
+      <div class="section-alert-box" style="color: #92400e; background: #fffbeb; border-color: rgba(217, 119, 6, 0.2);">
+        <strong>Mobile &amp; UX Scope:</strong> Smartphone viewport sizing, Core Web Vitals (LCP/CLS), and touch target tap usability.
+      </div>
+
+      <div class="defect-list">
+        {% for it in client_data.mobile_issues %}
+        <div class="defect-card">
+          <div class="defect-top-row">
+            <span class="defect-title">{{ it.label }}</span>
+            <span class="badge {% if it.priority == 'Critical' %}badge-critical{% elif it.priority == 'High' %}badge-high{% else %}badge-medium{% endif %}">
+              {{ it.priority }}
+            </span>
+          </div>
+          <p class="defect-detail"><strong>Vulnerability / Defect:</strong> {{ it.detail }}</p>
+          {% if it.urls and it.urls|length > 0 %}
+          <div class="defect-urls">
+            <strong>Affected Endpoint:</strong> {{ it.urls[:2]|join(', ') }}{% if it.urls|length > 2 %} (+{{ it.urls|length - 2 }} more){% endif %}
+          </div>
+          {% endif %}
+          <div class="defect-solution">
+            <strong>Remediation:</strong> {{ it.fix }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Section 5: Off-Page SEO and Backlink Audit (Guide Section 7) -->
+    {% if client_data.offpage_issues and client_data.offpage_issues|length > 0 %}
+    <div class="section-card" style="border-left-color: #7c3aed;">
+      <div class="section-header-row">
+        <div class="section-title">
+          <i data-lucide="link-2" style="width: 20px; height: 20px; color: #7c3aed;"></i>
+          <span>5. Off-Page SEO and Backlink Audit</span>
+        </div>
+        <span class="badge badge-subtle">
+          {{ client_data.offpage_issues|length }} Off-Page Item(s)
+        </span>
+      </div>
+
+      <div class="section-alert-box" style="color: #5b21b6; background: #f5f3ff; border-color: rgba(124, 58, 237, 0.2);">
+        <strong>Off-Page Equity Scope:</strong> Domain authority equity, backlink health, outbound link balance, and external link safety.
+      </div>
+
+      <div class="defect-list">
+        {% for it in client_data.offpage_issues %}
+        <div class="defect-card">
+          <div class="defect-top-row">
+            <span class="defect-title">{{ it.label }}</span>
+            <span class="badge {% if it.priority == 'Critical' %}badge-critical{% elif it.priority == 'High' %}badge-high{% else %}badge-medium{% endif %}">
+              {{ it.priority }}
+            </span>
+          </div>
+          <p class="defect-detail"><strong>Vulnerability / Defect:</strong> {{ it.detail }}</p>
+          {% if it.urls and it.urls|length > 0 %}
+          <div class="defect-urls">
+            <strong>Affected Endpoint:</strong> {{ it.urls[:2]|join(', ') }}{% if it.urls|length > 2 %} (+{{ it.urls|length - 2 }} more){% endif %}
+          </div>
+          {% endif %}
+          <div class="defect-solution">
+            <strong>Remediation:</strong> {{ it.fix }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Section 6: Prioritized SEO Action Plan (Guide Section 10) -->
+    {% if client_data.tiers and client_data.tiers|length > 0 %}
+    <div>
+      <div style="margin-bottom: 14px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+          <span class="badge badge-critical">Strict Recommended Priority Order</span>
+        </div>
+        <h2 style="font-size: 21px; font-weight: 800; color: var(--text-main);">6. Prioritized SEO Action Plan</h2>
+        <p style="font-size: 13px; color: var(--text-muted);">
+          Actions are organized strictly according to severity and potential impact: Search Visibility &amp; Indexability first, followed by Technical SEO, On-Page SEO, Local SEO, Off-Page SEO, and Performance/Security.
+        </p>
+      </div>
+
+      <!-- Tiers -->
+      {% for tier in client_data.tiers %}
+      {% if tier.action_list and tier.action_list|length > 0 %}
+      <div class="tier-block">
+        <div class="tier-header">
+          <div class="tier-header-left">
+            <span class="tier-name">
+              <span class="badge" style="background: #ffffff; color: {{ tier.badge_color }}; border: 1px solid {{ tier.badge_color }}; font-weight: 800;">Tier {{ tier.tier_num }}</span>
+              <span>{{ tier.title }}</span>
+            </span>
+            <span class="tier-objective">{{ tier.subtitle }}</span>
+          </div>
+          <span class="badge badge-subtle">{{ tier.action_list|length }} Action Item(s)</span>
+        </div>
+
+        <div class="tier-items-container">
+          {% for item in tier.action_list %}
+          <div class="action-card">
+            <div class="action-card-top">
+              <div class="action-card-left">
+                <span class="badge {% if item.priority == 'Critical' %}badge-critical{% elif item.priority == 'High' %}badge-high{% elif item.priority == 'Medium' %}badge-medium{% else %}badge-subtle{% endif %}">
+                  {{ item.priority }}
+                </span>
+                <span class="action-card-title">{{ item.label }}</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted);">
+                Estimated Impact: <strong style="color: var(--color-critical);">{{ item.gain }}</strong>
+              </div>
+            </div>
+
+            <!-- Issue Description -->
+            <p class="action-card-detail">
+              <strong>Finding:</strong> {{ item.detail if item.detail else item.label }}
+            </p>
+
+            <!-- Affected URLs -->
+            <div class="action-urls-box">
+              <strong>Affected URLs:</strong>
+              {% if item.urls and item.urls|length > 0 %}
+                <span>{{ item.urls[:3]|join(', ') }}{% if item.urls|length > 3 %} (+{{ item.urls|length - 3 }} more){% endif %}</span>
+              {% else %}
+                <span>Homepage / Entire Website Scope ({{ client_data.domain }})</span>
+              {% endif %}
+            </div>
+
+            <!-- Suggested Solution -->
+            <div class="action-solution-box">
+              <strong>Suggested Solution:</strong> <span>{{ item.fix }}</span>
+            </div>
+
+            <!-- Expected Business Impact -->
+            <div class="action-impact-box">
+              <strong>Expected Business Impact / Risk Avoided:</strong> <span>{{ item.business_impact }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Section 7: 3-Phase Implementation Roadmap & Partner Callout -->
+    <div class="card">
+      <div style="margin-bottom: 14px;">
+        <h3 style="font-size: 15px; font-weight: 800; color: var(--text-main);">7. Implementation Roadmap &amp; Next Steps</h3>
+        <p style="font-size: 12px; color: var(--text-muted);">Recommended 3-phase rollout to rapidly recover organic rankings and stop customer conversion bleeding.</p>
+      </div>
+
+      <div class="roadmap-grid">
+        <div class="roadmap-col">
+          <span class="roadmap-phase-num" style="color: var(--color-critical);">Phase 1 • Week 1</span>
+          <span class="roadmap-phase-title">Immediate Triage &amp; Security</span>
+          <p class="roadmap-phase-desc">
+            Resolve search engine crawl barriers, ensure robots.txt and XML sitemaps are reachable, fix broken canonical directives, and verify HTTPS security response headers.
+          </p>
+        </div>
+
+        <div class="roadmap-col">
+          <span class="roadmap-phase-num" style="color: var(--color-high);">Phase 2 • Month 1</span>
+          <span class="roadmap-phase-title">Core On-Page Optimization</span>
+          <p class="roadmap-phase-desc">
+            Rewrite search snippet titles and meta descriptions for high-intent pages, enforce strict H1-H6 heading hierarchy, compress heavy images to modern WebP format, and fix broken internal links.
+          </p>
+        </div>
+
+        <div class="roadmap-col">
+          <span class="roadmap-phase-num" style="color: var(--primary);">Phase 3 • Ongoing</span>
+          <span class="roadmap-phase-title">Experience &amp; Usability</span>
+          <p class="roadmap-phase-desc">
+            Optimize mobile PageSpeed and Google Core Web Vitals (LCP, INP, CLS), expand high-value content depth, and conduct regular monthly audits to protect rankings.
+          </p>
+        </div>
+      </div>
+
+      <div class="agency-partner-box" style="margin-top: 16px;">
+        <strong style="color: var(--primary-dark); font-size: 13px;">Partner with Mindcob for Turnkey Remediation</strong>
+        <p style="font-size: 12px; color: var(--text-main); line-height: 1.5;">
+          Mindcob specializes in end-to-end technical, on-page, and security SEO remediation. We can deploy these exact fixes directly with your engineering or content team to rapidly recover suppressed search rankings and traffic.
+        </p>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="client-footer">
+      <div>This executive vulnerability report was generated by <strong>MINDCOB SEO AUDIT PRO</strong> for <strong>{{ client_data.domain }}</strong>.</div>
+      <div>Confidential &amp; Proprietary · Prepared for executive review · Strict adherence to Google Webmaster Guidelines.</div>
+    </footer>
+
+  </div>
+
+  <script>
+    // Initialize Lucide icons
+    if (window.lucide) {
+      lucide.createIcons();
+    }
+
+    // Auto-trigger print if ?autoprint=1 is in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('autoprint') === '1') {
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          window.print();
+        }, 600);
+      });
+    }
+  </script>
+</body>
+</html>

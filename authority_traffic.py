@@ -68,12 +68,7 @@ def calculate_authority_scores(url, crawl_facts=None, home_facts=None, psi_score
     Model based on domain TLD prestige, backlink/referring equity, internal link graph,
     content depth, security posture, and Core Web Vitals.
     """
-    # 1. Try Moz API first
-    moz_res = get_moz_metrics(url)
-    if moz_res:
-        return moz_res
-
-    # 2. Algorithmic Authority Model
+    # 1. Pure Algorithmic Authority Model (100% Local Execution)
     p = urlparse(url if "://" in url else "https://" + url)
     netloc = (p.netloc or p.path).lower().split(":")[0]
     tld = netloc.split(".")[-1] if "." in netloc else ""
@@ -156,6 +151,63 @@ def calculate_authority_scores(url, crawl_facts=None, home_facts=None, psi_score
     }
 
 
+def calculate_page_authority(fact, da_score=35, is_home=False):
+    """
+    Computes specific Page Authority (PA) (0-100) for an individual crawled page.
+    Derived from Domain Authority equity, URL depth, content thickness, internal
+    link flow, HTTP status, and indexability.
+    """
+    pa = float(da_score)
+
+    if is_home:
+        pa += 4.0
+    else:
+        # URL depth analysis
+        raw_url = fact.get("url") or fact.get("final_url") or ""
+        p = urlparse(raw_url if "://" in raw_url else "https://" + raw_url)
+        segments = [s for s in p.path.strip("/").split("/") if s]
+        depth = len(segments)
+        if depth == 0:
+            pa += 2.0
+        elif depth == 1:
+            pa -= 1.0
+        elif depth == 2:
+            pa -= 3.0
+        else:
+            pa -= min(8.0, 3.0 + (depth - 2) * 2.0)
+
+    # Content depth
+    wc = fact.get("word_count", 0)
+    if wc >= 1500:
+        pa += 5.0
+    elif wc >= 800:
+        pa += 3.0
+    elif wc < 250:
+        pa -= 5.0
+
+    # Internal links
+    int_links = fact.get("internal_count")
+    if int_links is None:
+        int_links = len(fact.get("internal_links") or [])
+    if int_links >= 30:
+        pa += 4.0
+    elif int_links >= 10:
+        pa += 2.0
+    elif int_links < 3:
+        pa -= 3.0
+
+    # Status penalty
+    status = fact.get("status", 200)
+    if status != 200:
+        pa -= 12.0
+
+    # Noindex penalty
+    if fact.get("noindex"):
+        pa -= 15.0
+
+    return int(max(5, min(99, round(pa))))
+
+
 def estimate_monthly_traffic(domain, da_score=35, pages_crawled=25):
     """
     Generates realistic 12-month historical monthly organic traffic trajectory
@@ -235,5 +287,13 @@ def estimate_monthly_traffic(domain, da_score=35, pages_crawled=25):
         "top_3_pct": top_3_pct,
         "search_visibility_index": min(100, max(12, int(da_score * 0.95))),
         "is_estimated": True,
-        "note": "Estimated organic search visibility based on domain authority, indexing volume, and keyword footprints. Connect Google Search Console in settings for verified server-side clicks.",
+        "note": "Estimated organic search visibility based on domain authority, indexing volume, and keyword footprints.",
+        "estimation_parameters": {
+            "domain_authority": da_score,
+            "power_law_formula": f"DA^2.3 algorithmic curve (DA {da_score})",
+            "pages_crawled": pages_crawled,
+            "tld_geo_bias": (tld.upper() if tld else "COM"),
+            "seed_hash": seed,
+            "disclaimer": "Notice: These traffic numbers are statistical algorithmic estimates derived from Domain Authority (DA) and site footprint, not direct Google Analytics / Search Console data. Real visitor counts may differ based on paid ads, social campaigns, and offline brand recognition.",
+        },
     }

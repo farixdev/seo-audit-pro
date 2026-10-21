@@ -108,36 +108,105 @@ def fetch_page(url, session=None, timeout=25, proxy=None, method="GET"):
     proxies = _proxies(proxy)
     t0 = time.time()
     try:
+        # Streamed: the body is read only as far as needed (see _read_html).
         resp = sess.request(method, url, headers=HEADERS, timeout=timeout,
-                            allow_redirects=True, proxies=proxies)
+                            allow_redirects=True, proxies=proxies,
+                            stream=(method == "GET"))
     except requests.RequestException as e:
         page["error"] = str(e)
         page["elapsed_ms"] = int((time.time() - t0) * 1000)
         return page
 
-    page["elapsed_ms"] = int((time.time() - t0) * 1000)
-    page["status"] = resp.status_code
-    page["final_url"] = resp.url
-    page["ok"] = resp.ok
-    page["headers"] = {k: v for k, v in resp.headers.items()}
-    page["content_type"] = resp.headers.get("Content-Type", "")
-    page["redirects"] = [{"status": r.status_code, "url": r.url}
-                         for r in resp.history]
-    ctype = page["content_type"].lower()
-    is_html = "html" in ctype
-    if method == "GET":
-        try:
-            resp.encoding = resp.apparent_encoding or resp.encoding
-        except Exception:
-            pass
-        head = resp.text[:2000].lower()
-        if is_html or "<html" in head or "<!doctype html" in head:
-            page["is_html"] = True
-            page["html"] = resp.text
-            page["text_len"] = len(resp.text)
-    else:
-        page["is_html"] = is_html
+    try:
+        page["status"] = resp.status_code
+        page["final_url"] = resp.url
+        page["ok"] = resp.ok
+        page["headers"] = {k: v for k, v in resp.headers.items()}
+        page["content_type"] = resp.headers.get("Content-Type", "")
+        page["redirects"] = [{"status": r.status_code, "url": r.url}
+                             for r in resp.history]
+        ctype = page["content_type"].lower()
+        is_html = "html" in ctype
+        if method == "GET":
+            try:
+                html = _read_html(resp, ctype, is_html)
+            except (requests.RequestException, OSError) as e:
+                html, page["error"] = None, str(e)
+            if html is not None:
+                page["is_html"] = True
+                page["html"] = html
+                page["text_len"] = len(html)
+        else:
+            page["is_html"] = is_html
+    finally:
+        resp.close()
+        page["elapsed_ms"] = int((time.time() - t0) * 1000)
     return page
+
+
+# Pages larger than this are truncated: every on-page check looks at the head
+# and the main content, and huge documents (registries, data dumps) would cost
+# seconds of CPU and hundreds of MB per page.
+MAX_HTML_BYTES = 3 * 1024 * 1024
+_BINARY_TYPES = ("image/", "video/", "audio/", "font/", "application/pdf", "application/zip",
+                 "application/gzip", "application/x-", "application/octet-stream", "application/vnd.",
+                 "application/msword", "application/wasm")
+
+
+def _read_html(resp, ctype, is_html):
+    """The page's HTML, or None when the response is not an HTML page.
+
+    Binary files are never downloaded. Other non-HTML types are sniffed from
+    their first 4 KB (some servers send HTML as text/plain) and dropped if they
+    are not HTML."""
+    if not is_html and any(t in ctype for t in _BINARY_TYPES):
+        return None
+    chunks, size, sniffed = [], 0, is_html
+    for chunk in resp.iter_content(65536):
+        chunks.append(chunk)
+        size += len(chunk)
+        if not sniffed and size >= 4096:
+            start = b"".join(chunks)[:4096].lower()
+            if b"<html" not in start and b"<!doctype html" not in start:
+                return None
+            sniffed = True
+        if size >= MAX_HTML_BYTES:
+            break
+    raw = b"".join(chunks)[:MAX_HTML_BYTES]
+    if not sniffed:
+        start = raw[:4096].lower()
+        if b"<html" not in start and b"<!doctype html" not in start:
+            return None
+    return _decode(raw, ctype)
+
+
+_CHARSET_RE = re.compile(r"charset=[\"']?([\w.:-]+)", re.I)
+_META_CHARSET_RE = re.compile(rb"<meta[^>]+charset=[\"']?([\w.:-]+)", re.I)
+
+
+def _decode(raw, ctype):
+    """Decode with the declared charset (header, then <meta>), else UTF-8;
+    detection runs only on a 64 KB sample (it is very slow on large bodies)."""
+    declared = []
+    m = _CHARSET_RE.search(ctype or "")
+    if m:
+        declared.append(m.group(1))
+    m = _META_CHARSET_RE.search(raw[:4096])
+    if m:
+        declared.append(m.group(1).decode("ascii", "ignore"))
+    for enc in declared + ["utf-8"]:
+        try:
+            return raw.decode(enc)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    try:
+        from charset_normalizer import from_bytes
+        best = from_bytes(raw[:65536]).best()
+        if best and best.encoding:
+            return raw.decode(best.encoding, errors="replace")
+    except Exception:
+        pass
+    return raw.decode("utf-8", errors="replace")
 
 
 def _proxies(proxy):
@@ -430,7 +499,7 @@ def crawl(start_url, max_pages=25, seed_urls=None, progress=None, cancel=None,
     session = requests.Session()
 
     if workers is None:
-        workers = max(5, min(16, max_pages // 25))
+        workers = max(8, min(24, max_pages // 20))
 
     pages, order = {}, []
     queued = {start}
@@ -442,7 +511,7 @@ def crawl(start_url, max_pages=25, seed_urls=None, progress=None, cancel=None,
             queued.add(s)
             frontier.append(s)
 
-    report_interval = max(1, min(10, max_pages // 25))
+    report_interval = max(5, min(50, max_pages // 20))
 
     while frontier and len(order) < max_pages:
         if cancel is not None and cancel.is_set():
@@ -471,7 +540,8 @@ def crawl(start_url, max_pages=25, seed_urls=None, progress=None, cancel=None,
             pages[u] = page
             order.append(u)
             if len(order) % report_interval == 0 or len(order) == max_pages or len(order) <= 5:
-                log("Crawled %d/%d pages (%.0f%%)" % (len(order), max_pages, len(order) / max_pages * 100))
+                log("Crawled %d/%d pages (%.0f%%), %d URLs discovered"
+                    % (len(order), max_pages, len(order) / max_pages * 100, len(queued)))
             if len(order) >= max_pages:
                 break
             # Enqueue new internal links found on this page.

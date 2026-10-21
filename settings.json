@@ -1,7 +1,7 @@
 {
   "provider": "groq",
   "model": "llama-3.3-70b-versatile",
-  "max_pages": 51,
+  "max_pages": 200,
   "psi_strategy": "both",
   "single_page": false,
   "autoopen": true,

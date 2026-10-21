@@ -1,0 +1,35 @@
+======================================================================
+SOCIAL SHARE CARD PREVIEW (OPENGRAPH / TWITTER) — ONE-LINER REFERENCE
+======================================================================
+
+1. WHAT EACH SOCIAL METRIC IS (ONE-LINER)
+----------------------------------------------------------------------
+* OpenGraph (OG) Protocol:
+  Standardized meta tags created by Facebook that control the preview card when your link is shared on social media or messaging apps.
+
+* og:title:
+  The headline displayed on Facebook, LinkedIn, Slack, WhatsApp, and iMessage share cards.
+
+* og:description:
+  The 1-2 sentence preview blurb shown beneath the headline on social media feeds.
+
+* og:image:
+  The high-resolution thumbnail graphic (recommended 1200x630 px) that acts as the visual banner for your link preview.
+
+* og:url & og:site_name:
+  Specifies the canonical destination URL and overall brand name attached to the social post.
+
+* Twitter Cards (twitter:card / twitter:image):
+  Specialized tags designed for X (Twitter) to render either a "summary" thumbnail or an edge-to-edge "summary_large_image" card.
+
+* Why did the previous report show "true" instead of an image?:
+  The old crawler code only checked boolean existence (True/False) of the tag rather than extracting the image's full URL string. This has now been updated to capture the live URL and render the image preview.
+
+
+2. AUDIT SCORING & WEIGHTS FOR THIS SECTION
+----------------------------------------------------------------------
+* Open Graph Tags:        Low (1x weight) -> PASS (1.0) if title, description & image exist; WARN (0.3) if missing
+* Twitter Card Tags:      Low (1x weight) -> PASS (1.0) if twitter card tags present; INFO (0.0) if absent (non-penalized)
+
+Category Contribution: Part of Technical & On-Page SEO (improves social CTR and viral distribution).
+======================================================================

@@ -32,6 +32,8 @@ from urllib.parse import urlparse, urljoin
 
 from bs4 import BeautifulSoup
 
+import security_audit
+
 # category key -> (label, default weight). Weights sum to 1.0.
 CATEGORIES = [
     ("technical", "Technical SEO", 0.16),
@@ -151,11 +153,28 @@ def page_facts(page):
     f["favicon"] = bool(soup.find("link",
                                   attrs={"rel": re.compile("icon", re.I)}))
 
-    og = {p: bool(soup.find("meta", attrs={"property": "og:" + p}))
-          for p in ("title", "description", "image")}
-    f["og"] = og
-    f["twitter"] = bool(soup.find("meta",
-                                  attrs={"name": re.compile(r"^twitter:", re.I)}))
+    og_data = {}
+    for p in ("title", "description", "image", "type", "site_name", "url"):
+        tag = (soup.find("meta", attrs={"property": re.compile(r"^og:" + p + r"$", re.I)}) or
+               soup.find("meta", attrs={"name": re.compile(r"^og:" + p + r"$", re.I)}))
+        if tag and tag.get("content"):
+            val = tag.get("content").strip()
+            if p == "image" and val:
+                val = urljoin(final_url, val)
+            og_data[p] = val
+
+    tw_data = {}
+    for p in ("card", "title", "description", "image", "site", "creator"):
+        tag = (soup.find("meta", attrs={"name": re.compile(r"^twitter:" + p + r"$", re.I)}) or
+               soup.find("meta", attrs={"property": re.compile(r"^twitter:" + p + r"$", re.I)}))
+        if tag and tag.get("content"):
+            val = tag.get("content").strip()
+            if p == "image" and val:
+                val = urljoin(final_url, val)
+            tw_data[p] = val
+
+    f["og"] = og_data
+    f["twitter"] = tw_data
     f["pagination"] = bool(soup.find("link",
                                      attrs={"rel": re.compile(r"^(next|prev)$",
                                                               re.I)}))
@@ -499,19 +518,23 @@ def _technical_checks(ctx, home, all_facts):
                     "No charset meta.", "" if home.get("charset") else
                     "Declare <meta charset=\"utf-8\"> early in <head>.",
                     scope="home"))
+    og_dict = home.get("og") or {}
+    if isinstance(og_dict, dict):
+        og_valid_count = sum(1 for p in ("title", "description", "image") if og_dict.get(p))
+    else:
+        og_valid_count = 0
     out.append(_chk("open_graph", "technical", "Open Graph tags",
-                    "pass" if sum((home.get("og") or {}).values()) == 3 else
-                    "warn", "low", "low",
-                    "og:title/description/image present." if
-                    sum((home.get("og") or {}).values()) == 3 else
+                    "pass" if og_valid_count == 3 else "warn", "low", "low",
+                    "og:title/description/image present." if og_valid_count == 3 else
                     "Missing some Open Graph tags.",
-                    "Add og:title, og:description and og:image." if
-                    sum((home.get("og") or {}).values()) != 3 else "",
+                    "Add og:title, og:description and og:image." if og_valid_count != 3 else "",
                     scope="home"))
+    tw_val = home.get("twitter")
+    tw_present = bool(tw_val) if isinstance(tw_val, (bool, dict)) and tw_val else False
     out.append(_chk("twitter_card", "technical", "Twitter Card",
-                    "pass" if home.get("twitter") else "info", "low", "low",
-                    "Twitter Card tags present." if home.get("twitter") else
-                    "No Twitter Card tags.", "" if home.get("twitter") else
+                    "pass" if tw_present else "info", "low", "low",
+                    "Twitter Card tags present." if tw_present else
+                    "No Twitter Card tags.", "" if tw_present else
                     "Add twitter:card for richer previews.", scope="home"))
     out.append(_chk("pagination", "technical", "Pagination markup", "info",
                     "low", "low",
@@ -1162,78 +1185,38 @@ def _accessibility_checks(ctx, home):
 # SECURITY
 # ---------------------------------------------------------------------------
 def _security_checks(ctx, home):
+    sec_data = ctx.get("security_audit")
+    if sec_data:
+        return security_audit.generate_security_checks_catalog(sec_data, ctx, home)
+
+    final_url = home.get("final_url") or home.get("url") or ""
+    all_facts = ctx.get("all_facts") or [home]
+    try:
+        sec_data = security_audit.run_full_security_audit(final_url, home, all_facts, timeout=4)
+        return security_audit.generate_security_checks_catalog(sec_data, ctx, home)
+    except Exception:
+        pass
+
+    # Basic fallback if network fails
     out = []
     headers = home.get("headers") or {}
-    final = home.get("final_url", "")
-    https = final.startswith("https://")
-    out.append(_chk("https_active", "security", "HTTPS", "pass" if https else
-                    "fail", "critical", "med",
-                    "Served over HTTPS." if https else "Homepage is not HTTPS.",
-                    "" if https else "Install TLS and serve the whole site over "
-                    "HTTPS.", why="HTTPS is a confirmed ranking signal and a "
-                    "trust requirement.", scope="home"))
-    ssl_info = ctx.get("ssl_cert") or {}
-    if ssl_info.get("valid"):
-        days = ssl_info.get("days_left")
-        issuer = ssl_info.get("issuer") or "Trusted Authority"
-        if days is not None and days <= 0:
-            st = "fail"
-            det = f"SSL Certificate EXPIRED on {ssl_info.get('not_after')} ({issuer})."
-            fix = "Immediately renew your SSL/TLS certificate to prevent browser warning blocks."
-        elif days is not None and days < 20:
-            st = "warn"
-            det = f"SSL Certificate expires in {days} days on {ssl_info.get('not_after')} ({issuer})."
-            fix = "Renew your SSL certificate before it expires."
-        else:
-            st = "pass"
-            det = f"SSL Certificate is valid for {days} days until {ssl_info.get('not_after')} (Issued by {issuer})."
-            fix = ""
-        out.append(_chk("sec_ssl_cert_expiry", "security", "SSL Certificate Expiration",
-                        st, "critical" if st == "fail" else "medium", "low",
-                        det, fix, scope="site"))
-    elif https and home.get("ok"):
-        out.append(_chk("ssl_valid", "security", "SSL certificate", "pass",
-                        "high", "med", "Certificate validated on fetch.",
-                        scope="home"))
+    https = final_url.startswith("https://")
+    out.append(_chk("sec_https_active", "security", "HTTPS Protocol Enforcement", "pass" if https else "fail",
+                    "critical", "med", "Served over HTTPS." if https else "Homepage is not HTTPS.",
+                    "" if https else "Install TLS and serve the whole site over HTTPS.",
+                    why="HTTPS is a confirmed ranking signal and trust requirement.", scope="home"))
     for cid, hdr, label, sev, fix in [
-        ("hsts", "Strict-Transport-Security", "HSTS", "medium",
-         "Add Strict-Transport-Security to force HTTPS."),
-        ("csp", "Content-Security-Policy", "Content Security Policy", "medium",
-         "Add a Content-Security-Policy to mitigate XSS/injection."),
-        ("x_frame_options", "X-Frame-Options", "X-Frame-Options", "low",
-         "Add X-Frame-Options (or CSP frame-ancestors)."),
-        ("x_content_type", "X-Content-Type-Options", "X-Content-Type-Options",
-         "low", "Add X-Content-Type-Options: nosniff."),
-        ("referrer_policy", "Referrer-Policy", "Referrer-Policy", "low",
-         "Add a Referrer-Policy header."),
-        ("permissions_policy", "Permissions-Policy", "Permissions-Policy", "low",
-         "Add a Permissions-Policy to restrict powerful features."),
+        ("sec_hsts", "Strict-Transport-Security", "HSTS", "medium", "Add Strict-Transport-Security to force HTTPS."),
+        ("sec_csp", "Content-Security-Policy", "Content Security Policy", "medium", "Add a Content-Security-Policy to mitigate XSS/injection."),
+        ("sec_x_frame_options", "X-Frame-Options", "X-Frame-Options", "low", "Add X-Frame-Options (or CSP frame-ancestors)."),
+        ("sec_x_content_type", "X-Content-Type-Options", "X-Content-Type-Options", "low", "Add X-Content-Type-Options: nosniff."),
+        ("sec_referrer_policy", "Referrer-Policy", "Referrer-Policy", "low", "Add a Referrer-Policy header."),
+        ("sec_permissions_policy", "Permissions-Policy", "Permissions-Policy", "low", "Add a Permissions-Policy to restrict powerful features."),
     ]:
         present = bool(_hget(headers, hdr))
         out.append(_chk(cid, "security", label, "pass" if present else "warn",
-                        sev, "low", "%s present." % label if present else
-                        "%s missing." % label, "" if present else fix,
-                        scope="home"))
-    if https:
-        mc = home.get("mixed_content", 0)
-        out.append(_chk("mixed_content", "security", "Mixed content",
-                        "pass" if mc == 0 else "fail", "high", "med",
-                        "No insecure (http://) subresources." if mc == 0 else
-                        "%d insecure http:// subresource(s) on an HTTPS page." %
-                        mc, "" if mc == 0 else "Load all resources over HTTPS.",
-                        scope="home"))
-    # cookie security (best-effort from Set-Cookie header)
-    setck = _hget(headers, "Set-Cookie")
-    if setck:
-        low = setck.lower()
-        secure = "secure" in low and "httponly" in low
-        out.append(_chk("cookie_security", "security", "Cookie flags",
-                        "pass" if secure else "warn", "low", "low",
-                        "Cookies set Secure + HttpOnly." if secure else
-                        "Cookies missing Secure/HttpOnly flags.",
-                        "" if secure else
-                        "Set Secure, HttpOnly and SameSite on cookies.",
-                        scope="home"))
+                        sev, "low", "%s present." % label if present else "%s missing." % label,
+                        "" if present else fix, scope="home"))
     return out
 
 

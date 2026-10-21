@@ -1,0 +1,5 @@
+# SEO Audit Pro — Windows desktop client dependencies (no server secrets, no DB driver)
+PySide6>=6.6
+requests>=2.31.0
+keyring>=25.0
+pyinstaller>=6.0

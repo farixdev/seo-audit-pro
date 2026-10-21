@@ -15,6 +15,8 @@ import time
 from datetime import datetime
 
 import scoring
+import config
+config.load_env()
 
 import sys
 
@@ -66,6 +68,16 @@ _CACHE = {
     "targets": {},         # domain -> (timestamp, dict)
     "audits": {},          # audit_id -> full_result_dict (immutable)
 }
+
+
+_AUDIT_CACHE_MAX = 12
+
+
+def _trim_audit_cache():
+    """Full results are large (MBs); keep only the most recently stored ones."""
+    audits = _CACHE["audits"]
+    while len(audits) > _AUDIT_CACHE_MAX:
+        audits.pop(next(iter(audits)))
 
 
 def _ensure_dirs():
@@ -202,6 +214,8 @@ def save_audit_result(audit_id, result):
     Invalidates history caches to ensure instant consistency.
     """
     _ensure_dirs()
+    if isinstance(result, dict):
+        result["id"] = audit_id
 
     # Build summary record for index & timeline
     sc = result.get("score") or {}
@@ -329,6 +343,7 @@ def save_audit_result(audit_id, result):
         _CACHE["history"] = None
         _CACHE["timelines"].clear()
         _CACHE["audits"][audit_id] = copy.deepcopy(result)
+        _trim_audit_cache()
 
     return summary
 
@@ -341,7 +356,10 @@ def get_audit(audit_id):
     # 1. Check in-memory cache
     with _CACHE_LOCK:
         if audit_id in _CACHE["audits"]:
-            return copy.deepcopy(_CACHE["audits"][audit_id])
+            res = copy.deepcopy(_CACHE["audits"][audit_id])
+            if isinstance(res, dict):
+                res["id"] = audit_id
+            return res
 
     # 2. Query Neon DB
     conn = _get_db()
@@ -355,8 +373,11 @@ def get_audit(audit_id):
                 row = cur.fetchone()
                 if row and row[0]:
                     res = row[0]
+                    if isinstance(res, dict):
+                        res["id"] = audit_id
                     with _CACHE_LOCK:
                         _CACHE["audits"][audit_id] = copy.deepcopy(res)
+                        _trim_audit_cache()
                     return res
         except Exception as e:
             print(f"[history_manager] Error fetching audit {audit_id} from Neon DB: {e}")
@@ -374,8 +395,11 @@ def get_audit(audit_id):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 res = json.load(f)
+                if isinstance(res, dict):
+                    res["id"] = audit_id
                 with _CACHE_LOCK:
                     _CACHE["audits"][audit_id] = copy.deepcopy(res)
+                    _trim_audit_cache()
                 return res
         except Exception:
             return None

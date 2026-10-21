@@ -26,3 +26,12 @@ history.json
 build/
 dist/
 *.egg-info/
+
+# Server runtime data (database, uploads, reports, logs, dev secrets)
+server_data/
+
+# Local databases and debug logs
+reports/*.db
+reports/*.log
+*.db-wal
+*.db-shm

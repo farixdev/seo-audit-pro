@@ -1,0 +1,34 @@
+======================================================================
+OFF-PAGE SEO & BACKLINK INTELLIGENCE — ONE-LINER REFERENCE
+======================================================================
+
+1. WHAT EACH METRIC IS (ONE-LINER)
+----------------------------------------------------------------------
+* Healthy Profile Badge:
+  Indicates zero suspicious outbound links, controlled link leaks, and a high-trust digital footprint.
+
+* Outbound Links (8):
+  The total count of external links pointing to third-party domains from your homepage.
+
+* Dofollow Ratio:
+  The percentage of outbound links passing full link equity (PageRank votes) without a nofollow attribute.
+
+* Toxic Risk Check (CLEAN):
+  Validates that zero outbound links point to spam-prone TLDs (.xyz, .top, .click, .win, .loan, .buzz).
+
+* Link Quality Tier (TIER A+):
+  Calculated directly from Domain Authority (DA >= 60 = Tier A+, >= 40 = Tier A, >= 25 = Tier B, < 25 = Tier C).
+
+* Anchor Diversity (Natural Brand Profile):
+  Confirms clickable link text looks organic and brand-focused rather than spammy, repetitive commercial anchors.
+
+
+2. AUDIT SCORING & WEIGHTS FOR THIS SECTION
+----------------------------------------------------------------------
+* Domain Authority Score:       High (3x weight)     -> PASS (1.0) if DA >= 40, WARN (0.3) if DA >= 20, FAIL (0.0) if < 20
+* Page Authority Score:         Medium (2x weight)   -> PASS (1.0) if PA >= 35, WARN (0.3) if PA >= 18, FAIL (0.0) if < 18
+* Outbound Link Ratio:          Low (1x weight)      -> PASS (1.0) if <= 50 links, WARN (0.3) if > 50 (PageRank leak)
+* Toxic Outbound Safety:        Medium/Low (2x/1x)   -> PASS (1.0) if 0 spam TLDs, WARN (0.3) if spam destinations detected
+
+Category Contribution: Off-Page SEO accounts for 8% (0.08) of the total audit score.
+======================================================================

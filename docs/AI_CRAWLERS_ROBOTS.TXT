@@ -1,0 +1,40 @@
+======================================================================
+AI SEARCH CRAWLERS & ROBOTS.TXT — ONE-LINER REFERENCE
+======================================================================
+
+1. WHAT EACH AI BOT & DIRECTIVE IS (ONE-LINER)
+----------------------------------------------------------------------
+* Robots.txt File:
+  The traffic control manual for search engines telling web crawlers which folders they can or cannot visit.
+
+* GPTBot:
+  OpenAI's web crawler; indexes content for ChatGPT answers, browsing features, and model training.
+
+* ClaudeBot:
+  Anthropic's web crawler; gathers web information to train and support Claude conversational AI.
+
+* Google-Extended:
+  Google's standalone token; allows blocking Gemini / Vertex AI training without hurting regular Google Search rankings.
+
+* CCBot (Common Crawl):
+  Open web scraper used to build open-source datasets that train Meta Llama, Mistral, and other foundational LLMs.
+
+* PerplexityBot:
+  Real-time search crawler used by Perplexity AI to retrieve live web sources and cite links in AI answers.
+
+* Applebot / Applebot-Extended:
+  Apple's web crawler powering Siri suggestions, Safari Search, Spotlight, and Apple Intelligence features.
+
+* XML Sitemaps:
+  Machine-readable map of all your website's canonical URLs, making discovery fast and 100% complete for search engines.
+
+* Sitemap Index:
+  A parent sitemap that groups multiple child sitemaps (e.g. posts, pages, products) together under one master URL.
+
+
+2. HOW PERMISSION STATUS IS DETERMINED
+----------------------------------------------------------------------
+* ALLOWED:   User-agent is either explicitly permitted or not blocked by any Disallow rule.
+* BLOCKED:   Robots.txt contains "User-agent: <bot>" followed by "Disallow: /".
+* SITEMAPS:  Auto-discovered via "Sitemap:" directives in robots.txt or standard root locations.
+======================================================================

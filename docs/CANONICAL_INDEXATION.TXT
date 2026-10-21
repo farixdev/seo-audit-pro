@@ -1,0 +1,41 @@
+======================================================================
+CANONICAL URL & INDEXATION DIRECTIVES — ONE-LINER REFERENCE
+======================================================================
+
+1. WHAT EACH DIRECTIVE IS (ONE-LINER)
+----------------------------------------------------------------------
+* Declared Canonical:
+  The master URL tag telling search engines: "This is the official single address representing this page's content."
+
+* Canonical Status (Matches Live URL):
+  Confirms the page has a valid self-referencing canonical tag, preventing link equity dilution from duplicate tracking parameters.
+
+* Robots Meta Tag:
+  In-page HTML directives telling Googlebot whether to index the page, follow its links, and what snippet sizes are permitted.
+
+* index:
+  Explicitly permits search engines to add this page to their search index and show it in search queries.
+
+* follow:
+  Instructs crawlers to follow links found on this page to discover and rank internal and external pages.
+
+* max-image-preview:large:
+  Grants Google permission to display large feature images in search results and Google Discover cards.
+
+* max-snippet:-1:
+  Allows Google to display unrestricted text snippet lengths under your page title in search results for better CTR.
+
+* max-video-preview:-1:
+  Allows Google to generate animated video snippet previews of any length in search results.
+
+* X-Robots-Tag Header:
+  Server-level HTTP header instruction for indexation; "None" confirms no hidden server-side search blocks exist.
+
+
+2. AUDIT SCORING & WEIGHTS FOR THIS SECTION
+----------------------------------------------------------------------
+* Canonical Tag Present:    High (3x weight)     -> PASS (1.0) if present & valid, WARN (0.3) if pointing elsewhere
+* Noindex Check:            Critical (5x weight) -> PASS (1.0) if indexable, FAIL (0.0) if homepage has noindex
+
+Category Contribution: Part of Technical SEO which accounts for 16% (0.16) of the total audit score.
+======================================================================

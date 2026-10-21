@@ -1,0 +1,296 @@
+# -*- coding: utf-8 -*-
+"""Settings (Manager): SMTP delivery, audit defaults, client information."""
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QGridLayout, QSpinBox, QWidget
+
+from seo_audit_pro import APP_VERSION, icons
+from seo_audit_pro.core import api, settings, tasks
+from seo_audit_pro.theme import C
+from seo_audit_pro.ui.pages.base import Page
+from seo_audit_pro.widgets.common import Badge, BusyButton, Card, StatefulArea, button, hbox, label, vbox
+from seo_audit_pro.widgets.feedback import Field, PasswordInput, combo, kv_row, line_edit, show_error, toast
+
+ENCRYPTION = [("STARTTLS (port 587)", "starttls"), ("SSL/TLS (port 465)", "ssl"), ("None (not recommended)", "none")]
+
+
+class SettingsPage(Page):
+    nav_key = "settings"
+    title = "Settings"
+
+    def __init__(self, ws):
+        super().__init__(ws, scroll=True, spacing=20)
+        self.header("Settings", "Workspace-wide configuration. Changes are recorded in the audit log.")
+        content = QWidget()
+        cl = vbox(content, spacing=20)
+        cl.addWidget(self._smtp_card())
+        cl.addWidget(self._audit_card())
+        cl.addWidget(self._client_card())
+        cl.addStretch(1)
+        self.area = StatefulArea(content, skeleton="detail")
+        self.area.retry.connect(self.load)
+        self.body.addWidget(self.area, 1)
+        self.has_password = False
+
+    # -- SMTP ----------------------------------------------------------------
+    def _smtp_card(self):
+        card = Card(padding=24, spacing=16)
+        head = hbox(spacing=10)
+        col = vbox(spacing=2)
+        col.addWidget(label("Email delivery (SMTP)", "SectionTitle"))
+        col.addWidget(label("Used for outreach emails and password reset codes. The password is encrypted on the "
+                            "server and is never shown again after saving.", "Meta", wrap=True))
+        head.addLayout(col, 1)
+        self.smtp_state = Badge()
+        head.addWidget(self.smtp_state, 0, Qt.AlignmentFlag.AlignTop)
+        card.body.addLayout(head)
+
+        gmail = hbox(spacing=10)
+        gm = button("Use Gmail settings", icon_name="mail", size="sm")
+        gm.clicked.connect(self._gmail)
+        gmail.addWidget(gm)
+        gmail.addWidget(label("Gmail requires 2-Step Verification and an App Password "
+                              "(Google Account → Security → App passwords). Your normal Gmail password will not work.",
+                              "Meta", wrap=True), 1)
+        card.body.addLayout(gmail)
+
+        self.host = line_edit("smtp.yourdomain.com")
+        self.port = QSpinBox()
+        self.port.setRange(1, 65535)
+        self.port.setValue(587)
+        self.encryption = combo(ENCRYPTION, "starttls")
+        self.username = line_edit("Usually the full email address")
+        self.password = PasswordInput("App password")
+        self.from_name = line_edit("e.g. Mindcob SEO Team")
+        self.from_email = line_edit("outreach@yourdomain.com")
+        self.smtp_fields = {
+            "host": Field("SMTP host", self.host), "port": Field("Port", self.port),
+            "encryption": Field("Encryption", self.encryption), "username": Field("Username", self.username),
+            "password": Field("Password / App password", self.password),
+            "from_name": Field("From name", self.from_name), "from_email": Field("From email", self.from_email),
+        }
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(12)
+        layout = [("host", 0, 0, 1, 2), ("port", 0, 2, 1, 1), ("encryption", 0, 3, 1, 1), ("username", 1, 0, 1, 2),
+                  ("password", 1, 2, 1, 2), ("from_name", 2, 0, 1, 2), ("from_email", 2, 2, 1, 2)]
+        for key, r, c, rs, cs in layout:
+            grid.addWidget(self.smtp_fields[key], r, c, rs, cs)
+        for i in range(4):
+            grid.setColumnStretch(i, 1)
+        card.body.addLayout(grid)
+        self.encryption.currentIndexChanged.connect(self._encryption_changed)
+
+        actions = hbox(spacing=8)
+        self.test_result = label("", wrap=True)
+        actions.addWidget(self.test_result, 1)
+        self.test_btn = BusyButton("Test connection", None, icon_name="zap")
+        self.test_btn.clicked.connect(self._test)
+        self.save_btn = BusyButton("Save SMTP settings", "primary")
+        self.save_btn.clicked.connect(self._save_smtp)
+        actions.addWidget(self.test_btn)
+        actions.addWidget(self.save_btn)
+        card.body.addLayout(actions)
+        return card
+
+    def _gmail(self):
+        self.host.setText("smtp.gmail.com")
+        self.port.setValue(587)
+        self.encryption.setCurrentIndex(self.encryption.findData("starttls"))
+        if not self.from_email.text().strip() and "@" in self.username.text():
+            self.from_email.setText(self.username.text().strip())
+        self.username.setFocus()
+
+    def _encryption_changed(self, _i):
+        suggested = {"starttls": 587, "ssl": 465}.get(self.encryption.currentData())
+        if suggested and self.port.value() in (25, 465, 587):
+            self.port.setValue(suggested)
+
+    def _smtp_payload(self):
+        data = {"host": self.host.text().strip(), "port": self.port.value(), "encryption": self.encryption.currentData(),
+                "username": self.username.text().strip(), "from_name": self.from_name.text().strip(),
+                "from_email": self.from_email.text().strip()}
+        if self.password.text():
+            data["password"] = self.password.text()
+        return data
+
+    def _validate_smtp(self):
+        for f in self.smtp_fields.values():
+            f.set_error("")
+        data = self._smtp_payload()
+        errs = {"host": "" if data["host"] else "Enter the SMTP host.",
+                "from_name": "" if data["from_name"] else "Enter the sender name.",
+                "from_email": "" if "@" in data["from_email"] else "Enter the sender email address.",
+                "password": "" if (self.has_password or data.get("password")) else "Enter the SMTP password."}
+        for k, v in errs.items():
+            self.smtp_fields[k].set_error(v)
+        return None if any(errs.values()) else data
+
+    def _smtp_error(self, err):
+        field = err.data.get("field")
+        if field in self.smtp_fields:
+            self.smtp_fields[field].set_error(err.message)
+        else:
+            show_error(self, err)
+
+    def _set_test_result(self, ok, message):
+        color = C["success"] if ok else C["danger"]
+        self.test_result.setText(message)
+        self.test_result.setStyleSheet(f"color: {color};")
+
+    def _test(self):
+        data = self._validate_smtp()
+        if data is None:
+            return
+        self.test_btn.busy(True, "Testing…")
+        self.test_result.setText("")
+
+        def done(res):
+            self.test_btn.busy(False)
+            self._set_test_result(bool(res.get("ok")), res.get("message") or "Connected.")
+
+        def fail(err):
+            self.test_btn.busy(False)
+            # A failed handshake is reported as {"ok": false, "message": ...}.
+            if "message" in err.data and "ok" in err.data:
+                self._set_test_result(False, err.data["message"])
+            else:
+                self._smtp_error(err)
+
+        tasks.run(api.post, "/api/outreach/smtp/test", data, timeout=40, on_done=done, on_error=fail, owner=self)
+
+    def _save_smtp(self):
+        data = self._validate_smtp()
+        if data is None:
+            return
+        self.save_btn.busy(True, "Saving…")
+
+        def done(res):
+            self.save_btn.busy(False)
+            self._fill_smtp(res)
+            toast(self, "SMTP settings saved.", "success")
+
+        def fail(err):
+            self.save_btn.busy(False)
+            self._smtp_error(err)
+
+        tasks.run(api.put, "/api/outreach/smtp", data, on_done=done, on_error=fail, owner=self)
+
+    def _fill_smtp(self, s):
+        configured = bool(s.get("configured"))
+        self.has_password = bool(s.get("has_password"))
+        if configured:
+            self.smtp_state.setText("Configured")
+            self.smtp_state.set_colors(C["success"], C["success_bg"])
+            self.host.setText(s.get("host") or "")
+            self.port.setValue(int(s.get("port") or 587))
+            self.encryption.setCurrentIndex(max(0, self.encryption.findData(s.get("encryption"))))
+            self.username.setText(s.get("username") or "")
+            self.from_name.setText(s.get("from_name") or "")
+            self.from_email.setText(s.get("from_email") or "")
+        else:
+            self.smtp_state.setText("Not configured")
+            self.smtp_state.set_colors(C["warning"], C["warning_bg"])
+        self.password.clear()
+        self.password.edit.setPlaceholderText("Saved — leave blank to keep" if self.has_password else "App password")
+
+    # -- Audit defaults --------------------------------------------------------
+    def _audit_card(self):
+        card = Card(padding=24, spacing=16)
+        card.body.addWidget(label("Audit defaults", "SectionTitle"))
+        card.body.addWidget(label("Applied to every new audit. Larger crawls take longer but cover more of the site.",
+                                  "Meta", wrap=True))
+        row = hbox(spacing=16)
+        self.max_pages = QSpinBox()
+        self.max_pages.setRange(1, 500)
+        self.max_pages.setValue(50)
+        self.psi = combo([("Mobile and desktop", "both"), ("Mobile only", "mobile")], "both")
+        self.concurrent = QSpinBox()
+        self.concurrent.setRange(1, 4)
+        self.concurrent.setValue(2)
+        row.addWidget(Field("Pages to crawl", self.max_pages, "Between 1 and 500 pages per audit."), 1)
+        row.addWidget(Field("PageSpeed Insights", self.psi, "Mobile only halves PageSpeed time."), 1)
+        row.addWidget(Field("Audits at the same time", self.concurrent,
+                            "2 suits a server with 4 GB of memory; 3–4 need 8 GB or more."), 1)
+        card.body.addLayout(row)
+        pdf = hbox(spacing=8)
+        self.pdf_icon = label()
+        self.pdf_text = label("", "Muted", wrap=True)
+        pdf.addWidget(self.pdf_icon, 0, Qt.AlignmentFlag.AlignTop)
+        pdf.addWidget(self.pdf_text, 1)
+        card.body.addLayout(pdf)
+        actions = hbox()
+        actions.addStretch(1)
+        self.audit_save = BusyButton("Save audit defaults", "primary")
+        self.audit_save.clicked.connect(self._save_audit)
+        actions.addWidget(self.audit_save)
+        card.body.addLayout(actions)
+        return card
+
+    def _fill_audit(self, data):
+        d = data.get("audit_defaults") or {}
+        self.max_pages.setValue(int(d.get("max_pages") or 50))
+        self.psi.setCurrentIndex(max(0, self.psi.findData(d.get("psi_strategy") or "both")))
+        self.concurrent.setValue(int(d.get("concurrent") or 2))
+        if data.get("pdf_supported"):
+            self.pdf_icon.setPixmap(icons.pixmap("check_circle", C["success"], 16))
+            self.pdf_text.setText("PDF reports are available: the server has Microsoft Word or LibreOffice installed. "
+                                  "Each PDF is created the first time someone opens or emails it.")
+        else:
+            self.pdf_icon.setPixmap(icons.pixmap("info", C["text_3"], 16))
+            self.pdf_text.setText("PDF reports are not available on this server, so reports are delivered as DOCX. "
+                                  "Install Microsoft Word or LibreOffice on the server to enable PDF.")
+
+    def _save_audit(self):
+        self.audit_save.busy(True, "Saving…")
+        payload = {"audit_defaults": {"max_pages": self.max_pages.value(), "psi_strategy": self.psi.currentData(),
+                                      "concurrent": self.concurrent.value()}}
+
+        def done(res):
+            self.audit_save.busy(False)
+            self._fill_audit(res)
+            toast(self, "Audit defaults saved.", "success")
+
+        def fail(err):
+            self.audit_save.busy(False)
+            show_error(self, err)
+
+        tasks.run(api.put, "/api/settings", payload, on_done=done, on_error=fail, owner=self)
+
+    # -- Client ------------------------------------------------------------------
+    def _client_card(self):
+        card = Card(padding=24, spacing=12)
+        card.body.addWidget(label("This computer", "SectionTitle"))
+        self.server_row = kv_row("Server", settings.api_url())
+        card.body.addWidget(self.server_row)
+        card.body.addWidget(kv_row("App version", APP_VERSION))
+        card.body.addWidget(label("To connect to a different server, sign out and choose Change server on the "
+                                  "sign-in screen.", "Meta", wrap=True))
+        return card
+
+    # -- lifecycle -------------------------------------------------------------
+    def activate(self, **_):
+        self.load()
+
+    def load(self):
+        if not getattr(self, "_loaded", False):
+            self.area.loading("Loading settings…")
+        state = {"smtp": None, "settings": None}
+
+        def maybe_ready():
+            if state["smtp"] is not None and state["settings"] is not None:
+                self._loaded = True
+                self._fill_smtp(state["smtp"])
+                self._fill_audit(state["settings"])
+                self.area.ready()
+
+        def got_smtp(res):
+            state["smtp"] = res
+            maybe_ready()
+
+        def got_settings(res):
+            state["settings"] = res
+            maybe_ready()
+
+        self.fetch("smtp", api.get, "/api/outreach/smtp", on_done=got_smtp, on_error=self.area.error)
+        self.fetch("settings", api.get, "/api/settings", on_done=got_settings, on_error=self.area.error)

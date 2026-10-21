@@ -1,0 +1,51 @@
+======================================================================
+SECURITY HEADERS & SAFE BROWSING — ONE-LINER REFERENCE
+======================================================================
+
+1. WHAT EACH SECURITY ITEM IS (ONE-LINER)
+----------------------------------------------------------------------
+* HTTPS Enforced:
+  Encrypts all traffic between user and server; confirmed Google ranking factor and trust baseline.
+
+* Strict-Transport-Security (HSTS):
+  Forces browsers to communicate ONLY over HTTPS, blocking protocol downgrade and SSL-stripping attacks.
+
+* Content-Security-Policy (CSP):
+  Restricts which scripts and styles can execute, preventing Cross-Site Scripting (XSS) and Google Safe Browsing malware blacklists.
+
+* X-Frame-Options:
+  Blocks unauthorized sites from embedding your pages inside iframes, preventing clickjacking attacks.
+
+* X-Content-Type-Options:
+  Forces "nosniff" so browsers never execute uploaded files (e.g. fake images) as malicious code.
+
+* Referrer-Policy:
+  Controls how much URL path data leaks to third-party sites on external clicks, protecting user privacy and analytics.
+
+* Permissions-Policy:
+  Explicitly blocks third-party scripts from accessing sensitive browser hardware (camera, microphone, geolocation).
+
+* Mixed Content:
+  Checks that zero insecure (http://) images, fonts, or scripts are loaded onto an encrypted https:// page.
+
+* Cookie Security (Secure / HttpOnly):
+  Ensures session cookies can only be sent over HTTPS and cannot be stolen via JavaScript.
+
+* SSL Certificate Expiration:
+  Monitors live certificate days remaining to prevent catastrophic browser warning blocks ("Your connection is not private").
+
+
+2. AUDIT SCORING & WEIGHTS FOR THIS SECTION
+----------------------------------------------------------------------
+* HTTPS Active:                  Critical (5x weight) -> PASS (1.0) if https://, FAIL (0.0) if http://
+* SSL Certificate Validity:      Critical (5x weight) -> PASS (1.0) if valid, WARN (0.3) if <20 days, FAIL (0.0) if expired
+* Mixed Content:                 High (3x weight)     -> PASS (1.0) if 0 http resources, FAIL (0.0) if any found
+* HSTS Header:                   Medium (2x weight)   -> PASS (1.0) if configured, WARN (0.3) if missing
+* CSP Header:                    Medium (2x weight)   -> PASS (1.0) if configured, WARN (0.3) if missing
+* X-Frame-Options:               Low (1x weight)      -> PASS (1.0) if configured, WARN (0.3) if missing
+* X-Content-Type-Options:        Low (1x weight)      -> PASS (1.0) if configured, WARN (0.3) if missing
+* Referrer-Policy:               Low (1x weight)      -> PASS (1.0) if configured, WARN (0.3) if missing
+* Permissions-Policy:            Low (1x weight)      -> PASS (1.0) if configured, WARN (0.3) if missing
+
+Category Contribution: Security category accounts for 8% (0.08) of the total audit score.
+======================================================================

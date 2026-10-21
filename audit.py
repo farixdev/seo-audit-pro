@@ -25,6 +25,7 @@ import crawler
 import llm
 import pagespeed
 import scoring
+import security_audit
 import seo_checks
 import structured_data
 
@@ -385,7 +386,8 @@ def run_audit(params, progress=None):
     except Exception as e:
         errors.append("http redirect: %s" % e)
         result["http_redirect"] = None
-    if not single_page and "crawl" in enabled:
+    # Broken-link checking feeds the Technical SEO category.
+    if not single_page and ("technical" in enabled or "crawl" in enabled):
         log("Checking internal links…")
         try:
             result["broken_links"] = _check_links(home_facts, pages, cancel,
@@ -426,7 +428,8 @@ def run_audit(params, progress=None):
     # 7) structured data -------------------------------------------------
     _ck(cancel)
     structured = {}
-    if "structured" in enabled and home_page.get("html"):
+    # Structured-data validation feeds the Technical SEO category.
+    if ("technical" in enabled or "structured" in enabled) and home_page.get("html"):
         log("Validating structured data…")
         try:
             structured[result["final_url"]] = structured_data.analyze(
@@ -474,6 +477,23 @@ def run_audit(params, progress=None):
     orphan_pages = [u for u, cnt in in_degrees.items() if cnt <= 1 and u != result["final_url"]]
     result["orphan_pages"] = orphan_pages
 
+    # 8c) Passive Website Security Audit ---------------------------------
+    _ck(cancel)
+    sec_audit = None
+    if "security" in enabled:
+        log("Running passive security audit (headers, SSL, cookies, DNS, files)…")
+        try:
+            sec_audit = security_audit.run_full_security_audit(
+                result["final_url"], home_page, all_facts, proxy=proxy, timeout=6
+            )
+        except Exception as e:
+            errors.append("security audit: %s" % e)
+            sec_audit = None
+    result["security_audit"] = sec_audit
+    if sec_audit and sec_audit.get("ssl"):
+        ssl_cert = sec_audit["ssl"]
+        result["ssl_cert"] = ssl_cert
+
     log("Evaluating Domain Authority (DA) & Traffic…")
     psi_score = ((psi.get("mobile") or {}).get("scores") or {}).get("performance")
     authority = authority_traffic.calculate_authority_scores(
@@ -482,8 +502,13 @@ def run_audit(params, progress=None):
     )
     result["authority"] = authority
 
+    da_val = authority.get("domain_authority", 35)
+    for f in all_facts:
+        is_home = (f.get("final_url") == result["final_url"]) or (f.get("url") == result["final_url"])
+        f["page_authority"] = authority_traffic.calculate_page_authority(f, da_score=da_val, is_home=is_home)
+
     traffic = authority_traffic.estimate_monthly_traffic(
-        result["domain"], da_score=authority.get("domain_authority", 35),
+        result["domain"], da_score=da_val,
         pages_crawled=len(all_facts)
     )
     result["traffic"] = traffic
@@ -498,6 +523,7 @@ def run_audit(params, progress=None):
         "structured": structured, "content": content, "enabled": enabled,
         "ssl_cert": ssl_cert, "orphan_pages": orphan_pages,
         "authority": authority, "traffic": traffic,
+        "security_audit": sec_audit,
     }
     try:
         checks = seo_checks.build_checks(ctx)

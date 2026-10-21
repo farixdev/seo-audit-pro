@@ -1,0 +1,30 @@
+======================================================================
+MONTHLY ORGANIC TRAFFIC & TRENDS — ONE-LINER REFERENCE
+======================================================================
+
+1. WHAT THIS METRIC REPRESENTS (ONE-LINER)
+----------------------------------------------------------------------
+* Monthly Organic Traffic:
+  A statistical algorithmic projection of estimated monthly search visitors based on Domain Authority (DA) and site size.
+
+* Notice on Accuracy:
+  This data is an ESTIMATION model, NOT direct Google Analytics or Search Console numbers. Actual visitor counts may vary.
+
+* Power-Law Traffic Curve:
+  Computed as DA^2.3 base multiplier with seasonal fluctuation heuristics and crawl footprint weights.
+
+* Ranking Keywords Estimate:
+  Statistical projection of organic search terms ranking in the top 100 positions based on overall authority.
+
+* Geographic Distribution:
+  Projected regional market breakdown based on the top-level domain (TLD) and international targeting signals.
+
+
+2. CALCULATION PARAMETERS (AVAILABLE ON HOVER)
+----------------------------------------------------------------------
+* Domain Authority (DA) Score
+* Power-Law Mathematical Curve (DA^2.3)
+* Crawled Pages Footprint Volume
+* TLD Regional Market Bias (.com, .ca, .co.uk, etc.)
+* Seasonal 12-Month Sine Curve Multipliers
+======================================================================

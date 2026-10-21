@@ -1,0 +1,24 @@
+======================================================================
+CRAWLED PAGES INVENTORY, PAGE AUTHORITY (PA) & GOOGLE INDEX (site:)
+======================================================================
+
+1. WHAT EACH COLUMN & METRIC IS (ONE-LINER)
+----------------------------------------------------------------------
+* Page Authority (PA) (0-100):
+  The algorithmic link equity and ranking potential of an individual URL relative to the overall domain equity.
+
+* PA Calculation Factors:
+  Domain Authority baseline + URL directory depth penalty (-1 to -8) + word count tier (+5 to -5) + internal links (+4 to -3) + status code penalty (-12) + noindex penalty (-15).
+
+* Google Index (site:) Search:
+  Inspects whether Google has indexed the specific page using the live Google search query "site:URL".
+
+* Direct Google site: Link (↗):
+  One-click button that opens the live Google search query in a new tab for manual verification.
+
+* Live Google Index Checker:
+  Queries Google search to test if the URL matches existing indexed documents or returns "did not match any documents".
+
+* Pagination Controls:
+  Supports 10, 25, 50, 100, or All pages per view with real-time URL/title filtering and Prev/Next page navigation.
+======================================================================

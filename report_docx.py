@@ -855,21 +855,23 @@ def _appendix_section(doc, result):
     doc.add_heading("Pages reviewed", level=2)
     facts = result.get("all_facts", [])
     if facts:
-        table = doc.add_table(rows=1, cols=6)
+        table = doc.add_table(rows=1, cols=7)
         table.style = "Table Grid"
-        for i, h in enumerate(["URL", "Status", "Title", "Meta", "Words", "H1"]):
+        for i, h in enumerate(["URL", "Status", "PA", "Title", "Meta", "Words", "H1"]):
             _cell_text(table.rows[0].cells[i], [(h, {"size": 8, "bold": True})])
         _style_header_row(table)
         for f in facts:
             cells = table.add_row().cells
             _cell_text(cells[0], [(f.get("final_url", ""), {"size": 8})])
-            for j, val in enumerate([f.get("status", ""), f.get("title_len", 0),
+            for j, val in enumerate([f.get("status", ""),
+                                     f.get("page_authority", 35),
+                                     f.get("title_len", 0),
                                      f.get("meta_desc_len", 0),
                                      f.get("word_count", 0),
                                      f.get("h1_count", 0)], start=1):
                 _cell_text(cells[j], [(str(val), {"size": 8})],
                            align=WD_ALIGN_PARAGRAPH.CENTER)
-        _set_widths(table, [3.1, 0.7, 0.7, 0.7, 0.7, 0.6])
+        _set_widths(table, [2.8, 0.6, 0.6, 0.7, 0.6, 0.6, 0.6])
 
     psi = result.get("psi") or {}
     rows = []
@@ -913,8 +915,503 @@ def _score_grade(v):
     return "F"
 
 
-# ---- entry point -----------------------------------------------------------
+# ============================================================================
+# CLIENT-FACING EXECUTIVE DELIVERABLE GENERATORS
+# Designed for clients: less technical jargon, no DA/PA/Monthly Traffic/Local,
+# with structured 4-tier Recommended Action Plan with business impact.
+# ============================================================================
+
+def _client_header_footer(doc, result):
+    sec = doc.sections[0]
+    sec.top_margin = Inches(0.7)
+    sec.bottom_margin = Inches(0.7)
+    sec.left_margin = Inches(0.8)
+    sec.right_margin = Inches(0.8)
+
+    # Header
+    hdr = sec.header.paragraphs[0]
+    hdr.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _runs(hdr, [
+        ("MINDCOB SEO AUDIT PRO  ·  CRITICAL VULNERABILITY & RISK REPORT",
+         {"size": 8, "color": MUTED, "bold": True})
+    ])
+
+    # Footer
+    ftr = sec.footer.paragraphs[0]
+    _runs(ftr, [
+        ("Confidential SEO Audit  ·  Prepared for ", {"size": 8, "color": MUTED}),
+        (str(result.get("domain", "")), {"size": 8, "color": SLATE, "bold": True}),
+        ("  ·  Page ", {"size": 8, "color": MUTED})
+    ])
+    _page_field(ftr.add_run())
+
+
+def _get_category_issues(checks, categories=None, check_ids=None):
+    """Filter checks down to failed and warning items only (no passes)."""
+    issues = []
+    categories = [c.lower() for c in (categories or [])]
+    check_ids = [cid.lower() for cid in (check_ids or [])]
+    for c in (checks or []):
+        if c.get("status") not in ("fail", "warn"):
+            continue
+        cat = (c.get("category") or "").lower()
+        cid = (c.get("id") or "").lower()
+        match = False
+        if categories and cat in categories:
+            match = True
+        if check_ids and cid in check_ids:
+            match = True
+        if match:
+            pri = c.get("severity", "medium").capitalize()
+            if c.get("status") == "fail" and pri == "Medium":
+                pri = "High"
+            urls = c.get("where") or []
+            issues.append({
+                "id": cid,
+                "label": c.get("label", "Issue"),
+                "priority": pri,
+                "detail": c.get("detail", ""),
+                "fix": c.get("fix") or "Apply standard technical remediation to resolve.",
+                "where": urls,
+                "why": c.get("why") or "",
+            })
+    return issues
+
+
+def _client_audit_table(doc, items, headers=None, widths=None):
+    """Draws a clean, high-urgency defect table with explicit solutions."""
+    if not items:
+        return
+
+    table = doc.add_table(rows=1, cols=5)
+    table.style = "Table Grid"
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    if not headers:
+        headers = ["Priority Level", "Identified Issue / Defect", "Risk Detail", "Affected URLs", "Suggested Solution"]
+    for i, h in enumerate(headers):
+        _cell_text(table.rows[0].cells[i], [(h, {"size": 8.5, "bold": True})])
+    _style_header_row(table)
+
+    for it in items:
+        cells = table.add_row().cells
+        pri = it.get("priority", "Medium")
+
+        # 1. Priority Level
+        _cell_text(cells[0], [(pri.upper(), {"size": 8, "bold": True,
+                               "color": PRIORITY_FG.get(pri, INK)})],
+                   align=WD_ALIGN_PARAGRAPH.CENTER,
+                   valign=WD_ALIGN_VERTICAL.CENTER,
+                   shade=PRIORITY_SHADE.get(pri))
+
+        # 2. Defect Label
+        _cell_text(cells[1], [(it.get("label", "Issue"), {"size": 8.5, "bold": True})])
+
+        # 3. Risk Detail
+        _cell_text(cells[2], [(it.get("detail", ""), {"size": 8, "color": SLATE})])
+
+        # 4. Affected URLs
+        urls = it.get("where") or []
+        if urls:
+            url_str = "\n".join(urls[:2])
+            if len(urls) > 2:
+                url_str += f"\n+{len(urls) - 2} more pages"
+        else:
+            url_str = "Homepage / Site-wide"
+        _cell_text(cells[3], [(url_str, {"size": 7.5, "color": MUTED})])
+
+        # 5. Suggested Solution
+        _cell_text(cells[4], [(it.get("fix", "Follow standard technical SEO guidelines."),
+                               {"size": 8, "color": BRAND_DK})])
+
+    if not widths:
+        widths = [0.9, 1.7, 1.9, 1.0, 1.4]
+    _set_widths(table, widths)
+    _spacer(doc, 8)
+
+
+def _client_cover(doc, result):
+    # Top agency banner
+    b = doc.add_table(rows=1, cols=2)
+    _no_table_borders(b)
+    _set_widths(b, [4.5, PAGE_W - 4.5])
+    c0, c1 = b.rows[0].cells
+    _cell_text(c0, [
+        ("MINDCOB", {"size": 13, "bold": True, "color": BRAND}),
+        ("  ·  SEO AUDIT PRO", {"size": 10, "color": MUTED, "bold": True}),
+        ("\nCRITICAL VULNERABILITY & RISK REPORT", {"size": 8.5, "bold": True, "color": RGBColor(0xC0, 0x2A, 0x2E)}),
+        ("\nCritical Website Vulnerability & Risk Brief", {"size": 9.5, "color": SLATE})
+    ])
+    _cell_text(c1, [
+        (str(result.get("domain", "")), {"size": 11, "bold": True, "color": INK}),
+        ("\nAudited: " + str(result.get("date") or result.get("generated_at", "")[:10]),
+         {"size": 8.5, "color": MUTED}),
+        (f"\nScope: {result.get('pages_crawled', 1)} Page(s) Audited", {"size": 8.5, "color": SLATE, "bold": True})
+    ], align=WD_ALIGN_PARAGRAPH.RIGHT)
+    _spacer(doc, 10)
+
+    # Calculate defect totals
+    checks = result.get("checks") or []
+    pc = result.get("priority_counts") or {}
+    total_issues = sum(pc.values())
+    crit_count = pc.get("Critical", 0)
+    high_count = pc.get("High", 0)
+    urgent_count = crit_count + high_count
+
+    sec_issues = _get_category_issues(checks, categories=["security"])
+    sec_count = len(sec_issues)
+
+    # Severe Threat Hero Box (NO SCORING)
+    hero = doc.add_table(rows=1, cols=2)
+    _no_table_borders(hero)
+    _set_widths(hero, [2.35, PAGE_W - 2.35])
+
+    left = hero.rows[0].cells[0]
+    _shade(left, "991B1B")  # Deep Crimson Red
+    _cell_margins(left, top=160, bottom=160, left=120, right=120)
+    left.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    lp0 = left.paragraphs[0]
+    lp0.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _runs(lp0, [("THREAT LEVEL: HIGH RISK", {"size": 8.5, "bold": True, "color": WHITE})])
+    lp1 = left.add_paragraph()
+    lp1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    lp1.paragraph_format.space_before = Pt(4)
+    lp1.paragraph_format.space_after = Pt(2)
+    _runs(lp1, [(str(total_issues), {"size": 42, "bold": True, "color": WHITE})])
+    lp2 = left.add_paragraph()
+    lp2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _runs(lp2, [("ACTIVE VULNERABILITIES", {"size": 8.5, "bold": True, "color": WHITE})])
+    lp3 = left.add_paragraph()
+    lp3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    lp3.paragraph_format.space_before = Pt(4)
+    _runs(lp3, [("IMMEDIATE ACTION REQUIRED", {"size": 8, "color": RGBColor(0xFE, 0xCD, 0xCD), "bold": True})])
+
+    right = hero.rows[0].cells[1]
+    _shade(right, "FEF2F2")  # Soft alert background
+    _left_accent(right, "DC2626", size=36)
+    _cell_margins(right, top=150, bottom=150, left=150, right=120)
+    right.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    rp = right.paragraphs[0]
+    rp.paragraph_format.space_after = Pt(4)
+    _runs(rp, [("SEARCH VISIBILITY & DATA INTEGRITY ALERT", {"size": 10.5, "color": BAD, "bold": True})])
+    rp2 = right.add_paragraph()
+    rp2.paragraph_format.space_after = Pt(4)
+    _runs(rp2, [
+        (f"A comprehensive diagnostic scan of {result.get('domain', 'your website')} identified active defects directly impairing organic search discovery, exposing browser trust warnings, and causing mobile visitor abandonment.\n\n"
+         "Unresolved security misconfigurations and broken crawl paths quietly bleed traffic to competitors. "
+         "This audit report isolates every detected failure and provides immediate remediation solutions.",
+         {"size": 9.5, "color": INK})
+    ])
+
+    _spacer(doc, 10)
+
+    # 4 Urgent Threat KPI Tiles (Only errors, no green reassurance)
+    _kpi_tiles(doc, [
+        ("%d" % crit_count, "CRITICAL ERRORS", BAD if crit_count > 0 else MUTED),
+        ("%d" % high_count, "HIGH THREATS", RGBColor(0xEA, 0x58, 0x0C) if high_count > 0 else MUTED),
+        ("%d" % sec_count, "SECURITY FLAWS", BAD if sec_count > 0 else MUTED),
+        ("%d" % result.get("pages_crawled", 1), "PAGES AUDITED", INK),
+    ])
+    _spacer(doc, 8)
+
+
+def _client_threat_overview(doc, result):
+    _section_heading(doc, "Executive Risk & Threat Summary")
+    doc.add_paragraph(
+        "Identified critical vulnerabilities and technical defects impacting domain security, search indexation, and user conversion:"
+    )
+
+    threats = [
+        ("1. Security Flaws & 'Not Secure' Browser Alerts",
+         "Insecure SSL/TLS protocols, missing defensive headers (HSTS, CSP), and exposed sensitive files trigger full-screen browser warnings and data breach risks.",
+         "C02A2E"),
+        ("2. Search Crawl & Indexing Blockers",
+         "Server errors, multi-hop redirect chains, and canonical or noindex misconfigurations cause high-converting landing pages to be de-indexed by Google.",
+         "E8590C"),
+        ("3. Mobile Conversion Friction & Core Web Vitals Drop-off",
+         "Mobile render latency (LCP/CLS) and responsive viewport anomalies trigger mobile-first ranking penalties and user abandonment.",
+         "D97706"),
+    ]
+
+    for title, desc, col in threats:
+        t = doc.add_table(rows=1, cols=1)
+        _no_table_borders(t)
+        _set_widths(t, [PAGE_W])
+        c = t.rows[0].cells[0]
+        _shade(c, "F8FAFC")
+        _left_accent(c, col, size=30)
+        _cell_margins(c, top=80, bottom=80, left=120, right=100)
+        p = c.paragraphs[0]
+        _runs(p, [(title, {"size": 10, "bold": True, "color": INK}),
+                  ("\n" + desc, {"size": 8.5, "color": SLATE})])
+        _spacer(doc, 4)
+    _spacer(doc, 6)
+
+
+def _client_security_audit_section(doc, result):
+    checks = result.get("checks") or []
+    sec_issues = _get_category_issues(checks, categories=["security"])
+    if not sec_issues:
+        return False
+    _section_heading(doc, "1. Website Security Audit")
+    doc.add_paragraph(
+        "Direct vulnerability scan isolating SSL/TLS handshake defects, missing defensive headers, cookie attribute flaws, sensitive file exposures, and email spoofing risks."
+    )
+    _client_audit_table(doc, sec_issues)
+    return True
+
+
+def _client_technical_audit_section(doc, result):
+    checks = result.get("checks") or []
+    tech_issues = _get_category_issues(checks, categories=["technical", "ux"],
+                                       check_ids=["non_200_pages", "redirect_chains", "noindex_pages",
+                                                  "broken_internal_links", "robots_present", "sitemap_present",
+                                                  "sitemap_status", "sitemap_valid", "canonical_home",
+                                                  "canonical_site", "ux_layout_stability", "ux_interactivity",
+                                                  "ux_render_blocking", "ux_font_optimization"])
+    if not tech_issues:
+        return False
+    _section_heading(doc, "2. Technical SEO Audit")
+    doc.add_paragraph(
+        "Technical SEO governs how efficiently search engine spiders can crawl, index, and render your website without hitting server errors or broken redirect loops. "
+        "Below are all identified technical infrastructure defects requiring remediation."
+    )
+    _client_audit_table(doc, tech_issues)
+    return True
+
+
+def _client_onpage_audit_section(doc, result):
+    checks = result.get("checks") or []
+    onpage_issues = _get_category_issues(checks, categories=["onpage", "content"],
+                                         check_ids=["title_tag", "title_len", "meta_desc", "meta_desc_len",
+                                                    "headings_h1", "headings_structure", "content_depth",
+                                                    "thin_content", "img_alt_tags", "img_oversized",
+                                                    "orphan_pages", "internal_linking", "cta_presence",
+                                                    "cta_working", "url_structure"])
+    if not onpage_issues:
+        return False
+    _section_heading(doc, "3. On-Page SEO Audit")
+    doc.add_paragraph(
+        "On-Page SEO dictates how search engines evaluate your topical authority, keyword relevance, and page structure. "
+        "Missing title tags, weak heading hierarchy, orphan pages, and unoptimized imagery directly suppress keyword ranking positions."
+    )
+    _client_audit_table(doc, onpage_issues)
+    return True
+
+
+def _client_mobile_audit_section(doc, result):
+    checks = result.get("checks") or []
+    mobile_issues = _get_category_issues(checks, categories=["mobile", "performance"],
+                                         check_ids=["viewport", "mobile_friendly", "mobile_psi", "mobile_lcp",
+                                                    "mobile_cls", "mobile_touch_targets", "responsive_design"])
+    if not mobile_issues:
+        return False
+    _section_heading(doc, "4. Mobile Visibility and Usability")
+    doc.add_paragraph(
+        "Google evaluates your site through smartphone crawlers. Mobile responsiveness defects, small tap targets, and layout shift latency directly penalize search positions and hurt conversion rates."
+    )
+    _client_audit_table(doc, mobile_issues)
+    return True
+
+
+def _client_offpage_audit_section(doc, result):
+    checks = result.get("checks") or []
+    offpage_issues = _get_category_issues(checks, categories=["offpage"],
+                                          check_ids=["offpage_domain_authority", "offpage_page_authority",
+                                                     "offpage_outbound_links", "offpage_toxic_risk"])
+    if not offpage_issues:
+        return False
+    _section_heading(doc, "5. Off-Page SEO and Backlink Audit")
+    doc.add_paragraph(
+        "Assesses domain authority equity, referring link distribution, and distinguishes harmful or spammy outbound links from legitimate citations. "
+        "Uncontrolled outbound link leakage or toxic references can dilute domain trust."
+    )
+    _client_audit_table(doc, offpage_issues)
+    return True
+
+
+def _client_action_plan_section(doc, result):
+    items = result.get("action_items") or []
+
+    # 6-Tier Recommended Priority Order as specified by the client guide
+    tier_defs = [
+        (1, "Priority Tier 1: Search Visibility and Indexability",
+         "First, ensure that important website pages can be crawled, indexed, and discovered in search engines. Resolve any major visibility or indexing problems.",
+         "C02A2E"),
+        (2, "Priority Tier 2: Technical SEO",
+         "Fix critical crawl errors, server errors, redirect issues, sitemap problems, and other technical barriers.",
+         "E8590C"),
+        (3, "Priority Tier 3: On-Page SEO",
+         "Improve content quality, titles, meta descriptions, headings, internal linking, URLs, and image optimization.",
+         "2E7DF2"),
+        (4, "Priority Tier 4: Local SEO",
+         "Optimize Google Business Profile, local landing pages, citations, and location-based keyword visibility.",
+         "7C3AED"),
+        (5, "Priority Tier 5: Off-Page SEO",
+         "Improve backlink quality, build relevant links, and strengthen the website's authority and reputation.",
+         "059669"),
+        (6, "Priority Tier 6: Performance, Mobile UX, and Security",
+         "Address any remaining issues affecting website usability, speed, mobile experience, or security.",
+         "D97706"),
+    ]
+
+    client_buckets = {1: [], 2: [], 3: [], 4: [], 5: [], 6: []}
+
+    for it in items:
+        cat = (it.get("category") or "").lower()
+        cid = (it.get("id") or "").lower()
+        raw_tier = it.get("tier")
+
+        target_tier = 2
+        if raw_tier in (1, 2, 3, 4, 5, 6):
+            target_tier = raw_tier
+        elif cid in ("robots_present", "noindex_pages", "sitemap_present", "sitemap_status",
+                     "sitemap_valid", "canonical_self", "canonical_match", "redirect_chains",
+                     "broken_internal_links", "indexability", "crawlability", "meta_robots"):
+            target_tier = 1
+        elif cat == "technical":
+            target_tier = 2
+        elif cat in ("onpage", "content"):
+            target_tier = 3
+        elif cat == "local":
+            target_tier = 4
+        elif cat == "offpage":
+            target_tier = 5
+        elif cat in ("performance", "mobile", "security", "accessibility", "ux"):
+            target_tier = 6
+
+        # Business impact phrasing
+        biz_impact = it.get("business_impact") or ""
+        if not biz_impact or biz_impact.startswith("Ranked") or biz_impact.startswith("Ensures"):
+            if target_tier == 1:
+                biz_impact = "Ensures priority revenue pages are discovered and indexed by Google crawlers."
+            elif target_tier == 2:
+                biz_impact = "Eliminates server dropouts and crawl latency that quietly suppress keyword rankings."
+            elif target_tier == 3:
+                biz_impact = "Directly improves organic CTR on Google search results and lifts target keyword positions."
+            elif target_tier == 4:
+                biz_impact = "Strengthens Google Maps 3-pack local visibility and drives inbound calls."
+            elif target_tier == 5:
+                biz_impact = "Elevates domain trust equity and prevents toxic link association penalties."
+            elif target_tier == 6:
+                biz_impact = "Prevents scary browser 'Not Secure' blocks and cuts mobile visitor drop-off."
+
+        urls = it.get("where") or it.get("affected_urls") or []
+        client_buckets[target_tier].append({
+            "priority": it.get("priority", "Medium"),
+            "label": it.get("label", "Issue"),
+            "detail": it.get("detail", ""),
+            "fix": it.get("fix") or "Follow standard SEO guidelines to resolve.",
+            "business_impact": biz_impact,
+            "urls": urls,
+        })
+
+    total_client_items = sum(len(b) for b in client_buckets.values())
+    if total_client_items == 0:
+        return False
+
+    _section_heading(doc, "6. Prioritized SEO Action Plan")
+    doc.add_paragraph(
+        "All action items are organized according to our recommended priority order to ensure immediate risk mitigation and maximum organic visibility return on investment. "
+        "Each action item details its priority level, issue description, affected URLs, suggested solution, and expected business impact."
+    )
+
+    for t_num, t_title, t_desc, t_col in tier_defs:
+        b_items = client_buckets[t_num]
+        if not b_items:
+            continue
+
+        doc.add_heading(t_title, level=2)
+        doc.add_paragraph(t_desc)
+
+        table = doc.add_table(rows=1, cols=5)
+        table.style = "Table Grid"
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+        headers = ["Priority Level", "Issue Description", "Affected URLs", "Suggested Solution", "Expected Business Impact"]
+        for i, h in enumerate(headers):
+            _cell_text(table.rows[0].cells[i], [(h, {"size": 8.5, "bold": True})])
+        _style_header_row(table)
+
+        for item in b_items:
+            cells = table.add_row().cells
+
+            # 1. Priority Level
+            _cell_text(cells[0], [(item["priority"].upper(), {"size": 8, "bold": True,
+                                   "color": PRIORITY_FG.get(item["priority"], INK)})],
+                       align=WD_ALIGN_PARAGRAPH.CENTER,
+                       valign=WD_ALIGN_VERTICAL.CENTER,
+                       shade=PRIORITY_SHADE.get(item["priority"]))
+
+            # 2. Issue Description
+            desc_chunks = [(item["label"], {"size": 8.5, "bold": True})]
+            if item["detail"]:
+                desc_chunks.append(("\n" + item["detail"], {"size": 8, "color": SLATE}))
+            _cell_text(cells[1], desc_chunks)
+
+            # 3. Affected URLs
+            urls = item["urls"]
+            if urls:
+                url_str = "\n".join(urls[:2])
+                if len(urls) > 2:
+                    url_str += f"\n+{len(urls) - 2} more pages"
+            else:
+                url_str = "Homepage / Site-wide"
+            _cell_text(cells[2], [(url_str, {"size": 7.5, "color": MUTED})])
+
+            # 4. Suggested Solution
+            _cell_text(cells[3], [(item["fix"], {"size": 8, "color": BRAND_DK})])
+
+            # 5. Expected Business Impact
+            _cell_text(cells[4], [(item["business_impact"], {"size": 8, "color": BRAND_DK})])
+
+        _set_widths(table, [0.8, 1.8, 1.1, 1.7, 1.5])
+        _spacer(doc, 8)
+
+    return True
+
+
+def _client_roadmap_section(doc, result):
+    _section_heading(doc, "7. Implementation Roadmap & Next Steps")
+    doc.add_paragraph(
+        "To maximize search engine visibility and revenue recovery without exhausting internal resources, we recommend executing recommendations across a structured 3-phase timeline:"
+    )
+
+    phases = [
+        ("Phase 1: Immediate Triage (Week 1)",
+         "Resolve search visibility blockers, robots.txt, XML sitemap errors, critical 4xx/5xx crawl failures, and SSL/security response headers.",
+         BAD),
+        ("Phase 2: Core Optimization (Month 1)",
+         "Optimize target title tags, compelling meta descriptions, H1-H6 heading hierarchy, image compression, and internal linking.",
+         WARN),
+        ("Phase 3: Experience & Usability (Ongoing)",
+         "Refine mobile PageSpeed scores, satisfy Google Core Web Vitals thresholds, and establish proactive search monitoring.",
+         BRAND_DK),
+    ]
+
+    t = doc.add_table(rows=1, cols=3)
+    _no_table_borders(t)
+    _set_widths(t, [PAGE_W / 3] * 3)
+
+    shades = [("FBDDDB", BAD), ("FDF1CF", WARN), ("EBF2FE", BRAND_DK)]
+    for cell, (title, text, col), (shade, _) in zip(t.rows[0].cells, phases, shades):
+        _shade(cell, shade)
+        _cell_margins(cell, top=100, bottom=100, left=100, right=100)
+        p = cell.paragraphs[0]
+        _runs(p, [(title, {"size": 9.5, "bold": True, "color": col}),
+                  ("\n\n" + text, {"size": 8.5, "color": SLATE})])
+    _spacer(doc, 10)
+
+    _callout(doc, "Partner with Mindcob for Turnkey Remediation",
+             "Mindcob specializes in end-to-end technical, on-page, and security SEO remediation. "
+             "We can deploy these exact fixes directly with your engineering or content team to rapidly recover suppressed search rankings and traffic.",
+             accent="2E7DF2", shade="F3F7FD", title_color=BRAND_DK)
+
+
+# ---- Entry Points ----------------------------------------------------------
+
 def generate_docx_report(result, path, charts=None):
+    """Full comprehensive technical agency report."""
     doc = Document()
     _base_styles(doc)
     _header_footer(doc, result)
@@ -940,3 +1437,44 @@ def generate_docx_report(result, path, charts=None):
 
     doc.save(path)
     return path
+
+
+def generate_client_docx_report(result, path, charts=None):
+    """
+    Executive Vulnerability & Risk Report:
+    - NO SCORING (No overall score numbers, no grades, no progress meters)
+    - High-urgency Threat Assessment Hero
+    - Strictly focuses on ERRORS, WARNINGS, and CONCRETE SOLUTIONS
+    - Structured according to the official client audit guide:
+        1. Website Security Audit
+        2. Technical SEO Audit
+        3. On-Page SEO Audit
+        4. Mobile Visibility and Usability
+        5. Off-Page SEO and Backlink Audit
+        6. Prioritized SEO Action Plan (in strict 6-tier recommended priority order)
+        7. 3-Phase Implementation Roadmap
+    """
+    doc = Document()
+    _base_styles(doc)
+    _client_header_footer(doc, result)
+
+    _client_cover(doc, result)
+    doc.add_page_break()
+    _client_threat_overview(doc, result)
+    if _client_security_audit_section(doc, result):
+        _spacer(doc, 10)
+    if _client_technical_audit_section(doc, result):
+        _spacer(doc, 10)
+    if _client_onpage_audit_section(doc, result):
+        _spacer(doc, 10)
+    if _client_mobile_audit_section(doc, result):
+        _spacer(doc, 10)
+    if _client_offpage_audit_section(doc, result):
+        _spacer(doc, 10)
+    if _client_action_plan_section(doc, result):
+        doc.add_page_break()
+    _client_roadmap_section(doc, result)
+
+    doc.save(path)
+    return path
+

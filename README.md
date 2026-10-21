@@ -1,107 +1,90 @@
 # SEO Audit Pro
 
-Give it a website URL. It **crawls the whole site**, runs a world-class SEO
-audit across seven categories, and exports a **client-ready Word (.docx) report
-with charts** — plus a live, tabbed preview inside the app.
+Website intelligence for SEO agencies: a Windows desktop application for
+Managers, Team Leads and Agents to manage leads, run real technical SEO and
+passive security audits, deliver client reports, run audit-grounded email
+outreach and collaborate — backed by a secure API server.
 
-**100% free. No API keys required.** All data comes from your own HTTP crawler
-and Google's **PageSpeed Insights v5**, which runs *keyless* (it returns
-Lighthouse scores **and** real-user Core Web Vitals from the CrUX dataset). An
-optional free Groq/OpenRouter/Anthropic/Gemini key only adds an AI-written
-executive summary; everything else works fully offline.
-
-Part of the **Mindcob Toolbox** — launch it from the toolbox, or run it directly.
-
-## Run (1-Click Web Launch)
-
-Just double-click **`run.bat`** or execute:
-
-```bat
-.venv\Scripts\python.exe web_app.py
+```
+Windows desktop (PySide6)  ──HTTPS / WSS──▶  Flask API (one process)  ──▶  PostgreSQL (Neon)
+                                             │
+                                             └─ existing audit engine, report generator, SMTP queue
 ```
 
-It starts the local web server and **automatically opens the Web UI in your default browser** (`http://127.0.0.1:5055`).
+The desktop client never connects to the database and contains no server
+secrets. See [docs/architecture.md](docs/architecture.md).
 
-Alternatively:
+## Quick start (local development)
+
 ```bat
-:: python app.py also launches the Web UI by default
-.venv\Scripts\python.exe app.py
+:: 1. API server on the local SQLite database
+set SEO_DB=sqlite
+.venv\Scripts\python.exe scripts\dev_seed.py     :: once; demo accounts -> server_data\dev_credentials.txt
+run.bat                                           :: http://127.0.0.1:5055
 
-:: Headless CLI mode:
-python app.py --cli https://example.com --out report.docx --pages 25
+:: 2. Desktop client
+run_desktop.bat
 ```
 
-## Features in the New Web UI
+Build the Windows executable (and installer, if Inno Setup 6 is installed):
 
-- **Dual-Mode Dashboard**: Seamlessly switch between **Executive / Layman View** (simplified business insights, plain English priorities) and **SEO Expert Matrix** (deep technical diagnostics, heading trees, schema inspection, crawled inventory).
-- **Interactive Visualizations**: Animated circular health score gauge with letter grade (A+ through F), 8-axis category radar footprint, issue severity donut chart, and Core Web Vitals threshold meters.
-- **SERP & Social Card Simulators**: Live Google search snippet preview (Desktop & Mobile with character & pixel length gauges) and OpenGraph / Twitter card previews.
-- **Core Web Vitals & PageSpeed v5**: Side-by-side Mobile & Desktop Lighthouse lab simulations plus real-user CrUX field data.
-- **Export Deliverables**:
-  - **Word Report (.docx)**: Client-ready document with native styled tables and executive summary.
-  - **PDF Report**: High-fidelity export via Microsoft Word or instant browser print-to-PDF engine.
-  - **1-Click Section Image Download**: Dedicated camera icon on every card and chart to export high-resolution PNG snapshots (powered by html2canvas).
-- **SEO Progress Tracker**: Historical multi-line trend chart tracking overall score and category progression over time, plus a delta comparison engine (Before vs. After: score delta, fixed issues, new issues, and speed change).
-- **Web-Based Settings**: Configure AI keys (Groq, Gemini, OpenRouter), PageSpeed API keys, proxy, and crawler parameters directly from the browser.
+```bat
+build_exe.bat
+```
 
-## What it checks (8 scored categories, ~70 checks)
+Production deployment, environment variables and first-Manager setup:
+[docs/deployment.md](docs/deployment.md).
 
-| Category | Examples |
-|----------|----------|
-| **Technical SEO** | robots.txt, XML sitemap, canonical, noindex/indexability, redirect chains, HTTP→HTTPS, broken links, URL structure, **structured data / schema validation**, Open Graph/Twitter, hreflang, pagination, AI-crawler rules |
-| **On-Page SEO** | title & meta length + uniqueness across the crawl, single H1, heading hierarchy, thin content, image alt, internal links, favicon |
-| **Performance** | PageSpeed mobile+desktop (Performance/SEO/Best-Practices), lab LCP/TBT/CLS/FCP, **real-user CrUX** LCP/INP/CLS/FCP/TTFB, render-blocking, page weight, compression, cache, unused CSS/JS |
-| **Content Quality** | readability, content depth, keyword density, author/E-E-A-T, dates, About/Contact (NAP), thin content |
-| **Mobile** | viewport + configuration, responsive-design signals, legible font sizes, tap targets, mobile page speed |
-| **Accessibility** | document language, alt text, form labels, descriptive link text, landmarks, **live Lighthouse a11y audits** (color-contrast, ARIA, …) |
-| **Security** | HTTPS/SSL, HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, mixed content, cookie flags |
-| **User Experience** | layout stability (CLS), interactivity (INP), perceived load speed, font loading |
+## What it does
 
-## Scoring
+| Area | Highlights |
+|---|---|
+| Access | Sign-in with lockout, forgot/reset password by emailed code, mandatory change of temporary passwords, refresh-token sessions stored in Windows Credential Manager, sign-out everywhere on password change |
+| Roles | Manager, Team Lead, Agent — enforced by the API (see [docs/security.md](docs/security.md)) |
+| Lead Bank | Built for Google Maps scrapes (one niche + area per file, many files, millions of rows): multi-file CSV/XLSX import running in the background with live progress; rows without a website and duplicates (by domain or phone, against the bank and within the file) removed and listed per file; niche → area navigator with counts; filters for unassigned / audited / contacted; select all matching across pages; assign to a person or team, or split evenly across a team; assignment history and conflict protection; CSV export; archive |
+| Audits | One click from a lead, or bulk: select leads (or all matching) and queue up to 100 per run (500 for Managers); a saved server-side queue runs 2 at a time by default (sized for a 4 GB server), single audits first and fair turns between people, survives restarts; Queue view with progress, time left and cancel; one notification per finished batch. Real progress from the engine; scored results, issue explorer with resolved/unresolved tracking, passive security findings, recommendations, crawled pages |
+| Reports | Client and technical DOCX when an audit completes; PDF created on first open (Word/LibreOffice on the server, one at a time); standalone HTML client report; JSON export. Results are stored compressed (~80 KB per audit) |
+| Outreach | Email drafts generated only from real audit findings and always editable; attachments; encrypted SMTP (Gmail or company domain); rate-limited queue; bulk outreach with preview and confirmation; delivery activity |
+| Collaboration | Direct messages and team channels with presence, typing, replies, edits, deletes, reactions, attachments and search; notifications |
+| Administration | Teams, users, immutable audit log, audit defaults |
 
-Each check is `pass` / `warn` / `fail` (or `info` / `na`). Checks roll up into a
-**severity-weighted per-category score**, then into a **weighted overall score
-and A+–F grade**. Categories with no applicable checks are dropped and the
-weights renormalise, with a confidence/completeness indicator. Honest penalties
-(noindexed homepage, no HTTPS, critical failures) are surfaced, not hidden. Every
-non-pass finding becomes a **prioritized action item** with **Problem · Impact ·
-Recommendation · Difficulty · Estimated SEO Gain · Priority**, sorted Critical →
-Low so the quick wins float to the top.
+## The audit engine
 
-## Competitor comparison (optional)
+Give it a website; it crawls the site and runs ~70 checks across ten weighted
+categories, plus PageSpeed Insights (lab + real-user CrUX data) and a passive
+security assessment.
 
-Add competitor URLs in **⚙ Options** to benchmark up to three rivals side-by-side
-— overall score, mobile speed, HTTPS, title/meta, word count and schema — with a
-comparison chart and table.
+| Category | Weight | Examples |
+|---|---|---|
+| Technical SEO | 16% | robots.txt, sitemap, canonicals, indexability, redirects, broken links, structured data, hreflang |
+| On-Page SEO | 14% | titles, meta descriptions, headings, thin content, image alt, internal links |
+| Performance | 14% | PageSpeed mobile/desktop, Core Web Vitals, render-blocking, compression, caching |
+| Content | 10% | readability, depth, E-E-A-T signals, NAP |
+| Mobile | 10% | viewport, responsive signals, tap targets, mobile speed |
+| Security | 8% | HTTPS/TLS, certificates, HSTS, security headers, cookies, information disclosure, sensitive file exposure, known JS library CVEs, SPF/DMARC/DKIM, authentication surface, WAF, technology fingerprint |
+| Local SEO | 8% | local business signals |
+| Off-Page / Authority | 8% | estimated authority model (labelled as an estimate) |
+| Accessibility | 8% | language, labels, link text, landmarks, Lighthouse a11y |
+| UX | 4% | layout stability, interactivity, font loading |
 
-## The report
+Each check is pass (1.0) / warning (0.3) / fail (0.0); `info` and
+not-applicable checks are excluded, categories without data are dropped and
+weights renormalised, and honest penalties are applied. The security
+assessment is passive: exposed sensitive files are reported only as "Publicly
+accessible", never downloaded or quoted. Scoring and rules are documented in
+[docs/AUDIT_SCORING.TXT](docs/AUDIT_SCORING.TXT) and
+[docs/SCORING_RULES.TXT](docs/SCORING_RULES.TXT).
 
-A branded, agency-grade document with: **cover** (domain, date, overall grade,
-score gauge, KPI cards), **table of contents**, **executive summary** with
-strengths / weaknesses / opportunities, **score dashboard** (per-category bars +
-radar chart + colored scorecard), **prioritized action plan** (severity donut +
-top-issues chart + Problem/Impact/Recommendation/Difficulty/Gain table),
-**per-category detailed findings**, **competitor comparison**, a crawl/data
-appendix, branded page header/footer with page numbers, and a methodology note.
-Charts are rendered with matplotlib.
+## Documentation
 
-## Export
-
-- **DOCX** — the primary deliverable (auto-generated and opened when an audit
-  finishes).
-- **PDF** — rendered via Microsoft Word if installed (updates the table of
-  contents and page numbers); otherwise open the DOCX and "Save as PDF".
-- **HTML** and **JSON** — standalone exports.
-
-## Notes & limits
-
-- **No API key needed.** PageSpeed Insights is keyless; an optional
-  `PAGESPEED_API_KEY` only raises quota. An optional AI key (any of Groq /
-  OpenRouter / Anthropic / Gemini, auto-detected) writes the executive summary.
-- The crawler fetches rendered-by-server HTML (no headless browser), so
-  JavaScript-only content may be under-counted — same limitation as the other
-  Mindcob tools.
-- The audit is bounded (default 25 pages, configurable) to stay fast and free.
-- Paid data an agency might also buy — keyword volumes, backlinks, competitor
-  rankings, SERP snapshots — is intentionally **not** included (that needs a paid
-  provider like SE Ranking). This tool covers everything obtainable for free.
+| Document | Contents |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Components, request flow, structure |
+| [docs/desktop.md](docs/desktop.md) | Startup, sign-in flows, navigation, local data, design system |
+| [docs/api.md](docs/api.md) | REST and WebSocket reference |
+| [docs/database.md](docs/database.md) | Schema, constraints, migrations |
+| [docs/security.md](docs/security.md) | Authentication, RBAC matrix, data protection |
+| [docs/deployment.md](docs/deployment.md) | Server and client deployment |
+| [docs/testing.md](docs/testing.md) | Automated and manual tests |
+| [docs/IMPLEMENTATION_RECORD.md](docs/IMPLEMENTATION_RECORD.md) | What was found, changed, fixed, and what remains |
+| `docs/*.TXT` | Engine methodology notes (scoring, security headers, indexation, …) |

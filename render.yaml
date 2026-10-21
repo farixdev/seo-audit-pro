@@ -1,11 +1,24 @@
 services:
   - type: web
-    name: seo-audit-pro
+    name: seo-audit-pro-api
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 180
+    # One process only: realtime hub, audit workers and email queue are in-process.
+    startCommand: gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 32 --timeout 180
+    disk:
+      name: seo-data
+      mountPath: /var/data/seo-audit-pro
+      sizeGB: 5
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: SEO_ENV
+        value: production
+      - key: SEO_DATA_DIR
+        value: /var/data/seo-audit-pro
       - key: DATABASE_URL
         sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATA_ENCRYPTION_KEY
+        generateValue: true

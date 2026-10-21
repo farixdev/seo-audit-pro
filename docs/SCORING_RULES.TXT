@@ -1,0 +1,86 @@
+======================================================================
+SEO AUDIT PRO — HOW AUDIT SCORES ARE CALCULATED (ONE-LINER CHEATSHEET)
+======================================================================
+
+1. CATEGORY WEIGHTS (TOTAL = 100%)
+----------------------------------------------------------------------
+* Technical SEO:      16% (0.16) -> Crawlability, robots.txt, sitemaps, redirects
+* On-Page SEO:        14% (0.14) -> Titles, meta descriptions, headings, canonicals
+* Performance:        14% (0.14) -> Core Web Vitals (LCP, CLS, INP) & PageSpeed score
+* Content Quality:    10% (0.10) -> Word counts, thin content, readability, keyword stuffing
+* Mobile Experience:  10% (0.10) -> Viewport tag, tap targets, mobile responsiveness
+* Accessibility:       8% (0.08) -> Image alt tags, color contrast, ARIA landmarks
+* Security:            8% (0.08) -> SSL certificate, HTTPS enforcement, security headers
+* Local SEO:           8% (0.08) -> LocalBusiness schema, address/NAP consistency
+* Off-Page SEO:        8% (0.08) -> Domain authority signals, link graph trust
+* User Experience:     4% (0.04) -> Visual layout shift, viewport stability, UI ergonomics
+
+
+2. CHECK VALUES & STATUS CREDITS
+----------------------------------------------------------------------
+* PASS = 1.0  (Earns 100% full credit)
+* WARN = 0.3  (Earns strict 30% partial credit — agency standard)
+* FAIL = 0.0  (Earns 0% credit)
+* INFO / N/A  (Excluded completely — does not count for or against)
+
+
+3. SEVERITY MULTIPLIERS (IMPORTANCE OF EACH CHECK)
+----------------------------------------------------------------------
+* Critical check: 5x multiplier (5 points in denominator)
+* High check:     3x multiplier (3 points in denominator)
+* Medium check:   2x multiplier (2 points in denominator)
+* Low check:      1x multiplier (1 point in denominator)
+
+
+4. HOW A CATEGORY SCORE IS CALCULATED (0 TO 100)
+----------------------------------------------------------------------
+Category Score = (Sum of Earned Points / Total Possible Weight) * 100
+
+Example: 
+- 1 Passed High check (3 * 1.0 = 3) + 1 Warned Medium check (2 * 0.3 = 0.6) = 3.6 earned
+- Total Possible Weight = 3 + 2 = 5
+- Category Score = (3.6 / 5) * 100 = 72 / 100
+
+
+5. HOW OVERALL BASE SCORE IS CALCULATED
+----------------------------------------------------------------------
+Base Score = Sum of each (Category Score * Category Weight)
+
+Example:
+- Technical (100 * 0.16) = 16.0 pts
+- On-Page (75 * 0.14)    = 10.5 pts
+- Performance (98 * 0.14) = 13.7 pts
+- Content (84 * 0.10)     =  8.4 pts
+- Mobile (100 * 0.10)     = 10.0 pts
+- Accessibility (51 * 0.08) = 4.1 pts
+- Security (92 * 0.08)    =  7.4 pts
+- Local SEO (63 * 0.08)   =  5.0 pts
+- Off-Page (100 * 0.08)   =  8.0 pts
+- UX (66 * 0.04)          =  2.6 pts
+Total Base Score          = 85.7 pts
+
+
+6. DIRECT PENALTIES DEDUCTED FROM OVERALL SCORE
+----------------------------------------------------------------------
+* Homepage set to noindex:             -10 points deducted from total score
+* Site not served over HTTPS:           -8 points deducted from total score
+* Critical check failures:              -8 points per critical fail (max -24 pts)
+* High-severity failures:               -3 points per high fail (max -12 pts)
+
+FINAL SCORE = Base Score MINUS Penalties (clamped between 0 and 100)
+
+
+7. FINAL LETTER GRADE BANDS
+----------------------------------------------------------------------
+* 95 to 100 = A+ (World Class)
+* 90 to 94  = A  (Excellent)
+* 86 to 89  = A- (Very Strong)
+* 82 to 85  = B+ (Strong / Above Average)
+* 78 to 81  = B  (Solid Foundation)
+* 74 to 77  = B- (Fair / Gaps to Close)
+* 69 to 73  = C+ (Needs Work)
+* 64 to 68  = C  (Below Average)
+* 59 to 63  = C- (At Risk)
+* 53 to 58  = D+ (Poor)
+* 46 to 52  = D  (Critical Issues Suppressing Traffic)
+* 0  to 45  = F  (Failing / Urgent Action Required)

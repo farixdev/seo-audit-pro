@@ -1,0 +1,23 @@
+START AT 30 SCORE
++22 FOR .gov .edu .mil .org 
++12 for .com, .net, .io, .ca, .co.uk, .ai
+-8 for .xyz, .top, .click, .site or other 
+
+doman name if:
+8 charater seemled without hyphens +6pt
+domain woith hyphens or more than 20 character -4 pts
+
+
+ssl certifictae +8pt
+100 crawled pages $\rightarrow$ +14 pts
+50 crawled pages $\rightarrow$ +10 pts
+20 crawled pages $\rightarrow$ +6 pts
+
+On-Page & Architecture Equity:
+word count > 1500 +6pts
+internal links 40+ on the homepage +6 pts
+
+metadata titlE&images +3pt
+
+ageSpeed score > 85 adds +5 pts; slow sites <40 lose -5 pts.
+
