@@ -10,7 +10,7 @@ import re
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QCheckBox, QFrame, QLabel, QStackedWidget, QWidget
 
-from seo_audit_pro import icons, local_server
+from seo_audit_pro import TEAM_SERVER_URL, icons, local_server
 from seo_audit_pro.core import api, local, settings, tasks
 from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C
@@ -187,7 +187,8 @@ class AuthView(QWidget):
         self.server_label = label("", "Meta")
         footer.addWidget(self.server_label)
         self.change_link = button("Change", "link")
-        self.change_link.clicked.connect(lambda: self.show_page("welcome"))
+        # A build tied to a team server never offers "On this computer".
+        self.change_link.clicked.connect(lambda: self.show_page("server" if TEAM_SERVER_URL else "welcome"))
         footer.addWidget(self.change_link)
         footer.addStretch(1)
         lay.addLayout(footer)
@@ -566,6 +567,7 @@ class AuthView(QWidget):
         links.addWidget(back)
         other = button("Use it on this computer instead", "link")
         other.clicked.connect(lambda: self.show_page("welcome"))
+        other.setVisible(not TEAM_SERVER_URL)
         links.addWidget(other)
         links.addStretch(1)
         p.form.addLayout(links)

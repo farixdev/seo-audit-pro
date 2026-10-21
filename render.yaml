@@ -1,10 +1,17 @@
+# SEO Audit Pro team server on Render (Blueprint).
+# Render dashboard > New > Blueprint > pick this repository. It asks for the
+# values marked "sync: false"; everything else is set here.
 services:
   - type: web
-    name: seo-audit-pro-api
+    name: mindcob-seo-audit-pro
     runtime: python
+    region: ohio            # next to the Neon database (AWS us-east-2)
+    plan: starter           # disks need a paid plan; the free plan also sleeps when idle
     buildCommand: pip install -r requirements.txt
-    # One process only: realtime hub, audit workers and email queue are in-process.
+    # One process only: the live-event hub, audit queue and email worker are in-process.
     startCommand: gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 32 --timeout 180
+    healthCheckPath: /api/health
+    autoDeploy: true
     disk:
       name: seo-data
       mountPath: /var/data/seo-audit-pro
@@ -16,9 +23,24 @@ services:
         value: production
       - key: SEO_DATA_DIR
         value: /var/data/seo-audit-pro
+      - key: MAX_CONCURRENT_AUDITS
+        value: "2"
+      # The Neon connection string (Neon console > Connection details).
       - key: DATABASE_URL
         sync: false
+      # Created once and kept; changing DATA_ENCRYPTION_KEY makes saved email passwords unreadable.
       - key: SECRET_KEY
         generateValue: true
       - key: DATA_ENCRYPTION_KEY
         generateValue: true
+      # First Manager account, created on the first start when no account exists.
+      # The password is temporary: the app asks to change it at the first sign-in.
+      - key: BOOTSTRAP_MANAGER_EMAIL
+        sync: false
+      - key: BOOTSTRAP_MANAGER_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_MANAGER_NAME
+        sync: false
+      # Optional: Google PageSpeed key (can also be saved later in the app's Settings).
+      - key: PAGESPEED_API_KEY
+        sync: false

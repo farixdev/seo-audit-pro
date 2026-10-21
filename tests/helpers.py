@@ -1,5 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Test harness: isolated SQLite database + data directory per test run."""
+"""Test harness: isolated database + data directory per test run.
+
+By default every run uses a fresh SQLite file. With ``SEO_TEST_POSTGRES=1`` the
+same tests run against a PostgreSQL TEST database (for example a Neon test
+branch) whose URL is in ``SEO_TEST_DATABASE_URL`` or in
+``server_data/test_database_url.txt``. That database is WIPED at the start of
+the run, so it is refused when it points at the same host as the
+``DATABASE_URL`` in ``.env`` (the live database).
+"""
 
 import os
 import socketserver
@@ -7,15 +15,58 @@ import sys
 import tempfile
 import threading
 import uuid
+from urllib.parse import urlparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+
+def _live_database_host():
+    try:
+        with open(os.path.join(ROOT, ".env"), encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip().startswith("DATABASE_URL="):
+                    return urlparse(line.split("=", 1)[1].strip().strip("'\"")).hostname
+    except OSError:
+        pass
+    return None
+
+
+def _postgres_test_url():
+    url = (os.environ.get("SEO_TEST_DATABASE_URL") or "").strip()
+    path = os.path.join(ROOT, "server_data", "test_database_url.txt")
+    if not url and os.path.isfile(path):
+        url = open(path, encoding="utf-8").read().strip()
+    if not url:
+        sys.exit("SEO_TEST_POSTGRES=1 needs SEO_TEST_DATABASE_URL or server_data/test_database_url.txt")
+    host = urlparse(url).hostname
+    if not host or host == _live_database_host():
+        sys.exit("Refusing to run tests: the test database URL points at the live database in .env.")
+    return url
+
+
+def _wipe_postgres(url):
+    import psycopg2
+    from backend.db import _clean_pg_url
+    conn = psycopg2.connect(_clean_pg_url(url), connect_timeout=15)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute("DROP SCHEMA public CASCADE")
+        cur.execute("CREATE SCHEMA public")
+    conn.close()
+
+
 _TMP = tempfile.mkdtemp(prefix="seo_audit_pro_test_")
 os.environ["SEO_DATA_DIR"] = _TMP
-os.environ["DATABASE_URL"] = ""          # never touch a real database from tests
-os.environ["SEO_DB"] = "sqlite"
+POSTGRES = os.environ.get("SEO_TEST_POSTGRES") == "1"
+if POSTGRES:
+    _url = _postgres_test_url()
+    os.environ["DATABASE_URL"] = _url
+    os.environ["SEO_DB"] = "postgres"
+else:
+    os.environ["DATABASE_URL"] = ""      # never touch a real database from tests
+    os.environ["SEO_DB"] = "sqlite"
 os.environ["SEO_ENV"] = "test"
 os.environ["SECRET_KEY"] = "test-secret-key-" + uuid.uuid4().hex
 os.environ["DATA_ENCRYPTION_KEY"] = "test-data-key-" + uuid.uuid4().hex
@@ -23,6 +74,9 @@ os.environ["EMAIL_SEND_INTERVAL_SECONDS"] = "0"
 os.environ["LOGIN_ATTEMPTS_PER_IP_5MIN"] = "100000"  # every test client shares 127.0.0.1
 for key in ("GROQ_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
     os.environ[key] = ""
+
+if POSTGRES:
+    _wipe_postgres(_url)
 
 from backend import db, security  # noqa: E402
 from backend.app import create_app  # noqa: E402

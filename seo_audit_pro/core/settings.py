@@ -7,9 +7,9 @@ import sys
 
 from PySide6.QtCore import QSettings
 
-from seo_audit_pro import APP_NAME, ORG_NAME
+from seo_audit_pro import APP_NAME, ORG_NAME, TEAM_SERVER_URL
 
-DEFAULT_API_URL = os.environ.get("SEO_API_URL", "http://127.0.0.1:5055")
+DEFAULT_API_URL = os.environ.get("SEO_API_URL") or TEAM_SERVER_URL or "http://127.0.0.1:5055"
 PROFILE = (os.environ.get("SEO_AUDIT_PRO_PROFILE") or "").strip()  # isolated settings, used for testing
 _RUNTIME = {"local_url": None}
 
@@ -26,6 +26,8 @@ def mode():
     value = _store().value("mode")
     if value in (LOCAL, REMOTE):
         return value
+    if TEAM_SERVER_URL:  # this build connects to the team server: no first-run choice
+        return REMOTE
     return None if getattr(sys, "frozen", False) or PROFILE else REMOTE  # a profile behaves like a fresh install
 
 

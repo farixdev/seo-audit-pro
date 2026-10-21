@@ -122,7 +122,7 @@ class Startup:
         def offline(err):
             self.finish("signin", f"Server unavailable — {err.message} You can retry signing in or change the server address.")
 
-        tasks.run(api.health, on_done=connected, on_error=offline)
+        tasks.run(api.health, timeout=30, on_done=connected, on_error=offline)  # a cloud server can be slow to wake
 
     def finish(self, target, notice=None, kind="error"):
         self.step("Ready", 1.0)
