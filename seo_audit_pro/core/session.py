@@ -19,7 +19,7 @@ from PySide6.QtCore import QObject, Signal
 from seo_audit_pro.core import settings
 
 log = logging.getLogger("seo_audit_pro.client")
-_KEYRING_SERVICE = "SEO Audit Pro"
+_KEYRING_SERVICE = "SEO Audit Pro" + (f" ({settings.PROFILE})" if settings.PROFILE else "")
 
 
 class Session(QObject):
@@ -101,6 +101,8 @@ class Session(QObject):
 
     # -- secure storage -----------------------------------------------------
     def _key(self):
+        if settings.mode() == settings.LOCAL:  # the local port can change between runs
+            return "this-computer"
         return settings.api_url()
 
     def _persist(self):

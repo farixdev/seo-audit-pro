@@ -64,12 +64,17 @@ Build on Windows:
 build_exe.bat
 ```
 
-produces `dist\SEOAuditPro\SEOAuditPro.exe` (one-folder build) and, when Inno
-Setup 6 is installed, `dist\SEOAuditPro-Setup-3.0.0.exe` (installer with Start
-menu entry, optional desktop shortcut and uninstaller). On first launch, users
-set the server address from the sign-in screen ("Change server"). The default
-is `http://127.0.0.1:5055` for local development and can be preset with the
-`SEO_API_URL` environment variable.
+produces `dist\SEOAuditPro\SEOAuditPro.exe` (one-folder build that includes the
+API server and the audit engine), `dist\SEO-Audit-Pro-Portable-3.0.0.zip` (the
+app folder, *READ ME FIRST.txt* and the PDF manuals from `docs\manuals\`) and,
+when Inno Setup 6 is installed, `dist\SEOAuditPro-Setup-3.0.0.exe`.
+
+On first launch users choose **On this computer** (the app runs its built-in
+server with its own SQLite database; no setup needed) or **Connect to a team
+server** (enter the server address). A local workspace can be shared on the
+office network from Settings › This computer; others connect to the address
+shown there. Running from source, the app connects to `http://127.0.0.1:5055`
+by default (`SEO_API_URL` overrides it).
 
 ## Local development
 

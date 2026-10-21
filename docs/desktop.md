@@ -1,15 +1,30 @@
 # Desktop client
 
 `SEOAuditPro.exe` (source: `seo_audit_pro/`, launcher `SEOAuditPro.pyw`) is a
-PySide6 application. It talks only to the API server.
+PySide6 application. It talks only to the API server — either its own built-in
+server ("On this computer") or a team server.
+
+## Modes
+
+* **On this computer** (the default choice on first run): the app starts the
+  same exe with `--serve` as a windowless background process
+  (`seo_audit_pro/local_server.py`). It listens on 127.0.0.1 (port 5057 or the
+  next free one), keeps everything in `%LOCALAPPDATA%\SEO Audit Pro\data`
+  (SQLite database, generated keys, reports, uploads, logs), exits when the app
+  closes or crashes, and is restarted by the app if it stops. A Manager can let
+  other computers on the network connect (Settings › This computer).
+* **Connect to a team server**: the app uses the saved server address.
+
+Only one app window runs per Windows user; a second launch brings it forward.
+`SEO_AUDIT_PRO_PROFILE=<name>` gives separate settings and data (testing).
 
 ## Startup
 
 1. **Splash** — brand mark, product name, and a small startup log in the
    bottom-left: *Initializing application → Loading configuration → Loading
-   interface → Checking local resources → Initializing secure session →
-   Connecting to &lt;server&gt; → (Restoring your session → Loading workspace) →
-   Ready*. Each line corresponds to real work; the progress line follows it.
+   interface → Checking local resources → (Starting the audit server on this
+   computer) → Initializing secure session → Connecting to &lt;server&gt; →
+   (Restoring your session → Loading workspace) → Ready*. Each line corresponds to real work; the progress line follows it.
    Heavy modules load while the splash is visible. No secrets or stack traces
    are ever shown.
 2. **Sign in** — or straight into the workspace when "Keep me signed in" was
@@ -22,6 +37,8 @@ PySide6 application. It talks only to the API server.
 
 | Screen | Purpose |
 |---|---|
+| Welcome | First run only: "On this computer" or "Connect to a team server" |
+| Create the Manager account | First run of a new local workspace: name, email, password (policy checklist); calls `POST /api/setup/manager`, allowed only while no account exists and only from this computer |
 | Sign in | Email, password (show/hide), keep me signed in, forgot password |
 | Reset your password | Requests an emailed 8-digit code (works when SMTP is configured) |
 | Enter your reset code | Code + new password with live policy checklist |
@@ -116,8 +133,10 @@ polls every 5 s and the open chat every 15 s.
 
 ## Local data
 
-* Preferences (server address, window geometry, sidebar state):
-  `HKCU\Software\Mindcob\SEO Audit Pro`.
+* Preferences (mode, server address, local port, network sharing, window
+  geometry, sidebar state): `HKCU\Software\Mindcob\SEO Audit Pro`.
+* Built-in server data (On this computer mode):
+  `%LOCALAPPDATA%\SEO Audit Pro\data`.
 * Refresh token (only with "Keep me signed in"): Windows Credential Manager,
   entry "SEO Audit Pro".
 * Downloads: `Documents\SEO Audit Pro`.

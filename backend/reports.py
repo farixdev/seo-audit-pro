@@ -203,7 +203,7 @@ def render_client_html(audit_id, result):
     """Self-contained HTML client report (no server round-trips needed)."""
     global _LUCIDE_JS
     if _LUCIDE_JS is None:
-        p = os.path.join(config.ROOT_DIR, "static", "libs", "lucide.min.js")
+        p = os.path.join(config.RESOURCE_DIR, "static", "libs", "lucide.min.js")
         try:
             with open(p, encoding="utf-8") as fh:
                 _LUCIDE_JS = fh.read().replace("</script", "<\\/script")

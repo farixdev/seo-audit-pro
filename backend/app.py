@@ -58,7 +58,7 @@ def create_app(start_workers=True):
     history_manager.HISTORY_FILE = os.path.join(hist_dir, "history.json")
     history_manager.TARGETS_FILE = os.path.join(hist_dir, "targets.json")
 
-    root = config.ROOT_DIR
+    root = config.RESOURCE_DIR
     app = Flask("seo_audit_pro", template_folder=os.path.join(root, "templates"),
                 static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024

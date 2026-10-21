@@ -22,6 +22,7 @@ import itertools
 import json
 import logging
 import math
+import os
 import re
 import socket
 import threading
@@ -60,6 +61,19 @@ def audit_settings():
         except ValueError:
             pass
     return data
+
+
+def pagespeed_key():
+    """Google PageSpeed Insights API key: the one saved in Settings, else the
+    PAGESPEED_API_KEY environment variable. Without a key Google allows only a
+    small shared quota, so PageSpeed data is often missing."""
+    row = db.query_one("SELECT value FROM app_settings WHERE key = 'pagespeed_key'")
+    if row and row["value"]:
+        try:
+            return security.decrypt_secret(row["value"])
+        except Exception:  # noqa: BLE001 - key encrypted with another DATA_ENCRYPTION_KEY
+            log.warning("The saved PageSpeed key could not be decrypted; save it again in Settings.")
+    return (os.environ.get("PAGESPEED_API_KEY") or "").strip() or None
 
 
 def concurrency():
@@ -414,7 +428,8 @@ def _run(audit_id):
         params = {}
     defaults = audit_settings()
     params = {"url": row["url"], "max_pages": params.get("max_pages") or defaults["max_pages"],
-              "psi_strategy": params.get("psi_strategy") or defaults.get("psi_strategy", "both")}
+              "psi_strategy": params.get("psi_strategy") or defaults.get("psi_strategy", "both"),
+              "psi_key": pagespeed_key()}
     state = {"percent": 2, "step": "Starting audit", "pages_processed": 0, "pages_discovered": 0, "last_write": 0.0}
     flush_lock = threading.Lock()
 

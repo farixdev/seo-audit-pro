@@ -62,19 +62,41 @@ class Startup:
         from seo_audit_pro.core import settings
         self.step("Initializing application…", 0.08)
         self.step("Loading configuration…", 0.18)
-        server = settings.api_url()
         self.step("Loading interface…", 0.30)
         from seo_audit_pro.ui.main_window import MainWindow
         self.window = MainWindow()
-        self.step("Checking local resources…", 0.45)
+        self.step("Checking local resources…", 0.40)
         missing = [f for f in ("app.ico", "check-white.svg") if not os.path.isfile(os.path.join(settings.asset_dir(), f))]
         if missing:
             logging.getLogger("seo_audit_pro").warning("Missing assets: %s", missing)
-        self.step("Initializing secure session…", 0.55)
-        from seo_audit_pro.core import api, tasks
+        mode = settings.mode()
+        if mode is None:  # first run: choose "This computer" or a team server
+            self.finish("welcome")
+        elif mode == settings.LOCAL:
+            self.start_local()
+        else:
+            self.connect()
+
+    def start_local(self):
+        from seo_audit_pro.core import local
+        self.step("Starting the audit server on this computer…", 0.5)
+
+        def ready(status):
+            if status.get("needs_setup"):
+                self.finish("setup")
+            else:
+                self.connect()
+
+        local.start(ready, lambda err: self.finish("welcome", err.message))
+
+    def connect(self):
+        from seo_audit_pro.core import api, settings, tasks
         from seo_audit_pro.core.session import session
+        server = settings.api_url()
+        self.step("Initializing secure session…", 0.62)
         stored = session.stored_refresh()
-        self.step(f"Connecting to {server.split('://', 1)[-1]}…", 0.65)
+        where = "this computer" if settings.mode() == settings.LOCAL else server.split("://", 1)[-1]
+        self.step(f"Connecting to {where}…", 0.7)
 
         def connected(_health):
             if stored and stored.get("refresh_token"):
@@ -151,9 +173,82 @@ def main():
     app.setStyleSheet(stylesheet(settings.asset_dir()))
     log = _setup_logging()
     _install_excepthook(log)
+    instance = _SingleInstance()
+    if instance.forward():
+        return  # already running: the other window was brought to the front
+    from seo_audit_pro import local_server
+    app.aboutToQuit.connect(local_server.instance().stop)
     startup = Startup(app)
+    instance.on_activate = lambda: _raise(startup.window)
     startup.run()
+    _watch_local_server(app)
     sys.exit(app.exec())
+
+
+def _raise(window):
+    if window is None:
+        return
+    if window.isMinimized():
+        window.showNormal()
+    window.show()
+    window.raise_()
+    window.activateWindow()
+
+
+class _SingleInstance:
+    """One window per Windows user: a second launch brings the first one forward."""
+
+    def __init__(self):
+        import getpass
+
+        from PySide6.QtNetwork import QLocalServer
+        from seo_audit_pro.core import settings
+        self.name = f"SEOAuditPro-{getpass.getuser()}-{settings.PROFILE or 'default'}"
+        self.server = QLocalServer()
+        self.on_activate = None
+
+    def forward(self):
+        from PySide6.QtNetwork import QLocalServer, QLocalSocket
+        sock = QLocalSocket()
+        sock.connectToServer(self.name)
+        if sock.waitForConnected(400):
+            sock.write(b"show")
+            sock.waitForBytesWritten(400)
+            sock.disconnectFromServer()
+            return True
+        QLocalServer.removeServer(self.name)  # left behind by a crashed instance
+        self.server.newConnection.connect(self._activated)
+        self.server.listen(self.name)
+        return False
+
+    def _activated(self):
+        conn = self.server.nextPendingConnection()
+        if conn is not None:
+            conn.disconnectFromServer()
+        if self.on_activate:
+            self.on_activate()
+
+
+def _watch_local_server(app):
+    """Restart the built-in server if it stops unexpectedly (This computer mode)."""
+    from PySide6.QtCore import QTimer
+    from seo_audit_pro import local_server
+    from seo_audit_pro.core import local, settings
+    srv = local_server.instance()
+    state = {"busy": False}
+
+    def check():
+        if state["busy"] or settings.mode() != settings.LOCAL or srv.port is None or srv.running():
+            return
+        logging.getLogger("seo_audit_pro").warning("The local server stopped; restarting it")
+        state["busy"] = True
+        local.start(lambda _s: state.update(busy=False), lambda _e: state.update(busy=False))
+
+    timer = QTimer(app)
+    timer.setInterval(5000)
+    timer.timeout.connect(check)
+    timer.start()
+    app._local_server_watch = timer
 
 
 if __name__ == "__main__":

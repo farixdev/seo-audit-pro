@@ -218,6 +218,49 @@ bulk audits through the client as an Agent (preview → re-audit option →
 queue → completion notification → scores in the lead list) and as a Manager
 (select all 824 matching → 500 queued, 324 left for a later run).
 
+### Iteration 4: portable all-in-one app, first-run setup, manuals (2026-10-21)
+
+**Owner request.** A final exe with the full icon, portable to give to friends:
+on first run it initialises the database and everything else, sets up roles,
+stores its data locally, and works without DLL errors. Plus a simple user
+manual for every role (with error handling and limits) and a technical
+reference for developers.
+
+What changed:
+
+* **One exe, two roles.** `SEOAuditPro.pyw` opens the app, or with `--serve`
+  runs the API server and engine. The spec now bundles the server, the engine,
+  `templates/`, `static/libs/` and the data files of trafilatura, justext and
+  tld; `psycopg2`, unused Qt modules and `.env`/databases are kept out.
+* **On this computer mode** (`seo_audit_pro/local_server.py`, `core/local.py`):
+  the app starts its own windowless server on 127.0.0.1 with data in
+  `%LOCALAPPDATA%\SEO Audit Pro\data`; the server exits when the app closes
+  or is killed (parent-process watch) and the app restarts it if it stops.
+  Single app instance per user. Optional sharing on the local network.
+* **First run**: Welcome screen (this computer / team server) and a *Create the
+  Manager account* screen backed by `GET /api/setup/status` and
+  `POST /api/setup/manager` (only while no account exists, only from
+  loopback, password policy enforced).
+* **PageSpeed key** in Settings (stored encrypted; falls back to
+  `PAGESPEED_API_KEY`) — before this, audits sent no key at all.
+* Templates and static files are read from the bundle (`config.RESOURCE_DIR`).
+* `build_exe.bat` installs server + desktop requirements and runs
+  `scripts/package_portable.py`, which makes the portable zip with
+  *READ ME FIRST.txt* and the PDF manuals, and refuses to package secrets or
+  databases.
+* Manuals written as shared docs and exported to `docs/manuals/*.pdf`.
+
+Verified: 69 automated tests (`test_local_mode` adds 5: first-run setup on a
+fresh database, setup closed once accounts exist, encrypted PageSpeed key,
+built-in server start and exit-with-parent, port selection). The packaged
+server passed 21 end-to-end checks against a fresh data folder (start 2.8 s;
+real single and bulk audits; Word reports; both PDFs rendered on first open;
+HTML report; CSV and Excel imports; export; chat; no errors, missing modules
+or DLL problems in the logs). The packaged app showed the Welcome screen on a
+fresh profile, started its own server in local mode and showed the Manager
+setup; closing the app normally or killing it stopped the server; a second
+launch exited and focused the first window.
+
 ## 6. Known limitations
 
 * SSRF: the existing crawler follows redirects; a public site redirecting to an

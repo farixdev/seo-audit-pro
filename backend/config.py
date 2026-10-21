@@ -16,6 +16,9 @@ import config as _env_loader
 _env_loader.load_env()
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Read-only files shipped with the app (templates, static libraries). In the
+# packaged desktop app they live inside the bundle, not next to the .exe.
+RESOURCE_DIR = getattr(sys, "_MEIPASS", ROOT_DIR)
 if getattr(sys, "frozen", False):
     ROOT_DIR = os.path.dirname(sys.executable)
 

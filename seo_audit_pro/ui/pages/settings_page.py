@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Settings (Manager): SMTP delivery, audit defaults, client information."""
+"""Settings (Manager): SMTP delivery, audit defaults, PageSpeed key, and this
+computer (data folder, sharing the workspace on the local network)."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QGridLayout, QSpinBox, QWidget
 
-from seo_audit_pro import APP_VERSION, icons
-from seo_audit_pro.core import api, settings, tasks
+from seo_audit_pro import APP_VERSION, icons, local_server
+from seo_audit_pro.core import api, local, settings, tasks
 from seo_audit_pro.theme import C
 from seo_audit_pro.ui.pages.base import Page
-from seo_audit_pro.widgets.common import Badge, BusyButton, Card, StatefulArea, button, hbox, label, vbox
-from seo_audit_pro.widgets.feedback import Field, PasswordInput, combo, kv_row, line_edit, show_error, toast
+from seo_audit_pro.widgets.common import Badge, BusyButton, Card, StatefulArea, Toggle, button, hbox, label, vbox
+from seo_audit_pro.widgets.feedback import (Field, PasswordInput, combo, confirm, kv_row, line_edit, show_error,
+                                            toast)
 
 ENCRYPTION = [("STARTTLS (port 587)", "starttls"), ("SSL/TLS (port 465)", "ssl"), ("None (not recommended)", "none")]
 
@@ -25,6 +28,7 @@ class SettingsPage(Page):
         cl = vbox(content, spacing=20)
         cl.addWidget(self._smtp_card())
         cl.addWidget(self._audit_card())
+        cl.addWidget(self._pagespeed_card())
         cl.addWidget(self._client_card())
         cl.addStretch(1)
         self.area = StatefulArea(content, skeleton="detail")
@@ -210,8 +214,8 @@ class SettingsPage(Page):
         self.concurrent.setValue(2)
         row.addWidget(Field("Pages to crawl", self.max_pages, "Between 1 and 500 pages per audit."), 1)
         row.addWidget(Field("PageSpeed Insights", self.psi, "Mobile only halves PageSpeed time."), 1)
-        row.addWidget(Field("Audits at the same time", self.concurrent,
-                            "2 suits a server with 4 GB of memory; 3–4 need 8 GB or more."), 1)
+        row.addWidget(Field("Audits at the same time", self.concurrent, "2 for 4 GB of memory; 3–4 need 8 GB."), 1)
+        row.setAlignment(Qt.AlignmentFlag.AlignTop)
         card.body.addLayout(row)
         pdf = hbox(spacing=8)
         self.pdf_icon = label()
@@ -257,16 +261,121 @@ class SettingsPage(Page):
 
         tasks.run(api.put, "/api/settings", payload, on_done=done, on_error=fail, owner=self)
 
-    # -- Client ------------------------------------------------------------------
+    # -- PageSpeed ---------------------------------------------------------------
+    def _pagespeed_card(self):
+        card = Card(padding=24, spacing=14)
+        head = hbox(spacing=10)
+        head.addWidget(label("Google PageSpeed Insights", "SectionTitle"), 1)
+        self.psi_badge = Badge("Not set", C["warning"], C["warning_bg"])
+        head.addWidget(self.psi_badge)
+        card.body.addLayout(head)
+        card.body.addWidget(label(
+            "Speed scores come from Google. Without your own free API key Google often says it is busy, and the "
+            "speed part of the audit is skipped. To get a key: open console.cloud.google.com, create a project, "
+            "turn on \"PageSpeed Insights API\", then go to Credentials and create an API key.", "Meta", wrap=True))
+        row = hbox(spacing=10)
+        self.psi_key = PasswordInput("Paste the API key")
+        row.addWidget(self.psi_key, 1)
+        self.psi_save = BusyButton("Save key", "primary")
+        self.psi_save.clicked.connect(lambda: self._save_psi(self.psi_key.text().strip()))
+        row.addWidget(self.psi_save)
+        self.psi_clear = button("Remove", "ghost")
+        self.psi_clear.clicked.connect(lambda: self._save_psi(""))
+        row.addWidget(self.psi_clear)
+        card.body.addLayout(row)
+        return card
+
+    def _fill_psi(self, data):
+        on = bool(data.get("pagespeed_key_set"))
+        self.psi_badge.setText("Saved" if on else "Not set")
+        self.psi_badge.set_colors(*((C["success"], C["success_bg"]) if on else (C["warning"], C["warning_bg"])))
+        self.psi_clear.setVisible(on)
+        self.psi_key.edit.setPlaceholderText("Saved — paste a new key to replace it" if on else "Paste the API key")
+
+    def _save_psi(self, key):
+        if not key and not self.psi_clear.isVisible():
+            toast(self, "Paste the API key first.", "warning")
+            return
+        self.psi_save.busy(True, "Saving…")
+
+        def done(res):
+            self.psi_save.busy(False)
+            self.psi_key.clear()
+            self._fill_psi(res)
+            toast(self, "PageSpeed key saved. New audits will use it." if key else "PageSpeed key removed.", "success")
+
+        def fail(err):
+            self.psi_save.busy(False)
+            show_error(self, err)
+
+        tasks.run(api.put, "/api/settings", {"pagespeed_api_key": key}, on_done=done, on_error=fail, owner=self)
+
+    # -- This computer --------------------------------------------------------------
     def _client_card(self):
         card = Card(padding=24, spacing=12)
         card.body.addWidget(label("This computer", "SectionTitle"))
-        self.server_row = kv_row("Server", settings.api_url())
+        is_local = settings.mode() == settings.LOCAL
+        self.server_row = kv_row("Workspace", "Runs on this computer" if is_local else settings.api_url())
         card.body.addWidget(self.server_row)
         card.body.addWidget(kv_row("App version", APP_VERSION))
-        card.body.addWidget(label("To connect to a different server, sign out and choose Change server on the "
-                                  "sign-in screen.", "Meta", wrap=True))
+        if not is_local:
+            card.body.addWidget(label("To use a different server, sign out and choose Change on the sign-in screen.",
+                                      "Meta", wrap=True))
+            return card
+        folder = local_server.data_dir()
+        row = hbox(spacing=10)
+        row.addWidget(label(folder, wrap=True, selectable=True), 1)
+        open_btn = button("Open folder", "ghost", icon_name="folder")
+        open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(folder)))
+        row.addWidget(open_btn)
+        holder = QWidget()
+        holder.setLayout(row)
+        card.body.addWidget(kv_row("Data folder", holder))
+        card.body.addWidget(label("Everything is saved here: the database, reports and logs. To back it up, close the "
+                                  "app and copy this folder.", "Meta", wrap=True))
+        share = hbox(spacing=10)
+        self.share_toggle = Toggle(local.sharing())
+        self.share_toggle.toggled.connect(self._toggle_share)
+        share.addWidget(self.share_toggle)
+        share.addWidget(label("Let other computers on this network use this workspace"), 1)
+        card.body.addLayout(share)
+        self.share_info = label("", "Meta", wrap=True, selectable=True)
+        card.body.addWidget(self.share_info)
+        self._show_share()
         return card
+
+    def _show_share(self):
+        if not hasattr(self, "share_info"):
+            return
+        if local.sharing():
+            self.share_info.setText(
+                f"Others on the same network open SEO Audit Pro, choose \"Connect to a team server\" and enter "
+                f"{local.share_address()} — this computer must stay on with the app open. If Windows asks, "
+                "allow access on private networks.")
+        else:
+            self.share_info.setText("Off: only this computer can use the workspace.")
+
+    def _toggle_share(self, on):
+        if not confirm(self, "Turn on network sharing?" if on else "Turn off network sharing?",
+                       "The audit server restarts (a few seconds). Audits that are running start again."
+                       + (" People you add can then sign in from other computers on this network." if on else ""),
+                       "Restart server"):
+            self.share_toggle.setChecked(not on)
+            return
+        settings.put("share_network", "true" if on else "false")
+        self.share_info.setText("Restarting the audit server…")
+
+        def ready(_status):
+            self._show_share()
+            toast(self, "Network sharing is on." if on else "Network sharing is off.", "success")
+
+        def fail(err):
+            settings.put("share_network", "false")
+            self.share_toggle.setChecked(False)
+            self._show_share()
+            show_error(self, err)
+
+        local.start(ready, fail, owner=self, share=on)
 
     # -- lifecycle -------------------------------------------------------------
     def activate(self, **_):
@@ -282,6 +391,7 @@ class SettingsPage(Page):
                 self._loaded = True
                 self._fill_smtp(state["smtp"])
                 self._fill_audit(state["settings"])
+                self._fill_psi(state["settings"])
                 self.area.ready()
 
         def got_smtp(res):

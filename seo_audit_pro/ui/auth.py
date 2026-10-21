@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Sign-in experience: sign in, forgot password (emailed code), reset password,
+Sign-in experience: first-run welcome (this computer or a team server), first
+Manager account, sign in, forgot password (emailed code), reset password,
 mandatory first-login password change, and server address configuration.
 """
 
@@ -9,8 +10,8 @@ import re
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QCheckBox, QFrame, QLabel, QStackedWidget, QWidget
 
-from seo_audit_pro import icons
-from seo_audit_pro.core import api, settings, tasks
+from seo_audit_pro import icons, local_server
+from seo_audit_pro.core import api, local, settings, tasks
 from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C
 from seo_audit_pro.widgets.common import BusyButton, button, hbox, label, logo_label, vbox
@@ -116,6 +117,56 @@ class _Panel(QWidget):
         self.banner.setVisible(True)
 
 
+class _OptionCard(QFrame):
+    """A large clickable choice with a title, a description and an optional tag."""
+    clicked = Signal()
+
+    def __init__(self, icon_name, title, text, tag=""):
+        super().__init__()
+        self.setObjectName("OptionCard")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self.setStyleSheet(
+            f"QFrame#OptionCard {{ background: {C['surface']}; border: 1px solid {C['border']}; border-radius: 10px; }}"
+            f"QFrame#OptionCard:hover, QFrame#OptionCard:focus {{ border-color: {C['accent']}; }}"
+            f"QFrame#OptionCard:disabled {{ background: #F4F4F5; }}"
+            "QLabel { background: transparent; border: none; }")
+        lay = hbox(self, (16, 14, 16, 14), 14)
+        ic = QLabel()
+        ic.setPixmap(icons.pixmap(icon_name, C["text"], 22))
+        lay.addWidget(ic, 0, Qt.AlignmentFlag.AlignTop)
+        col = vbox(spacing=4)
+        head = hbox(spacing=8)
+        t = label(title)
+        t.setStyleSheet("font-weight: 600; font-size: 14px;")
+        head.addWidget(t)
+        if tag:
+            badge = label(tag)
+            badge.setStyleSheet(f"color: {C['success']}; background: {C['success_bg']}; border-radius: 4px; "
+                                "padding: 1px 6px; font-size: 11px; font-weight: 600;")
+            head.addWidget(badge)
+        head.addStretch(1)
+        col.addLayout(head)
+        col.addWidget(label(text, "Muted", wrap=True))
+        lay.addLayout(col, 1)
+
+    def mouseReleaseEvent(self, e):
+        if self.isEnabled() and e.button() == Qt.MouseButton.LeftButton and self.rect().contains(e.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(e)
+
+    def keyPressEvent(self, e):
+        if self.isEnabled() and e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.clicked.emit()
+            return
+        super().keyPressEvent(e)
+
+    def click(self):
+        if self.isEnabled():
+            self.clicked.emit()
+
+
 class AuthView(QWidget):
     signed_in = Signal()
 
@@ -135,12 +186,14 @@ class AuthView(QWidget):
         footer.addWidget(label("·", "Meta"))
         self.server_label = label("", "Meta")
         footer.addWidget(self.server_label)
-        change = button("Change server", "link")
-        change.clicked.connect(lambda: self.show_page("server"))
-        footer.addWidget(change)
+        self.change_link = button("Change", "link")
+        self.change_link.clicked.connect(lambda: self.show_page("welcome"))
+        footer.addWidget(self.change_link)
         footer.addStretch(1)
         lay.addLayout(footer)
         self.pages = {}
+        self._build_welcome()
+        self._build_setup()
         self._build_signin()
         self._build_forgot()
         self._build_reset()
@@ -149,16 +202,135 @@ class AuthView(QWidget):
         self.refresh_server_label()
 
     def refresh_server_label(self):
-        self.server_label.setText(settings.api_url().split("://", 1)[-1])
+        if settings.mode() == settings.LOCAL:
+            self.server_label.setText("Running on this computer")
+        elif settings.mode() is None:
+            self.server_label.setText("Not set up yet")
+        else:
+            self.server_label.setText(settings.api_url().split("://", 1)[-1])
 
     def show_page(self, key, notice=None, kind="error"):
         page = self.pages[key]
         page.notice(notice, kind) if notice else page.notice(None)
         self.stack.setCurrentWidget(page)
-        focus = {"signin": lambda: (self.email if not self.email.text() else self.password).setFocus(),
+        self.refresh_server_label()
+        self.change_link.setVisible(key not in ("welcome", "setup"))
+        focus = {"welcome": lambda: self.opt_local.setFocus(), "setup": lambda: self.m_name.setFocus(),
+                 "signin": lambda: (self.email if not self.email.text() else self.password).setFocus(),
                  "forgot": lambda: self.f_email.setFocus(), "reset": lambda: self.r_code.setFocus(),
                  "change": lambda: self.c_current.setFocus(), "server": lambda: self.s_url.setFocus()}
         focus[key]()
+
+    # -- First run: where does the workspace live? ----------------------------
+    def _build_welcome(self):
+        p = _Panel("Welcome to SEO Audit Pro", "Choose how you want to use it. You can change this later.")
+        self.opt_local = _OptionCard("monitor", "On this computer",
+                                     "Everything runs and is saved on this PC. Nothing else to install.",
+                                     "Recommended")
+        self.opt_remote = _OptionCard("server", "Connect to a team server",
+                                      "Your team already runs SEO Audit Pro on a server or another computer. "
+                                      "You need its address.")
+        self.opt_local.clicked.connect(self._choose_local)
+        self.opt_remote.clicked.connect(self._choose_remote)
+        p.form.addWidget(self.opt_local)
+        p.form.addWidget(self.opt_remote)
+        self.w_status = label("", "Meta", wrap=True)
+        self.w_status.setVisible(False)
+        p.form.addWidget(self.w_status)
+        self.pages["welcome"] = p
+        self.stack.addWidget(p)
+
+    def _choose_local(self):
+        settings.set_mode(settings.LOCAL)
+        for b in (self.opt_local, self.opt_remote):
+            b.setEnabled(False)
+        self.pages["welcome"].notice(None)
+        self.w_status.setText("Starting the audit server on this computer… The first start takes a few seconds.")
+        self.w_status.setVisible(True)
+
+        def ready(status):
+            self._welcome_idle()
+            if status.get("needs_setup"):
+                self.show_page("setup")
+            else:
+                self.show_page("signin", "This computer is ready. Sign in to continue.", "success")
+
+        def fail(err):
+            self._welcome_idle()
+            self.pages["welcome"].notice(err.message)
+
+        local.start(ready, fail, owner=self)
+
+    def _welcome_idle(self):
+        self.w_status.setVisible(False)
+        for b in (self.opt_local, self.opt_remote):
+            b.setEnabled(True)
+
+    def _choose_remote(self):
+        local_server.instance().stop()
+        settings.set_mode(settings.REMOTE)
+        if not settings.get("api_url"):
+            self.s_url.clear()
+        self.show_page("server")
+
+    # -- First run: the Manager account ---------------------------------------
+    def _build_setup(self):
+        p = _Panel("Create the Manager account", "You are the first person here. The Manager adds teams and "
+                                                 "people later, from inside the app.")
+        self.m_name = _auth_input("Your full name")
+        self.m_email = _auth_input("name@company.com")
+        self.m_pw = PasswordInput("Password", "AuthInput")
+        self.m_confirm = PasswordInput("Repeat password", "AuthInput")
+        self.m_policy = PolicyChecklist()
+        self.m_pw.edit.textChanged.connect(self.m_policy.update_for)
+        self.m_fields = {"name": Field("Full name", self.m_name), "email": Field("Email", self.m_email),
+                         "password": Field("Password", self.m_pw), "confirm": Field("Confirm password", self.m_confirm)}
+        for f in self.m_fields.values():
+            p.form.addWidget(f)
+        p.form.addWidget(self.m_policy)
+        self.m_btn = BusyButton("Create account and start", "primary", size="lg")
+        self.m_btn.clicked.connect(self._create_manager)
+        self.m_confirm.returnPressed.connect(self._create_manager)
+        p.form.addWidget(self.m_btn)
+        p.form.addWidget(label("Your data is saved on this computer, in:", "Meta"))
+        where = label(local_server.data_dir(), "Meta", wrap=True, selectable=True)
+        p.form.addWidget(where)
+        self.pages["setup"] = p
+        self.stack.addWidget(p)
+
+    def _create_manager(self):
+        name, email = self.m_name.text().strip(), self.m_email.text().strip().lower()
+        pw, confirm = self.m_pw.text(), self.m_confirm.text()
+        errs = {"name": "" if name else "Enter your name.",
+                "email": "" if EMAIL_RE.match(email) else "Enter a valid email address.",
+                "password": "" if self.m_policy.update_for(pw) else "The password does not meet the requirements.",
+                "confirm": "" if pw == confirm else "The passwords do not match."}
+        for k, v in errs.items():
+            self.m_fields[k].set_error(v)
+        if any(errs.values()):
+            return
+        self.m_btn.busy(True, "Creating your account…")
+
+        def done(payload):
+            self.m_btn.busy(False)
+            for w in (self.m_pw, self.m_confirm):
+                w.clear()
+            settings.set_last_email(email)
+            settings.put("remember", "true")
+            session.start(payload, remember=True)
+            self.signed_in.emit()
+
+        def fail(err):
+            self.m_btn.busy(False)
+            if err.code == "already_set_up":
+                self.show_page("signin", err.message, "info")
+            elif err.data.get("field") in self.m_fields:
+                self.m_fields[err.data["field"]].set_error(err.message)
+            else:
+                self.pages["setup"].notice(err.message)
+
+        tasks.run(api.post, "/api/setup/manager", {"name": name, "email": email, "password": pw}, auth=False,
+                  on_done=done, on_error=fail, owner=self)
 
     # -- Sign in -------------------------------------------------------------
     def _build_signin(self):
@@ -388,9 +560,15 @@ class AuthView(QWidget):
         self.s_btn.clicked.connect(self._save_server)
         self.s_url.returnPressed.connect(self._save_server)
         p.form.addWidget(self.s_btn)
+        links = hbox(spacing=12)
         back = button("Back to sign in", "link")
         back.clicked.connect(lambda: self.show_page("signin"))
-        p.form.addWidget(back, 0, Qt.AlignmentFlag.AlignLeft)
+        links.addWidget(back)
+        other = button("Use it on this computer instead", "link")
+        other.clicked.connect(lambda: self.show_page("welcome"))
+        links.addWidget(other)
+        links.addStretch(1)
+        p.form.addLayout(links)
         self.pages["server"] = p
         self.stack.addWidget(p)
         self.s_url.setText(settings.api_url())
@@ -401,7 +579,9 @@ class AuthView(QWidget):
             self.s_field.set_error("Enter a full address starting with https:// (or http:// for a local server).")
             return
         self.s_field.set_error("")
+        previous_mode = settings.mode()
         previous = settings.api_url()
+        settings.set_mode(settings.REMOTE)
         settings.set_api_url(url)
         self.s_btn.busy(True, "Testing…")
 
@@ -414,7 +594,8 @@ class AuthView(QWidget):
 
         def fail(err):
             self.s_btn.busy(False)
-            settings.set_api_url(previous)
+            if previous_mode == settings.REMOTE:
+                settings.set_api_url(previous)
             self.pages["server"].notice(err.message)
 
         tasks.run(api.health, on_done=done, on_error=fail, owner=self)

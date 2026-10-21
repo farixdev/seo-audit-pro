@@ -2,10 +2,11 @@
 """Manager-only administration: application settings and audit logs."""
 
 import json
+import re
 
 from flask import Blueprint, g, jsonify, request
 
-from backend import audit_runner, db, events, reports
+from backend import audit_runner, db, events, reports, security
 from backend.auth import MANAGER, require
 from backend.errors import ApiError
 from backend.util import body, now_iso, page_args, paged
@@ -18,13 +19,33 @@ bp = Blueprint("admin", __name__)
 @bp.get("/api/settings")
 @require(MANAGER)
 def get_settings():
-    return jsonify({"audit_defaults": audit_runner.audit_settings(), "pdf_supported": reports.pdf_supported()})
+    return jsonify({"audit_defaults": audit_runner.audit_settings(), "pdf_supported": reports.pdf_supported(),
+                    "pagespeed_key_set": bool(audit_runner.pagespeed_key())})
+
+
+def _save_pagespeed_key(raw):
+    """Store (encrypted) or clear the Google PageSpeed Insights API key."""
+    key = (raw or "").strip() if isinstance(raw, str) else ""
+    if key and not re.match(r"^[A-Za-z0-9_\-]{20,80}$", key):
+        raise ApiError(422, "That does not look like a Google API key. Copy it again from Google Cloud.",
+                       field="pagespeed_api_key")
+    with db.transaction() as tx:
+        tx.execute("DELETE FROM app_settings WHERE key = 'pagespeed_key'")
+        if key:
+            tx.execute("INSERT INTO app_settings (key, value, updated_by, updated_at) VALUES ('pagespeed_key', %s, %s, %s)",
+                       (security.encrypt_secret(key), g.user["id"], now_iso()))
+        events.audit(g.user, "SETTINGS_CHANGED", "settings", "pagespeed_key", {"set": bool(key)}, tx=tx)
 
 
 @bp.put("/api/settings")
 @require(MANAGER)
 def save_settings():
-    data = body().get("audit_defaults") or {}
+    payload = body()
+    if "pagespeed_api_key" in payload:
+        _save_pagespeed_key(payload["pagespeed_api_key"])
+        if "audit_defaults" not in payload:
+            return get_settings()
+    data = payload.get("audit_defaults") or {}
     try:
         max_pages = int(data.get("max_pages", 50))
     except (TypeError, ValueError):

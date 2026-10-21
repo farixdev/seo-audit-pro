@@ -10,13 +10,36 @@ from PySide6.QtCore import QSettings
 from seo_audit_pro import APP_NAME, ORG_NAME
 
 DEFAULT_API_URL = os.environ.get("SEO_API_URL", "http://127.0.0.1:5055")
+PROFILE = (os.environ.get("SEO_AUDIT_PRO_PROFILE") or "").strip()  # isolated settings, used for testing
+_RUNTIME = {"local_url": None}
+
+LOCAL, REMOTE = "local", "remote"
 
 
 def _store():
-    return QSettings(ORG_NAME, APP_NAME)
+    return QSettings(ORG_NAME, APP_NAME + (f" ({PROFILE})" if PROFILE else ""))
+
+
+def mode():
+    """"local" (this computer runs the server), "remote" (a team server), or
+    None before the first-run choice. Running from source defaults to remote."""
+    value = _store().value("mode")
+    if value in (LOCAL, REMOTE):
+        return value
+    return None if getattr(sys, "frozen", False) or PROFILE else REMOTE  # a profile behaves like a fresh install
+
+
+def set_mode(value):
+    _store().setValue("mode", value)
+
+
+def set_local_url(url):
+    _RUNTIME["local_url"] = url
 
 
 def api_url():
+    if mode() == LOCAL:
+        return (_RUNTIME["local_url"] or "http://127.0.0.1").rstrip("/")
     return (_store().value("api_url", DEFAULT_API_URL) or DEFAULT_API_URL).rstrip("/")
 
 

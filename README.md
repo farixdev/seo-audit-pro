@@ -6,13 +6,24 @@ passive security audits, deliver client reports, run audit-grounded email
 outreach and collaborate — backed by a secure API server.
 
 ```
-Windows desktop (PySide6)  ──HTTPS / WSS──▶  Flask API (one process)  ──▶  PostgreSQL (Neon)
-                                             │
-                                             └─ existing audit engine, report generator, SMTP queue
+Windows desktop (PySide6)  ──HTTP(S) / WS──▶  Flask API (one process)  ──▶  SQLite (this computer)
+                                              │                              or PostgreSQL (team server)
+                                              └─ audit engine, audit queue, reports, import + email workers
 ```
 
 The desktop client never connects to the database and contains no server
 secrets. See [docs/architecture.md](docs/architecture.md).
+
+## For people using the app
+
+Download `SEO-Audit-Pro-Portable-3.0.0.zip`, unzip it, double-click
+`SEOAuditPro.exe` and choose **On this computer**: the app starts its own
+built-in server (the same exe with `--serve`), creates its database and keys in
+`%LOCALAPPDATA%\SEO Audit Pro\data`, and asks for the first Manager account.
+Nothing else to install. Or choose **Connect to a team server**.
+
+Manuals: [User Manual](docs/manuals/SEO%20Audit%20Pro%20-%20User%20Manual.pdf) ·
+[Technical Reference](docs/manuals/SEO%20Audit%20Pro%20-%20Technical%20Reference.pdf).
 
 ## Quick start (local development)
 
@@ -26,7 +37,11 @@ run.bat                                           :: http://127.0.0.1:5055
 run_desktop.bat
 ```
 
-Build the Windows executable (and installer, if Inno Setup 6 is installed):
+To try the packaged first-run flow from source, set a throwaway profile first:
+`set SEO_AUDIT_PRO_PROFILE=dev-first-run` (separate settings and data folder).
+
+Build the Windows executable and the portable zip (and an installer, if Inno
+Setup 6 is installed):
 
 ```bat
 build_exe.bat

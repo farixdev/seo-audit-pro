@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """/api/auth/* — sign-in, token refresh, sign-out, password lifecycle, profile."""
 
+import ipaddress
 import threading
 
 from flask import Blueprint, g, jsonify, request, send_file
@@ -236,3 +237,50 @@ def health():
     status = 200 if db_ok else 503
     return jsonify({"status": "ok" if db_ok else "degraded", "version": config.APP_VERSION,
                     "app": "SEO Audit Pro"}), status
+
+
+# ---------------------------------------------------------------------------
+# First-run setup: create the first Manager from the app itself. Allowed only
+# while no account exists and only from the computer running the server.
+# ---------------------------------------------------------------------------
+def _from_this_computer():
+    addr = (request.remote_addr or "").split("%")[0]
+    try:
+        return ipaddress.ip_address(addr).is_loopback
+    except ValueError:
+        return False
+
+
+@bp.get("/api/setup/status")
+def setup_status():
+    return jsonify({"needs_setup": not (db.scalar("SELECT COUNT(*) FROM users") or 0),
+                    "this_computer": _from_this_computer()})
+
+
+@bp.post("/api/setup/manager")
+def setup_manager():
+    rate_limit(f"setup:{client_ip()}", 10, 300)
+    if not _from_this_computer():
+        raise ApiError(403, "The first account can only be created on the computer that runs the server.")
+    data = body()
+    name = text(data, "name", required=True, max_len=120, label="Name")
+    email = email_value(data, "email")
+    password = data.get("password") if isinstance(data.get("password"), str) else ""
+    problems = security.password_policy_errors(password, email)
+    if problems:
+        raise ApiError(422, problems[0], field="password")
+    uid, session_id, refresh, now = security.new_id("usr_"), security.new_id("ses_"), security.new_refresh_token(), now_iso()
+    with db.transaction() as tx:
+        if tx.scalar("SELECT COUNT(*) FROM users"):
+            raise ApiError(409, "This workspace is already set up. Sign in instead.", code="already_set_up")
+        tx.execute("""INSERT INTO users (id, name, email, password_hash, role, is_active, must_change_password,
+                          created_at, updated_at, last_login_at, last_seen_at)
+                      VALUES (%s, %s, %s, %s, 'MANAGER', 1, 0, %s, %s, %s, %s)""",
+                   (uid, name, email, security.hash_password(password), now, now, now, now))
+        tx.execute("INSERT INTO sessions (id, user_id, refresh_hash, created_at, expires_at, last_used_at, user_agent, ip) "
+                   "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                   (session_id, uid, security.sha256_hex(refresh), now, iso_in(config.REFRESH_TOKEN_TTL), now,
+                    (request.headers.get("User-Agent") or "")[:200], client_ip()))
+        user = tx.query_one("SELECT * FROM users WHERE id = %s", (uid,))
+        events.audit(user, "SETUP_COMPLETED", "user", uid, tx=tx)
+    return jsonify(_session_payload(user, session_id, refresh)), 201
