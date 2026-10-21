@@ -1,30 +1,35 @@
 # SEO Audit Pro team server on Render (Blueprint).
 # Render dashboard > New > Blueprint > pick this repository. It asks for the
 # values marked "sync: false"; everything else is set here.
+#
+# Free plan: the service sleeps after 15 minutes without use (the next request
+# wakes it in about a minute), has about a tenth of a CPU (so audits run one at
+# a time and slower), and has no disk (files on it vanish on every restart).
+# Everything that matters lives in the Neon database: leads, audit results,
+# people, chat, settings and uploaded files; report files are re-created
+# from the stored results when someone opens them.
+#
+# To upgrade later: set "plan: starter", raise MAX_CONCURRENT_AUDITS to 2.
 services:
   - type: web
     name: mindcob-seo-audit-pro
     runtime: python
     region: ohio            # next to the Neon database (AWS us-east-2)
-    plan: starter           # disks need a paid plan; the free plan also sleeps when idle
+    plan: free
     buildCommand: pip install -r requirements.txt
     # One process only: the live-event hub, audit queue and email worker are in-process.
     startCommand: gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 32 --timeout 180
     healthCheckPath: /api/health
     autoDeploy: true
-    disk:
-      name: seo-data
-      mountPath: /var/data/seo-audit-pro
-      sizeGB: 5
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
       - key: SEO_ENV
         value: production
       - key: SEO_DATA_DIR
-        value: /var/data/seo-audit-pro
+        value: /tmp/seo-audit-pro   # temporary on the free plan; nothing permanent is kept here
       - key: MAX_CONCURRENT_AUDITS
-        value: "2"
+        value: "1"
       # The Neon connection string (Neon console > Connection details).
       - key: DATABASE_URL
         sync: false
