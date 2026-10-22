@@ -494,6 +494,13 @@ def _m007_audit_log_tail():
     return ["ALTER TABLE audits ADD COLUMN log_tail TEXT"]
 
 
+def _m008_email_provider():
+    """How email is sent: 'smtp' (a mail server) or 'brevo' (Brevo's web API over
+    HTTPS, which works where hosts block the email ports; the API key is kept
+    encrypted in password_enc)."""
+    return ["ALTER TABLE smtp_settings ADD COLUMN provider TEXT NOT NULL DEFAULT 'smtp'"]
+
+
 MIGRATIONS = [
     (1, "initial schema", _m001_initial),
     (2, "lead bank", _m002_lead_bank),
@@ -502,6 +509,7 @@ MIGRATIONS = [
     (5, "work in apps", _m005_work_in_apps),
     (6, "chat shares", _m006_chat_shares),
     (7, "audit log tail", _m007_audit_log_tail),
+    (8, "email provider", _m008_email_provider),
 ]
 
 # Best-effort performance objects (run outside migrations; failures are logged,

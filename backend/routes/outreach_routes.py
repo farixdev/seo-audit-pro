@@ -17,7 +17,7 @@ _PRIORITY_RANK = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
 # SMTP settings — Manager only. The password is write-only.
 # ---------------------------------------------------------------------------
 def _smtp_public():
-    row = db.query_one("SELECT host, port, username, encryption, from_name, from_email, updated_at "
+    row = db.query_one("SELECT provider, host, port, username, encryption, from_name, from_email, updated_at "
                        "FROM smtp_settings WHERE id = 'default'")
     if not row:
         return {"configured": False}
@@ -31,6 +31,13 @@ def get_smtp():
 
 
 def _smtp_from_body(data, require_password):
+    if (data.get("provider") or "smtp") == "brevo":  # Brevo's web API: only a key and the sender
+        key = data.get("password") if isinstance(data.get("password"), str) else ""
+        if require_password and not key.strip():
+            raise ApiError(422, "Enter the Brevo API key.", field="password")
+        return {"provider": "brevo", "host": "api.brevo.com", "port": 443, "encryption": "ssl", "username": "",
+                "password": key.strip(), "from_email": email_value(data, "from_email"),
+                "from_name": text(data, "from_name", required=True, max_len=120, label="From name")}
     host = text(data, "host", required=True, max_len=255, label="SMTP host")
     try:
         port = int(data.get("port"))
@@ -47,25 +54,28 @@ def _smtp_from_body(data, require_password):
         raise ApiError(422, "Enter the SMTP password or app password.", field="password")
     from_email = email_value(data, "from_email")
     from_name = text(data, "from_name", required=True, max_len=120, label="From name")
-    return {"host": host, "port": port, "encryption": encryption, "username": username, "password": password,
-            "from_email": from_email, "from_name": from_name}
+    return {"provider": "smtp", "host": host, "port": port, "encryption": encryption, "username": username,
+            "password": password, "from_email": from_email, "from_name": from_name}
 
 
 @bp.put("/api/outreach/smtp")
 @require(MANAGER)
 def save_smtp():
-    existing = db.query_one("SELECT password_enc FROM smtp_settings WHERE id = 'default'")
-    cfg = _smtp_from_body(body(), require_password=not existing)
+    existing = db.query_one("SELECT password_enc, provider FROM smtp_settings WHERE id = 'default'")
+    data = body()
+    # Switching between SMTP and Brevo needs the new password / key.
+    same_kind = bool(existing) and existing["provider"] == (data.get("provider") or "smtp")
+    cfg = _smtp_from_body(data, require_password=not same_kind)
     enc = security.encrypt_secret(cfg["password"]) if cfg["password"] else existing["password_enc"]
     now = now_iso()
     with db.transaction() as tx:
         tx.execute("DELETE FROM smtp_settings WHERE id = 'default'")
-        tx.execute("""INSERT INTO smtp_settings (id, host, port, username, password_enc, encryption, from_name, from_email,
-                      updated_by, updated_at) VALUES ('default', %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                   (cfg["host"], cfg["port"], cfg["username"], enc, cfg["encryption"], cfg["from_name"],
-                    cfg["from_email"], g.user["id"], now))
+        tx.execute("""INSERT INTO smtp_settings (id, provider, host, port, username, password_enc, encryption, from_name,
+                      from_email, updated_by, updated_at) VALUES ('default', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                   (cfg["provider"], cfg["host"], cfg["port"], cfg["username"], enc, cfg["encryption"],
+                    cfg["from_name"], cfg["from_email"], g.user["id"], now))
         events.audit(g.user, "SMTP_CHANGED", "settings", "smtp",
-                     {"host": cfg["host"], "port": cfg["port"], "username": cfg["username"],
+                     {"provider": cfg["provider"], "host": cfg["host"], "port": cfg["port"], "username": cfg["username"],
                       "encryption": cfg["encryption"], "password_changed": bool(cfg["password"])}, tx=tx)
     mailer.wake()
     return jsonify(_smtp_public())
@@ -75,11 +85,13 @@ def save_smtp():
 @require(MANAGER)
 def test_smtp():
     data = body()
-    if data.get("host"):
+    if data.get("host") or data.get("provider") == "brevo":
         try:
             stored = mailer.smtp_config() if not data.get("password") else None
         except mailer.MailError:
             stored = None
+        if stored and stored.get("provider") != (data.get("provider") or "smtp"):
+            stored = None  # a key for the other kind is no use here
         cfg = _smtp_from_body(data, require_password=stored is None)
         if not cfg["password"]:
             cfg["password"] = stored["password"]

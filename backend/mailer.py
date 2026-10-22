@@ -45,6 +45,82 @@ def _is_gmail(cfg):
     return (cfg.get("host") or "").lower().strip() in ("smtp.gmail.com", "smtp.googlemail.com")
 
 
+# ---------------------------------------------------------------------------
+# Brevo (web API over HTTPS)
+# ---------------------------------------------------------------------------
+BREVO_API = "https://api.brevo.com/v3"
+
+
+def is_brevo(cfg):
+    return (cfg or {}).get("provider") == "brevo"
+
+
+def _brevo(method, path, key, payload=None, timeout=30):
+    import requests
+    try:
+        return requests.request(method, BREVO_API + path, json=payload, timeout=timeout,
+                                headers={"api-key": key.strip(), "accept": "application/json",
+                                         "content-type": "application/json"})
+    except requests.RequestException:
+        raise MailError("Could not reach Brevo. Check the server's internet connection and try again.")
+
+
+def _brevo_error(resp):
+    try:
+        message = (resp.json() or {}).get("message") or ""
+    except ValueError:
+        message = ""
+    if resp.status_code == 401:
+        return ("Brevo rejected the API key. Create one in Brevo > SMTP & API > API Keys (it starts with "
+                "xkeysib-; an SMTP key starting with xsmtpsib- does not work here).")
+    if resp.status_code == 403 and "ip" in message.lower():
+        return ("Brevo blocked this server's IP address. In Brevo > Security > Authorised IPs, allow it or "
+                "turn the IP restriction off.")
+    if "sender" in message.lower():
+        return ("Brevo does not accept this From address. Add it in Brevo > Senders, Domains & Dedicated IPs "
+                "(verify the sender, or authenticate your domain).")
+    return f"Brevo returned an error: {message[:200] or resp.status_code}"
+
+
+def _brevo_test(cfg):
+    resp = _brevo("GET", "/account", cfg["password"], timeout=15)
+    if resp.status_code != 200:
+        return False, _brevo_error(resp)
+    sender = (cfg.get("from_email") or "").lower()
+    try:
+        senders = _brevo("GET", "/senders", cfg["password"], timeout=15).json().get("senders") or []
+    except (MailError, ValueError):
+        senders = None
+    if senders is not None and sender and not any((s.get("email") or "").lower() == sender for s in senders):
+        domain = sender.split("@")[-1]
+        try:
+            domains = _brevo("GET", "/senders/domains", cfg["password"], timeout=15).json().get("domains") or []
+        except (MailError, ValueError):
+            domains = []
+        if not any((d.get("domain_name") or "").lower() == domain and d.get("authenticated") for d in domains):
+            return False, (f"Connected to Brevo, but {sender} is not a verified sender and {domain} is not an "
+                           "authenticated domain in Brevo (Senders, Domains & Dedicated IPs). Emails would be "
+                           "rejected until you add it.")
+    return True, "Connected to Brevo. Emails will be sent through your Brevo account."
+
+
+def _brevo_send(cfg, to_email, subject, body_text, attachments=(), reply_to=None):
+    import base64
+    payload = {"sender": {"name": cfg["from_name"], "email": cfg["from_email"]}, "to": [{"email": to_email}],
+               "subject": subject, "textContent": body_text}
+    if reply_to and reply_to.lower() != (cfg["from_email"] or "").lower():
+        payload["replyTo"] = {"email": reply_to}
+    files = []
+    for name, _mime, path in attachments:
+        with open(path, "rb") as fh:
+            files.append({"name": name, "content": base64.b64encode(fh.read()).decode("ascii")})
+    if files:
+        payload["attachment"] = files
+    resp = _brevo("POST", "/smtp/email", cfg["password"], payload, timeout=60)
+    if resp.status_code not in (200, 201, 202):
+        raise MailError(_brevo_error(resp))
+
+
 def _connect(cfg, timeout=20):
     host = (cfg.get("host") or "").strip()
     ctx = ssl.create_default_context()
@@ -95,6 +171,11 @@ def _friendly(exc, cfg=None):
 
 
 def test_connection(cfg):
+    if is_brevo(cfg):
+        try:
+            return _brevo_test(cfg)
+        except MailError as e:
+            return False, str(e)
     try:
         server = _connect(cfg, timeout=12)
         server.quit()
@@ -124,6 +205,9 @@ def send_now(to_email, subject, body_text, attachments=(), reply_to=None):
     cfg = smtp_config()
     if not cfg:
         raise MailError("SMTP is not configured.")
+    if is_brevo(cfg):
+        _brevo_send(cfg, to_email, subject, body_text, attachments, reply_to)
+        return
     try:
         server = _connect(cfg)
         try:

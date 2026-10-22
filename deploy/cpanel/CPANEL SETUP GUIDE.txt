@@ -109,8 +109,18 @@ app can be built with it. Then in the app:
 
   1. Sign in with BOOTSTRAP_MANAGER_EMAIL / BOOTSTRAP_MANAGER_PASSWORD.
      You will be asked to choose a new password.
-  2. Settings > Email delivery (SMTP). Only the Manager sets this; Team Leads
-     and Agents just send.
+  2. Settings > Email delivery. Only the Manager sets this; Team Leads and
+     Agents just send. "Send with" offers two ways:
+
+     BREVO (recommended for your domain; works on any hosting)
+       Send with: "Brevo (API key)"
+       In Brevo: Senders, Domains & Dedicated IPs > Domains > add your domain
+       and add the DNS records Brevo shows (cPanel > Zone Editor). Then
+       SMTP & API > API Keys > Generate a new API key (starts with xkeysib-).
+       In the app: paste the key, From email = an address on that domain
+       (e.g. outreach@yourdomain.com), From name = your agency name.
+
+     SMTP MAIL SERVER (Gmail or a mailbox from cPanel)
 
      GMAIL
        Click "Use Gmail settings":  smtp.gmail.com, port 587, STARTTLS

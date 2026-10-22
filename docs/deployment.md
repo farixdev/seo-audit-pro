@@ -65,6 +65,9 @@ Neon database:
   works. One service awake all month uses about 744 of Render's 750 free hours.
 * About a tenth of a CPU and 512 MB of memory is enough because the server does
   no heavy work.
+* The free plan blocks outgoing SMTP (ports 25, 465, 587). Send email with
+  **Brevo** (Settings > Email delivery > Send with: Brevo), which uses Brevo's web
+  API over HTTPS.
 
 With `AUDITS_RUN_ON=server`, PDF reports need Microsoft Word (Windows host) or
 LibreOffice (`soffice` on PATH) on the server; otherwise the app offers DOCX and

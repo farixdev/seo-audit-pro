@@ -146,7 +146,7 @@ Legacy paths kept as authenticated aliases: `POST /api/audit`,
 ## Outreach
 | Method | Path | Notes |
 |---|---|---|
-| GET / PUT | `/api/outreach/smtp` | Manager; password is write-only |
+| GET / PUT | `/api/outreach/smtp` | Manager; password / API key is write-only. `provider: smtp` (host, port, encryption, username, password, from) or `provider: brevo` (Brevo API key as `password`, from_name, from_email; sent over HTTPS to api.brevo.com, so it works where hosts block the email ports) |
 | POST | `/api/outreach/smtp/test` | Manager; tests stored or submitted settings |
 | GET | `/api/outreach/status` | SMTP configured flag and sending limits |
 | POST | `/api/outreach/generate` `{lead_id, audit_id?}` | draft built only from the stored audit result |
