@@ -86,6 +86,10 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 MAX_CONCURRENT_AUDITS = int(os.environ.get("MAX_CONCURRENT_AUDITS", 2))  # default; Managers can change it in Settings
 
+# The app does not send email: it writes the email from the audit, people send it
+# from their own mailbox and record the outreach (email or call) on the lead.
+EMAIL_SENDING = os.environ.get("EMAIL_SENDING") == "1"  # off unless explicitly turned on (tests do)
+
 # Shared hosting (SEO_HOSTING=cpanel, run by Passenger): the server may run as several
 # short-lived processes, cannot keep WebSocket connections open and must not run
 # background threads. The apps then refresh on a timer, a cron job sends queued

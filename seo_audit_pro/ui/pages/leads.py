@@ -438,8 +438,7 @@ class LeadsPage(Page):
         bl.addWidget(self.select_all_btn)
         bl.addStretch(1)
         self.bulk_buttons = {}
-        for key, text in (("audit", "Audit"), ("assign", "Assign"), ("email", "Email"), ("archive", "Archive"),
-                          ("restore", "Restore")):
+        for key, text in (("audit", "Audit"), ("assign", "Assign"), ("archive", "Archive"), ("restore", "Restore")):
             b = button(text, "ghost", size="sm")
             b.setStyleSheet("QPushButton { color: #FFFFFF; } QPushButton:hover { background: #3F3F46; color: #FFFFFF; }"
                             "QPushButton:disabled { color: #71717A; }")
@@ -651,9 +650,6 @@ class LeadsPage(Page):
             self.bulk_label.setText(f"{len(ids)} selected on this page")
             self.select_all_btn.setText(f"Select all {self.total:,} matching")
         self.select_all_btn.setVisible(bool(ids) and (self.all_matching or (len(ids) == page_rows and self.total > page_rows)))
-        self.bulk_buttons["email"].setEnabled(not self.all_matching and len(ids) <= 200)
-        self.bulk_buttons["email"].setToolTip("Bulk email works on up to 200 selected leads at a time."
-                                              if self.all_matching or len(ids) > 200 else "")
         archived_view = self.params.get("status") == "archived"
         self.bulk_buttons["audit"].setVisible(not archived_view)
         self.bulk_buttons["archive"].setVisible(self.manage and not archived_view)
@@ -746,10 +742,11 @@ class LeadsPage(Page):
             self.clear_selection()
             self.ws.navigate("audits", view="queue")
 
-    def bulk_email(self):
-        ids = self.table.selected_ids()
-        if ids:
-            self.ws.navigate("outreach", bulk_lead_ids=ids)
+    def _mark_outreach(self, row):
+        from seo_audit_pro.ui.pages.outreach import mark_outreach
+        tasks.run(api.get, f"/api/leads/{row['id']}",
+                  on_done=lambda r: mark_outreach(self, r["lead"], on_saved=lambda _l: self.load()),
+                  on_error=lambda e: show_error(self, e, "Lead"), owner=self)
 
     def bulk_archive(self):
         self._archive(True)
@@ -771,8 +768,11 @@ class LeadsPage(Page):
                             lambda: self.ws.navigate("audit", audit_id=row["last_audit_id"]))
             m.addAction(icons.icon("audit", C["text_2"]), "Run audit again" if row.get("last_audit_id") else "Start audit",
                         lambda: start_audit(self, row, lambda _a: self.load()))
-            m.addAction(icons.icon("mail", C["text_2"]), "Compose email",
+            m.addAction(icons.icon("mail", C["text_2"]), "Write email",
                         lambda: self.ws.navigate("outreach", lead_id=row["id"]))
+            m.addAction(icons.icon("check", C["text_2"]),
+                        "Update outreach…" if row.get("last_contact_at") else "Mark outreached…",
+                        lambda: self._mark_outreach(row))
         if self.manage:
             m.addSeparator()
             if row["status"] != "archived":

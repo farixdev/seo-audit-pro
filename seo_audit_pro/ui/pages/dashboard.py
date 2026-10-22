@@ -39,7 +39,7 @@ class DashboardPage(Page):
         self.metrics.add("audits_7d", "Audits completed · 7 days")
         self.metrics.add("running", "Audits running")
         self.metrics.add("avg", "Average score · 30 days")
-        self.metrics.add("emails", "Emails sent · 30 days")
+        self.metrics.add("emails", "Outreached · 30 days")
         cl.addWidget(self.metrics)
 
         grid = QGridLayout()
@@ -76,7 +76,7 @@ class DashboardPage(Page):
                        secondary=(lambda r: {"TEAM_LEAD": "Team Lead", "AGENT": "Agent"}.get(r.get("role"), "")) if role != "MANAGER" else None),
                 Column("leads", "Leads", "number", 80, align="right"),
                 Column("audits", "Audits", "number", 80, align="right"),
-                Column("emails", "Emails", "number", 80, align="right"),
+                Column("outreach", "Outreached", "number", 90, align="right"),
                 Column("won", "Won", "number", 70, align="right"),
             ], paginated=False)
             self.perf.view.setMinimumHeight(220)
@@ -140,8 +140,8 @@ class DashboardPage(Page):
         avg = o.get("avg_score_30d")
         m["avg"].set("—" if avg is None else avg, hint="" if avg is not None else "No audits completed yet",
                      color=score_color(avg) if avg is not None else None)
-        failed = o.get("emails_failed_30d") or 0
-        m["emails"].set(fmt.number(o["emails_sent_30d"]), hint=f"{failed} failed" if failed else "")
+        calls = o.get("calls_30d") or 0
+        m["emails"].set(fmt.number(o.get("outreach_30d") or 0), hint=f"{calls} by call" if calls else "")
 
         pipe = d.get("pipeline") or {}
         peak = max([pipe.get(k, 0) for k in PIPELINE_ORDER] + [1])

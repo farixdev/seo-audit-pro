@@ -28,7 +28,6 @@ class SettingsPage(Page):
         content = QWidget()
         cl = vbox(content, spacing=20)
         self.has_password = False
-        cl.addWidget(self._smtp_card())
         cl.addWidget(self._audit_card())
         cl.addWidget(self._pagespeed_card())
         cl.addWidget(self._client_card())
@@ -445,12 +444,11 @@ class SettingsPage(Page):
     def load(self):
         if not getattr(self, "_loaded", False):
             self.area.loading("Loading settings…")
-        state = {"smtp": None, "settings": None}
+        state = {"smtp": {}, "settings": None}  # the app does not send email: no email settings
 
         def maybe_ready():
-            if state["smtp"] is not None and state["settings"] is not None:
+            if state["settings"] is not None:
                 self._loaded = True
-                self._fill_smtp(state["smtp"])
                 self._fill_audit(state["settings"])
                 self._fill_psi(state["settings"])
                 self.area.ready()
@@ -463,5 +461,4 @@ class SettingsPage(Page):
             state["settings"] = res
             maybe_ready()
 
-        self.fetch("smtp", api.get, "/api/outreach/smtp", on_done=got_smtp, on_error=self.area.error)
         self.fetch("settings", api.get, "/api/settings", on_done=got_settings, on_error=self.area.error)

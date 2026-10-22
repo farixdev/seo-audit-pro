@@ -173,6 +173,13 @@ def change_password():
 
 @bp.post("/api/auth/forgot-password")
 def forgot_password():
+    if not config.EMAIL_SENDING:
+        raise ApiError(409, "This app does not send email, so ask your Manager to reset your password "
+                            "(Users > your name > Reset password).", code="reset_by_manager")
+    return _forgot_password()
+
+
+def _forgot_password():
     rate_limit(f"forgot-ip:{client_ip()}", 5, 900)
     data = body()
     email = email_value(data)

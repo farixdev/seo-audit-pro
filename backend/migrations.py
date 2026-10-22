@@ -501,6 +501,29 @@ def _m008_email_provider():
     return ["ALTER TABLE smtp_settings ADD COLUMN provider TEXT NOT NULL DEFAULT 'smtp'"]
 
 
+def _m009_manual_outreach():
+    """Outreach is done by people from their own mailbox or phone; the app records
+    it: outreached yes/no, by email or call, and the address / number used."""
+    return [
+        """CREATE TABLE lead_outreach (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL REFERENCES leads(id),
+            user_id TEXT NOT NULL REFERENCES users(id),
+            team_id TEXT REFERENCES teams(id),
+            outreached INTEGER NOT NULL CHECK (outreached IN (0, 1)),
+            method TEXT CHECK (method IN ('email', 'call')),
+            contact TEXT,
+            note TEXT,
+            created_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX ix_lead_outreach_lead ON lead_outreach(lead_id, created_at)",
+        "CREATE INDEX ix_lead_outreach_created ON lead_outreach(created_at)",
+        "CREATE INDEX ix_lead_outreach_user ON lead_outreach(user_id, created_at)",
+        "ALTER TABLE leads ADD COLUMN outreach_method TEXT",
+        "ALTER TABLE leads ADD COLUMN outreach_contact TEXT",
+    ]
+
+
 MIGRATIONS = [
     (1, "initial schema", _m001_initial),
     (2, "lead bank", _m002_lead_bank),
@@ -510,6 +533,7 @@ MIGRATIONS = [
     (6, "chat shares", _m006_chat_shares),
     (7, "audit log tail", _m007_audit_log_tail),
     (8, "email provider", _m008_email_provider),
+    (9, "manual outreach", _m009_manual_outreach),
 ]
 
 # Best-effort performance objects (run outside migrations; failures are logged,

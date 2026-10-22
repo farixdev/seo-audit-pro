@@ -13,6 +13,7 @@ from seo_audit_pro.core import api, fmt, settings, tasks
 from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C, STATUS, score_color
 from seo_audit_pro.ui.pages.base import Page
+from seo_audit_pro.ui.pages.outreach import METHOD_LABEL, mark_outreach, outreach_text
 from seo_audit_pro.ui.pages.reports import pending_file, report_size
 from seo_audit_pro.ui.pages.lead_dialogs import (AssignDialog, LeadFormDialog, load_assignees, set_archived,
                                                  start_audit)
@@ -115,13 +116,15 @@ class LeadDetailPage(Page):
         head.addLayout(left, 1)
         self.audit_btn = button("Start audit", "primary", icon_name="audit")
         self.audit_btn.clicked.connect(self._audit_action)
-        self.email_btn = button("Compose email", icon_name="mail")
+        self.email_btn = button("Write email", icon_name="mail")
         self.email_btn.clicked.connect(lambda: self.ws.navigate("outreach", lead_id=self.lead_id))
+        self.outreach_btn = button("Mark outreached", icon_name="check")
+        self.outreach_btn.clicked.connect(self._mark_outreach)
         self.edit_btn = button("Edit", icon_name="edit")
         self.edit_btn.clicked.connect(self._edit)
         self.more_btn = icon_button("more", "More actions", 18)
         self.more_btn.clicked.connect(self._more_menu)
-        for b in (self.edit_btn, self.email_btn, self.audit_btn):
+        for b in (self.edit_btn, self.outreach_btn, self.email_btn, self.audit_btn):
             head.addWidget(b, 0, Qt.AlignmentFlag.AlignTop)
         head.addWidget(self.more_btn, 0, Qt.AlignmentFlag.AlignTop)
         self.more_btn.setVisible(not session.is_agent())
@@ -209,13 +212,13 @@ class LeadDetailPage(Page):
 
     def _build_outreach(self):
         self.emails_table, self.emails_area = self._tab_table("Outreach", [
-            Column("subject", "Subject", "strong", 260, secondary=lambda r: f"To {r['to_email']}"),
-            Column("status", "Status", "status", 110),
-            Column("sender_name", "Sender", "text", 150),
-            Column("updated_at", "Updated", "relative", 120, stretch=True,
-                   render=lambda r: fmt.relative(r.get("sent_at") or r.get("updated_at"))),
-        ], "No emails have been drafted or sent to this lead.")
-        self.emails_table.activated.connect(self._open_email)
+            Column("outreached", "Outreached", "strong", 110, render=lambda r: "Yes" if r.get("outreached") else "No"),
+            Column("method", "How", "text", 80, render=lambda r: METHOD_LABEL.get(r.get("method"), "—")),
+            Column("contact", "Email / phone", "text", 200, render=lambda r: r.get("contact") or "—"),
+            Column("note", "Note", "text", 200, stretch=True, render=lambda r: (r.get("note") or "").replace("\n", " ")),
+            Column("user_name", "By", "text", 140),
+            Column("created_at", "When", "relative", 110),
+        ], "No outreach recorded yet. After you email or call this lead, use Mark outreached.")
         self.emails_area.retry.connect(lambda: self._load_tab(3, force=True))
 
     def _build_activity(self):
@@ -264,6 +267,8 @@ class LeadDetailPage(Page):
         self.audit_btn.setEnabled(not archived or bool(running))
         self.audit_btn.setToolTip("Restore this lead to audit it" if archived and not running else "")
         self.email_btn.setEnabled(not archived)
+        self.outreach_btn.setEnabled(not archived)
+        self.outreach_btn.setText("Update outreach" if lead.get("last_contact_at") else "Mark outreached")
         self._fill_details(lead)
         self.notes_label.setText(lead.get("notes") or "No notes yet. Use Edit to add context for your team.")
         self.notes_label.setStyleSheet("" if lead.get("notes") else f"color: {C['text_3']};")
@@ -295,7 +300,7 @@ class LeadDetailPage(Page):
                 ("Assigned team", lead.get("team_name") or "Unassigned"),
                 ("Assigned agent", lead.get("agent_name") or "Unassigned"),
                 ("Source", lead.get("batch_name") or lead.get("source")), ("Created", fmt.date(lead.get("created_at"))),
-                ("Last audit", audit_val), ("Last contact", fmt.relative(lead.get("last_contact_at"), "Never contacted"))]
+                ("Last audit", audit_val), ("Outreach", outreach_text(lead))]
         rows = [(k, v) for k, v in rows if v not in (None, "") or k in ("Contact", "Email", "Phone", "Niche", "Area")]
         if lead.get("maps_url"):
             link = button("Open in Google Maps", "link")
@@ -325,8 +330,7 @@ class LeadDetailPage(Page):
             self._load_table("reports", "/api/reports", self.reports_table, self.reports_area,
                              {"lead_id": lid, "page_size": 100})
         elif index == 3:
-            self._load_table("emails", "/api/outreach/emails", self.emails_table, self.emails_area,
-                             {"lead_id": lid, "page_size": 100})
+            self._load_table("outreach", f"/api/leads/{lid}/outreach", self.emails_table, self.emails_area, {})
         elif index == 4:
             self.activity_area.loading("Loading activity…")
             self.fetch("activity", api.get, f"/api/leads/{lid}/activity", on_done=self._render_activity,
@@ -483,9 +487,9 @@ class LeadDetailPage(Page):
                     lambda: self.ws.navigate("audit", audit_id=row["audit_id"]))
         m.exec(pos)
 
-    def _open_email(self, row):
-        key = "outreach_activity" if session.is_manager() else "outreach"
-        self.ws.navigate(key, email_id=row["id"])
+    def _mark_outreach(self):
+        if self.lead:
+            mark_outreach(self, self.lead, on_saved=lambda _l: self.reload())
 
     def on_realtime(self, ev):
         if ev.get("type") == "audit_progress" and ev.get("lead_id") == self.lead_id and \
@@ -498,7 +502,7 @@ _ACTION_ICON = {"LEAD_CREATED": "plus", "LEAD_UPDATED": "edit", "LEAD_ARCHIVED":
                 "AUDIT_CANCELLED": "stop", "AUDIT_CANCEL_REQUESTED": "stop", "REPORT_GENERATED": "report",
                 "EMAIL_SENT": "send", "EMAIL_QUEUED": "mail", "EMAIL_FAILED": "alert_triangle",
                 "EMAIL_DRAFT_SAVED": "mail", "EMAIL_DRAFT_DELETED": "trash", "ISSUE_STATUS_CHANGED": "check",
-                "AUDIT_EXPORTED": "download"}
+                "AUDIT_EXPORTED": "download", "LEAD_OUTREACH": "check"}
 
 
 def _log_detail(log):
@@ -511,6 +515,10 @@ def _log_detail(log):
         return f"Score {meta['score']}/100"
     if action in ("AUDIT_FAILED", "AUDIT_CANCELLED") and meta.get("error"):
         return meta["error"]
+    if action == "LEAD_OUTREACH":
+        if not meta.get("outreached"):
+            return "Marked as not outreached"
+        return f"Outreached by {meta.get('method') or 'contact'}" + (f" · {meta['contact']}" if meta.get("contact") else "")
     if action in ("EMAIL_SENT", "EMAIL_QUEUED") and meta.get("to"):
         return f"To {meta['to']}"
     if action == "EMAIL_FAILED" and meta.get("reason"):

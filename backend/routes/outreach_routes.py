@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """/api/outreach/* — SMTP settings (Manager), drafts, sending, bulk outreach."""
 
+import re
+
 from flask import Blueprint, g, jsonify, request
 
 from backend import config, db, events, mailer, reports, security, uploads
-from backend.auth import AGENT, MANAGER, TEAM_LEAD, can_access_lead, idempotent, load_lead, require
+from backend.auth import AGENT, MANAGER, TEAM_LEAD, can_access_lead, idempotent, lead_scope, load_lead, require
 from backend.errors import ApiError, conflict, not_found
 from backend.util import EMAIL_RE, body, email_value, iso_ago, now_iso, page_args, paged, text
 
@@ -277,7 +279,17 @@ def _email_fields(data):
     return to_email, subject, body_text
 
 
+NO_SENDING = ("This app does not send email. Copy the email (or open it in your mail app), send it from your "
+              "own mailbox, then mark the lead as outreached.")
+
+
+def _no_sending():
+    if not config.EMAIL_SENDING:
+        raise ApiError(410, NO_SENDING, code="sending_off")
+
+
 def _queue(tx, email_id):
+    _no_sending()
     if reports.made_in_app():  # report files come from the sender's app; the server needs its copy to send them
         missing = tx.query(
             """SELECT r.id, r.audit_id, r.kind, r.format FROM email_attachments ea JOIN reports r ON r.id = ea.report_id
@@ -308,6 +320,7 @@ def create_email():
     to_email, subject, body_text = _email_fields(data)
     send = bool(data.get("send"))
     if send:
+        _no_sending()
         _require_smtp()
     audit_id = data.get("audit_id") or None
     if audit_id and not db.query_one("SELECT 1 AS x FROM audits WHERE id = %s AND lead_id = %s", (audit_id, lead["id"])):
@@ -383,6 +396,7 @@ def send_email(email_id):
 @bp.post("/api/outreach/uploads")
 @require()
 def upload_attachment():
+    _no_sending()
     up = uploads.save_upload(request.files.get("file"), g.user["id"], "email")
     return jsonify({"upload": uploads.public_upload(up)}), 201
 
@@ -438,6 +452,7 @@ def bulk_preview():
 @require()
 @idempotent
 def bulk_send():
+    _no_sending()
     me = g.user
     data = body()
     ids = data.get("lead_ids")
@@ -471,3 +486,113 @@ def bulk_send():
         events.audit(me, "BULK_EMAIL", "email_batch", batch_id, {"queued": len(eligible), "skipped": len(skipped)}, tx=tx)
     mailer.wake()
     return jsonify({"batch_id": batch_id, "queued": len(eligible), "skipped": skipped}), 202
+
+
+# ---------------------------------------------------------------------------
+# Manual outreach: people email or call from their own mailbox / phone and record it
+# ---------------------------------------------------------------------------
+_METHODS = ("email", "call")
+
+
+def _outreach_out(r):
+    keys = ("id", "lead_id", "user_id", "user_name", "outreached", "method", "contact", "note", "created_at",
+            "company", "normalized_domain", "team_name")
+    out = {k: r.get(k) for k in keys}
+    out["outreached"] = bool(out["outreached"])
+    return out
+
+
+_OUTREACH_SELECT = """SELECT o.*, u.name AS user_name, l.company, l.normalized_domain, t.name AS team_name
+                      FROM lead_outreach o JOIN leads l ON l.id = o.lead_id
+                      LEFT JOIN users u ON u.id = o.user_id LEFT JOIN teams t ON t.id = o.team_id"""
+
+
+@bp.post("/api/leads/<lead_id>/outreach")
+@require()
+@idempotent
+def mark_outreach(lead_id):
+    """Record that this lead was (or was not) contacted, by email or call, and with which address / number."""
+    me = g.user
+    lead = load_lead(me, lead_id)
+    data = body()
+    outreached = bool(data.get("outreached"))
+    method = contact = None
+    if outreached:
+        method = text(data, "method", required=True, max_len=10, label="Method").lower()
+        if method not in _METHODS:
+            raise ApiError(422, "Choose Email or Call.", field="method")
+        if method == "email":
+            contact = email_value(data, "contact")
+        else:
+            contact = text(data, "contact", required=True, max_len=40, label="Phone number")
+            if len(re.sub(r"\D", "", contact)) < 5:
+                raise ApiError(422, "Enter the phone number you called.", field="contact")
+    note = text(data, "note", max_len=1000, label="Note") or None
+    now = now_iso()
+    oid = security.new_id("out_")
+    with db.transaction() as tx:
+        tx.execute("""INSERT INTO lead_outreach (id, lead_id, user_id, team_id, outreached, method, contact, note, created_at)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                   (oid, lead["id"], me["id"], lead["assigned_team_id"], 1 if outreached else 0, method, contact, note, now))
+        if outreached:
+            tx.execute("""UPDATE leads SET last_contact_at = %s, outreach_method = %s, outreach_contact = %s,
+                              updated_at = %s, version = version + 1,
+                              status = CASE WHEN status IN ('new', 'assigned', 'audited') THEN 'contacted' ELSE status END
+                          WHERE id = %s""", (now, method, contact, now, lead["id"]))
+        else:
+            tx.execute("""UPDATE leads SET last_contact_at = NULL, outreach_method = NULL, outreach_contact = NULL,
+                              updated_at = %s, version = version + 1,
+                              status = CASE WHEN status <> 'contacted' THEN status
+                                            WHEN last_audit_id IS NOT NULL THEN 'audited'
+                                            WHEN assigned_agent_id IS NOT NULL THEN 'assigned' ELSE 'new' END
+                          WHERE id = %s""", (now, lead["id"]))
+        events.audit(me, "LEAD_OUTREACH", "lead", lead["id"],
+                     {"outreached": outreached, "method": method, "contact": contact}, tx=tx)
+    from backend import cache
+    cache.bump()
+    from backend.routes.lead_routes import lead_out
+    row = db.query_one("""SELECT l.*, t.name AS team_name, a.name AS agent_name FROM leads l
+                          LEFT JOIN teams t ON t.id = l.assigned_team_id LEFT JOIN users a ON a.id = l.assigned_agent_id
+                          WHERE l.id = %s""", (lead["id"],))
+    entry = db.query_one(_OUTREACH_SELECT + " WHERE o.id = %s", (oid,))
+    return jsonify({"lead": lead_out(row), "entry": _outreach_out(entry)}), 201
+
+
+@bp.get("/api/leads/<lead_id>/outreach")
+@require()
+def lead_outreach_history(lead_id):
+    load_lead(g.user, lead_id)
+    rows = db.query(_OUTREACH_SELECT + " WHERE o.lead_id = %s ORDER BY o.created_at DESC LIMIT 100", (lead_id,))
+    return jsonify({"items": [_outreach_out(r) for r in rows]})
+
+
+@bp.get("/api/outreach/log")
+@require()
+def outreach_log():
+    """Everyone's recorded outreach within the caller's leads (Managers: all; Team
+    Leads: their team; Agents: their own leads)."""
+    me = g.user
+    page, size, offset = page_args(25)
+    scope, params = lead_scope(me)
+    where, params = [scope], list(params)
+    if request.args.get("method") in _METHODS:
+        where.append("o.method = %s")
+        params.append(request.args["method"])
+    if request.args.get("outreached") in ("yes", "no"):
+        where.append("o.outreached = %s")
+        params.append(1 if request.args["outreached"] == "yes" else 0)
+    if request.args.get("user_id"):
+        where.append("o.user_id = %s")
+        params.append(request.args["user_id"])
+    q = (request.args.get("search") or "").strip().lower()
+    if q:
+        term = f"%{db.like_escape(q)}%"
+        where.append(f"(LOWER(l.company) {db.LIKE} OR l.normalized_domain {db.LIKE} OR LOWER(COALESCE(o.contact, '')) {db.LIKE})")
+        params += [term, term, term]
+    clause = " AND ".join(where)
+    base = """FROM lead_outreach o JOIN leads l ON l.id = o.lead_id LEFT JOIN users u ON u.id = o.user_id
+              LEFT JOIN teams t ON t.id = o.team_id"""
+    total = db.scalar(f"SELECT COUNT(*) {base} WHERE {clause}", params)
+    rows = db.query(f"""SELECT o.*, u.name AS user_name, l.company, l.normalized_domain, t.name AS team_name
+                        {base} WHERE {clause} ORDER BY o.created_at DESC LIMIT %s OFFSET %s""", params + [size, offset])
+    return jsonify(paged([_outreach_out(r) for r in rows], total, page, size))

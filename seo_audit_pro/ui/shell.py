@@ -32,7 +32,7 @@ def navigation_for(role):
             (None, [("dashboard", "Dashboard", "dashboard")]),
             ("Workspace", [("leads", "Lead Bank", "leads"), ("audits", "Audits", "audit"), ("reports", "Reports", "report")]),
             ("Organization", [("teams", "Teams", "teams"), ("users", "Users", "user")]),
-            ("Outreach", [("outreach", "Emails", "mail"), ("outreach_activity", "Activity", "activity")]),
+            ("Outreach", [("outreach", "Write email", "mail"), ("outreach_activity", "Outreach log", "activity")]),
             ("Communication", [("chat", "Chat", "chat")]),
             ("System", [("notifications", "Notifications", "bell"), ("audit_logs", "Audit Logs", "logs"),
                         ("settings", "Settings", "settings")]),

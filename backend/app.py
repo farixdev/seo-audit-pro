@@ -110,6 +110,6 @@ def create_app(start_workers=True):
         from backend import lead_import
         audit_runner.recover_interrupted()
         lead_import.resume_interrupted()
-        if not config.SHARED_HOSTING:  # shared hosting: the cron job sends email
+        if config.EMAIL_SENDING and not config.SHARED_HOSTING:  # shared hosting: the cron job sends email
             mailer.start_worker()
     return app

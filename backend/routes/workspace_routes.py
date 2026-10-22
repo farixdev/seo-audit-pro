@@ -67,12 +67,9 @@ def dashboard():
     running = db.scalar(f"SELECT COUNT(*) {audit_base} AND a.status IN ('queued', 'running')", sp) or 0
     avg_score = db.scalar(f"SELECT AVG(a.score) {audit_base} AND a.status = 'completed' AND a.completed_at > %s",
                           sp + [month])
-    email_scope = "1=1" if me["role"] == MANAGER else ("e.team_id = %s" if me["role"] == TEAM_LEAD else "e.sender_id = %s")
-    ep = [] if me["role"] == MANAGER else [me["team_id"] if me["role"] == TEAM_LEAD else me["id"]]
-    emails_month = db.scalar(f"SELECT COUNT(*) FROM emails e WHERE {email_scope} AND e.status = 'sent' AND e.sent_at > %s",
-                             ep + [month]) or 0
-    failed_month = db.scalar(f"SELECT COUNT(*) FROM emails e WHERE {email_scope} AND e.status = 'failed' AND e.updated_at > %s",
-                             ep + [month]) or 0
+    out_base = f"FROM lead_outreach o JOIN leads l ON l.id = o.lead_id WHERE {scope} AND o.outreached = 1 AND o.created_at > %s"
+    outreach_month = db.scalar(f"SELECT COUNT(*) {out_base}", sp + [month]) or 0
+    calls_month = db.scalar(f"SELECT COUNT(*) {out_base} AND o.method = 'call'", sp + [month]) or 0
 
     # Audit activity: completed audits per day for the last 14 days.
     rows = db.query(f"SELECT SUBSTR(a.completed_at, 1, 10) AS day, COUNT(*) AS n {audit_base} "
@@ -96,8 +93,8 @@ def dashboard():
                     "leads": db.scalar("SELECT COUNT(*) FROM leads WHERE assigned_team_id = %s AND status <> 'archived'", (tid,)) or 0,
                     "audits": db.scalar("SELECT COUNT(*) FROM audits WHERE team_id = %s AND status = 'completed' AND completed_at > %s",
                                         (tid, month)) or 0,
-                    "emails": db.scalar("SELECT COUNT(*) FROM emails WHERE team_id = %s AND status = 'sent' AND sent_at > %s",
-                                        (tid, month)) or 0,
+                    "outreach": db.scalar("SELECT COUNT(*) FROM lead_outreach WHERE team_id = %s AND outreached = 1 "
+                                          "AND created_at > %s", (tid, month)) or 0,
                     "won": db.scalar("SELECT COUNT(*) FROM leads WHERE assigned_team_id = %s AND status = 'won'", (tid,)) or 0,
                 })
         else:
@@ -110,8 +107,8 @@ def dashboard():
                     "leads": db.scalar("SELECT COUNT(*) FROM leads WHERE assigned_agent_id = %s AND status <> 'archived'", (uid,)) or 0,
                     "audits": db.scalar("SELECT COUNT(*) FROM audits WHERE requested_by = %s AND status = 'completed' AND completed_at > %s",
                                         (uid, month)) or 0,
-                    "emails": db.scalar("SELECT COUNT(*) FROM emails WHERE sender_id = %s AND status = 'sent' AND sent_at > %s",
-                                        (uid, month)) or 0,
+                    "outreach": db.scalar("SELECT COUNT(*) FROM lead_outreach WHERE user_id = %s AND outreached = 1 "
+                                          "AND created_at > %s", (uid, month)) or 0,
                     "won": db.scalar("SELECT COUNT(*) FROM leads WHERE assigned_agent_id = %s AND status = 'won'", (uid,)) or 0,
                 })
 
@@ -130,7 +127,7 @@ def dashboard():
         "role": me["role"],
         "overview": {"leads": total_leads, "unassigned": unassigned, "audits_7d": audits_week,
                      "audits_running": running, "avg_score_30d": round(avg_score) if avg_score is not None else None,
-                     "emails_sent_30d": emails_month, "emails_failed_30d": failed_month},
+                     "outreach_30d": outreach_month, "calls_30d": calls_month},
         "pipeline": pipeline,
         "audit_activity": activity,
         "recent_audits": recent_audits,

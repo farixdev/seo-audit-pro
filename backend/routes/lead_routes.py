@@ -42,8 +42,8 @@ def lead_out(row):
     keys = ("id", "company", "website", "normalized_domain", "contact_name", "email", "phone", "niche", "area",
             "country", "address", "category", "rating", "review_count", "maps_url", "source", "notes", "status",
             "assigned_team_id", "assigned_agent_id", "team_name", "agent_name", "batch_id", "batch_name",
-            "last_audit_id", "last_audit_score", "last_audit_at", "last_contact_at", "version", "created_at",
-            "updated_at")
+            "last_audit_id", "last_audit_score", "last_audit_at", "last_contact_at", "outreach_method",
+            "outreach_contact", "version", "created_at", "updated_at")
     out = {k: row.get(k) for k in keys}
     try:
         out["extra"] = json.loads(row["extra"]) if row.get("extra") else {}

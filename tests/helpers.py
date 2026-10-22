@@ -93,6 +93,7 @@ else:
     os.environ["DATABASE_URL"] = ""      # never touch a real database from tests
     os.environ["SEO_DB"] = "sqlite"
 os.environ["SEO_ENV"] = "test"
+os.environ["EMAIL_SENDING"] = "1"  # the sending code stays tested; the app runs with it off
 os.environ["AUDITS_RUN_ON"] = "server"  # the queue tests drive the server's runner; test_app_runner switches to "app"
 os.environ["SECRET_KEY"] = "test-secret-key-" + uuid.uuid4().hex
 os.environ["DATA_ENCRYPTION_KEY"] = "test-data-key-" + uuid.uuid4().hex

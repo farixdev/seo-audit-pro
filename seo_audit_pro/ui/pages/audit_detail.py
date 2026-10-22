@@ -198,13 +198,15 @@ class AuditDetailPage(Page):
         hl.addLayout(col, 1)
         self.btn_lead = button("Open lead", icon_name="leads")
         self.btn_lead.clicked.connect(lambda: self.ws.navigate("lead", lead_id=self.audit["lead_id"]))
-        self.btn_email = button("Compose email", icon_name="mail")
+        self.btn_email = button("Write email", icon_name="mail")
         self.btn_email.clicked.connect(lambda: self.ws.navigate("outreach", lead_id=self.audit["lead_id"]))
+        self.btn_outreach = button("Mark outreached", icon_name="check")
+        self.btn_outreach.clicked.connect(self._mark_outreach)
         self.btn_rerun = button("Run again", icon_name="refresh")
         self.btn_rerun.clicked.connect(self.run_again)
         self.btn_cancel = BusyButton("Cancel audit", "danger", icon_name="stop")
         self.btn_cancel.clicked.connect(self.cancel)
-        for b in (self.btn_lead, self.btn_email, self.btn_rerun, self.btn_cancel):
+        for b in (self.btn_lead, self.btn_outreach, self.btn_email, self.btn_rerun, self.btn_cancel):
             hl.addWidget(b, 0, Qt.AlignmentFlag.AlignTop)
         self.body.addWidget(head)
 
@@ -455,6 +457,7 @@ class AuditDetailPage(Page):
         self.btn_cancel.busy(False)
         self.btn_rerun.setVisible(not running)
         self.btn_email.setVisible(a["status"] == "completed")
+        self.btn_outreach.setVisible(a["status"] == "completed")
 
     # ---------------------------------------------------------------- progress
     def _show_progress(self, a):
@@ -554,6 +557,13 @@ class AuditDetailPage(Page):
             show_error(self, err)
 
         tasks.run(api.post, f"/api/audits/{self.audit_id}/cancel", on_done=done, on_error=fail, owner=self)
+
+    def _mark_outreach(self):
+        """Record that this lead was emailed or called (the lead is fetched fresh for its email and phone)."""
+        from seo_audit_pro.ui.pages.outreach import mark_outreach
+        if self.audit:
+            tasks.run(api.get, f"/api/leads/{self.audit['lead_id']}", on_done=lambda r: mark_outreach(self, r["lead"]),
+                      on_error=lambda e: show_error(self, e, "Lead"), owner=self)
 
     def regenerate(self):
         self.btn_regen.busy(True, "Generating…")
