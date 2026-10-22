@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Brand mark: a graphite tile with inspection brackets framing an upward trend
-line — "precise inspection that leads to measurable improvement".
+Brand mark: a magnifying glass whose lens holds three rising bars, on a deep
+blue tile — the audit looks closely at a site, and what it finds makes the
+rankings climb. Mint bars are the growth; the white glass is the inspection.
 
 The mark is defined once as vector geometry and rendered for the splash,
-sign-in screen, sidebar, window icon and the Windows .ico file.
+sign-in screen, sidebar, window icon and the Windows .ico file. At 24 px and
+below a bolder, simpler version keeps it readable in the taskbar.
 """
 
 import os
@@ -15,21 +17,27 @@ from PySide6.QtGui import QIcon, QImage, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 INK = "#18181B"
-SIGNAL = "#5B8CFF"
+TILE_TOP = "#2F5BFF"     # electric blue
+TILE_BOTTOM = "#141A4D"  # deep navy
+GROWTH = "#3EE6A8"       # mint
 
 
-def logo_svg(simplified=False, tile=INK, line=SIGNAL):
-    brackets = "" if simplified else (
-        '<g stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" fill="none">'
-        '<path d="M14 23v-7a2 2 0 0 1 2-2h7"/><path d="M41 14h7a2 2 0 0 1 2 2v7"/>'
-        '<path d="M50 41v7a2 2 0 0 1-2 2h-7"/><path d="M23 50h-7a2 2 0 0 1-2-2v-7"/></g>')
-    width = "7" if simplified else "4.5"
-    pts = "14,46 26,34 34,40 50,22" if simplified else "21,42 29,34 35,38 44,27"
-    dot = "" if simplified else f'<circle cx="44" cy="27" r="3.4" fill="{line}"/>'
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
-            f'<rect width="64" height="64" rx="14" fill="{tile}"/>{brackets}'
-            f'<polyline points="{pts}" fill="none" stroke="{line}" stroke-width="{width}" '
-            f'stroke-linecap="round" stroke-linejoin="round"/>{dot}</svg>')
+def logo_svg(simplified=False):
+    tile = (f'<defs><linearGradient id="t" x1="0" y1="0" x2="1" y2="1">'
+            f'<stop offset="0" stop-color="{TILE_TOP}"/><stop offset="1" stop-color="{TILE_BOTTOM}"/>'
+            f'</linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#t)"/>')
+    if simplified:  # taskbar / small sizes: thick glass, two bold bars
+        body = (f'<rect x="18" y="27" width="6" height="9" rx="1.5" fill="{GROWTH}"/>'
+                f'<rect x="27" y="20" width="6" height="16" rx="1.5" fill="{GROWTH}"/>'
+                '<circle cx="27" cy="28" r="15" fill="none" stroke="#FFFFFF" stroke-width="6"/>'
+                '<path d="M38.5 39.5 52 53" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>')
+    else:
+        body = (f'<rect x="19" y="29" width="4.2" height="6" rx="1.3" fill="{GROWTH}" opacity="0.75"/>'
+                f'<rect x="25.4" y="25" width="4.2" height="10" rx="1.3" fill="{GROWTH}" opacity="0.88"/>'
+                f'<rect x="31.8" y="20.5" width="4.2" height="14.5" rx="1.3" fill="{GROWTH}"/>'
+                '<circle cx="28" cy="28" r="14" fill="none" stroke="#FFFFFF" stroke-width="4.6"/>'
+                '<path d="M38.6 38.6 49.5 49.5" stroke="#FFFFFF" stroke-width="6.4" stroke-linecap="round"/>')
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">{tile}{body}</svg>'
 
 
 def logo_image(size):

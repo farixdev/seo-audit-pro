@@ -248,7 +248,8 @@ class PageHeader(QWidget):
         self.subtitle = label(subtitle, "PageSubtitle", wrap=True)
         col.addWidget(self.title)
         col.addWidget(self.subtitle)
-        self.subtitle.setVisible(bool(subtitle))  # pages may fill it in after loading
+        if not subtitle:  # pages may fill it in after loading (never show() a widget before it has a parent)
+            self.subtitle.hide()
         row.addLayout(col, 1)
         self.actions = hbox(spacing=8)
         row.addLayout(self.actions)

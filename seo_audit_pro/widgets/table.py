@@ -289,7 +289,8 @@ class DataTable(QWidget):
         self.footer.setObjectName("TableFooter")
         self.footer.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.footer.setStyleSheet(f"#TableFooter {{ background: {C['surface']}; border-top: 1px solid {C['border']}; }}")
-        self.footer.setVisible(paginated)
+        if not paginated:
+            self.footer.hide()
         lay.addWidget(self.footer)
 
     @staticmethod

@@ -363,7 +363,8 @@ class LeadsPage(Page):
 
         self.tabs = Segmented([("Leads", "leads"), ("Imports", "imports")])
         self.tabs.changed.connect(self._switch_tab)
-        self.tabs.setVisible(self.manage)
+        if not self.manage:
+            self.tabs.hide()
         self.body.addWidget(self.tabs, 0, Qt.AlignmentFlag.AlignLeft)
         self.views = QStackedWidget()
         self.body.addWidget(self.views, 1)

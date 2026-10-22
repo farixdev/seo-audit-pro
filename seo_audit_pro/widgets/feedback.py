@@ -130,7 +130,8 @@ class Field(QWidget):
         lay.addWidget(widget)
         self.widget = widget
         self.hint = label(hint, "Meta", wrap=True)
-        self.hint.setVisible(bool(hint))
+        if not hint:
+            self.hint.hide()
         lay.addWidget(self.hint)
         self.err = label("", "FieldError", wrap=True)
         self.err.setVisible(False)
