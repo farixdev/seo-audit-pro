@@ -26,6 +26,9 @@ def bump():
 
 
 def get_or_set(key, compute, ttl=60):
+    from backend import config
+    if config.SHARED_HOSTING:  # several processes: another one may have changed the data
+        return compute()
     with _LOCK:
         version = _VERSION
         hit = _STORE.get(key)

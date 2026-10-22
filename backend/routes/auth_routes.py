@@ -236,7 +236,8 @@ def health():
         db_ok = False
     status = 200 if db_ok else 503
     return jsonify({"status": "ok" if db_ok else "degraded", "version": config.APP_VERSION,
-                    "app": "SEO Audit Pro", "audits_run_on": config.AUDITS_RUN_ON}), status
+                    "app": "SEO Audit Pro", "audits_run_on": config.AUDITS_RUN_ON,
+                    "realtime": config.REALTIME}), status
 
 
 @bp.get("/api/ping")

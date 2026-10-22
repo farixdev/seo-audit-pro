@@ -57,6 +57,15 @@ class SettingsPage(Page):
                               "(Google Account → Security → App passwords). Your normal Gmail password will not work.",
                               "Meta", wrap=True), 1)
         card.body.addLayout(gmail)
+        domain = hbox(spacing=10)
+        dm = button("Use domain email settings", icon_name="globe", size="sm")
+        dm.clicked.connect(self._domain_mail)
+        domain.addWidget(dm)
+        domain.addWidget(label("For a mailbox on your own domain (for example from cPanel): enter the full email "
+                               "address as the username first. Uses mail.yourdomain.com, port 465, SSL; if the test "
+                               "says the certificate does not match, use the server name your host shows for email.",
+                               "Meta", wrap=True), 1)
+        card.body.addLayout(domain)
 
         self.host = line_edit("smtp.yourdomain.com")
         self.port = QSpinBox()
@@ -104,6 +113,18 @@ class SettingsPage(Page):
         if not self.from_email.text().strip() and "@" in self.username.text():
             self.from_email.setText(self.username.text().strip())
         self.username.setFocus()
+
+    def _domain_mail(self):
+        address = (self.username.text().strip() or self.from_email.text().strip())
+        if "@" in address:
+            self.host.setText("mail." + address.split("@", 1)[1].lower())
+            if not self.from_email.text().strip():
+                self.from_email.setText(address)
+            if not self.username.text().strip():
+                self.username.setText(address)
+        self.port.setValue(465)
+        self.encryption.setCurrentIndex(self.encryption.findData("ssl"))
+        (self.username if "@" not in address else self.password).setFocus()
 
     def _encryption_changed(self, _i):
         suggested = {"starttls": 587, "ssl": 465}.get(self.encryption.currentData())

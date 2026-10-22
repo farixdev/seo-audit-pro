@@ -86,6 +86,14 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 MAX_CONCURRENT_AUDITS = int(os.environ.get("MAX_CONCURRENT_AUDITS", 2))  # default; Managers can change it in Settings
 
+# Shared hosting (SEO_HOSTING=cpanel, run by Passenger): the server may run as several
+# short-lived processes, cannot keep WebSocket connections open and must not run
+# background threads. The apps then refresh on a timer, a cron job sends queued
+# email (python -m backend.manage cron) and nothing is cached in memory.
+HOSTING = (os.environ.get("SEO_HOSTING") or "").strip().lower()
+SHARED_HOSTING = HOSTING == "cpanel"
+REALTIME = not SHARED_HOSTING
+
 # Where audits and report files are made. "app": on each person's own computer —
 # their desktop app runs the audits they queued and builds report files, and the
 # server only stores and shares the data. "server": the server does that work.

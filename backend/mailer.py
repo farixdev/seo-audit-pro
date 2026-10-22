@@ -13,7 +13,7 @@ import ssl
 import threading
 import time
 from email.message import EmailMessage
-from email.utils import formataddr, make_msgid
+from email.utils import formataddr, formatdate, make_msgid
 
 from backend import cache, config, db, events
 from backend.security import decrypt_secret
@@ -41,8 +41,21 @@ def smtp_config():
     return row
 
 
+def _is_gmail(cfg):
+    return (cfg.get("host") or "").lower().strip() in ("smtp.gmail.com", "smtp.googlemail.com")
+
+
 def _connect(cfg, timeout=20):
+    host = (cfg.get("host") or "").strip()
     ctx = ssl.create_default_context()
+    if host.lower() in ("localhost", "127.0.0.1", "::1"):
+        # The mail server on this same machine (cPanel): its certificate names the
+        # server, not "localhost", and the connection never leaves the machine.
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    cfg = dict(cfg, host=host)
+    if _is_gmail(cfg):  # Google shows app passwords in groups of four ("abcd efgh ijkl mnop")
+        cfg["password"] = (cfg.get("password") or "").replace(" ", "")
     if cfg["encryption"] == "ssl":
         server = smtplib.SMTP_SSL(cfg["host"], int(cfg["port"]), timeout=timeout, context=ctx)
     else:
@@ -56,9 +69,22 @@ def _connect(cfg, timeout=20):
     return server
 
 
-def _friendly(exc):
+def _friendly(exc, cfg=None):
+    cfg = cfg or {}
     if isinstance(exc, smtplib.SMTPAuthenticationError):
+        if _is_gmail(cfg):
+            return ("Gmail rejected the sign-in. Use the full Gmail address as the username and a 16-letter "
+                    "App Password (Google Account > Security > 2-Step Verification > App passwords), not the "
+                    "normal Gmail password.")
         return "The SMTP server rejected the username or password."
+    if isinstance(exc, ssl.SSLCertVerificationError):
+        return ("The mail server's certificate does not match this host name. Use the server name your host "
+                "shows for email (cPanel > Email Accounts > Connect Devices, for example server123.yourhost.com).")
+    if isinstance(exc, ssl.SSLError):
+        return "The port and encryption do not match: use port 465 with SSL, or port 587 with STARTTLS."
+    if isinstance(exc, smtplib.SMTPSenderRefused):
+        return ("The mail server refused the From address. It must be the mailbox you signed in with "
+                "(or an address it may send as).")
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
         return "The recipient address was rejected by the mail server."
     if isinstance(exc, (smtplib.SMTPConnectError, ConnectionError, OSError)):
@@ -74,15 +100,18 @@ def test_connection(cfg):
         server.quit()
         return True, "Connected and authenticated successfully."
     except Exception as e:  # noqa: BLE001
-        return False, _friendly(e)
+        return False, _friendly(e, cfg)
 
 
-def _build(cfg, to_email, subject, body_text, attachments=()):
+def _build(cfg, to_email, subject, body_text, attachments=(), reply_to=None):
     msg = EmailMessage()
     msg["From"] = formataddr((cfg["from_name"], cfg["from_email"]))
     msg["To"] = to_email
     msg["Subject"] = subject
+    msg["Date"] = formatdate(localtime=True)  # without it many mail servers score the email as spam
     msg["Message-ID"] = make_msgid(domain=cfg["from_email"].split("@")[-1])
+    if reply_to and reply_to.lower() != (cfg["from_email"] or "").lower():
+        msg["Reply-To"] = reply_to  # replies go to the person who sent it from the app
     msg.set_content(body_text)
     for name, mime, path in attachments:
         maintype, subtype = mime.split("/", 1)
@@ -91,14 +120,14 @@ def _build(cfg, to_email, subject, body_text, attachments=()):
     return msg
 
 
-def send_now(to_email, subject, body_text, attachments=()):
+def send_now(to_email, subject, body_text, attachments=(), reply_to=None):
     cfg = smtp_config()
     if not cfg:
         raise MailError("SMTP is not configured.")
     try:
         server = _connect(cfg)
         try:
-            server.send_message(_build(cfg, to_email, subject, body_text, attachments))
+            server.send_message(_build(cfg, to_email, subject, body_text, attachments, reply_to))
         finally:
             try:
                 server.quit()
@@ -107,7 +136,7 @@ def send_now(to_email, subject, body_text, attachments=()):
     except MailError:
         raise
     except Exception as e:  # noqa: BLE001
-        raise MailError(_friendly(e)) from e
+        raise MailError(_friendly(e, cfg)) from e
 
 
 def send_password_reset(user, code):
@@ -159,7 +188,8 @@ def _process_one():
             return "raced"
     sender = db.query_one("SELECT * FROM users WHERE id = %s", (row["sender_id"],))
     try:
-        send_now(row["to_email"], row["subject"], row["body"], _attachments_for(row["id"]))
+        send_now(row["to_email"], row["subject"], row["body"], _attachments_for(row["id"]),
+                 reply_to=(sender or {}).get("email"))
     except Exception as e:  # noqa: BLE001
         reason = str(e) if isinstance(e, MailError) else getattr(e, "message", None) or "Email delivery failed."
         db.execute("UPDATE emails SET status = 'failed', error = %s, updated_at = %s WHERE id = %s",
@@ -237,4 +267,47 @@ def start_worker():
 
 
 def wake():
+    if config.SHARED_HOSTING:  # no queue thread here: send now in a short-lived thread (the cron job is the backup)
+        threading.Thread(target=_drain_once, name="email-send", daemon=True).start()
+        return
     _WAKE.set()
+
+
+_DRAIN_LOCK = threading.Lock()
+
+
+def _drain_once():
+    if _DRAIN_LOCK.acquire(blocking=False):  # one sender per process; the database stops two processes sending one email
+        try:
+            drain(110)
+        finally:
+            _DRAIN_LOCK.release()
+
+
+def release_stuck(minutes=10):
+    """An email left in 'sending' (the process was stopped while sending) may
+    or may not have gone out: mark it failed rather than risk sending it twice."""
+    db.execute("UPDATE emails SET status = 'failed', error = %s, updated_at = %s WHERE status = 'sending' AND updated_at < %s",
+               ("Delivery was interrupted. Check the recipient's inbox before resending.", now_iso(), iso_ago(minutes * 60)))
+
+
+def drain(max_seconds=50):
+    """Send queued emails until none are left or ``max_seconds`` pass (the cron
+    job runs this every minute on shared hosting). Returns how many were sent."""
+    deadline = time.monotonic() + max_seconds
+    sent = 0
+    while time.monotonic() < deadline:
+        try:
+            outcome = _process_one()
+        except Exception as e:  # noqa: BLE001
+            log.error("Email queue error: %s", e)
+            return sent
+        if outcome == "sent":
+            sent += 1
+        if outcome in ("sent", "failed"):
+            if time.monotonic() + config.EMAIL_SEND_INTERVAL_SECONDS >= deadline:
+                break
+            time.sleep(config.EMAIL_SEND_INTERVAL_SECONDS)
+        elif outcome != "raced":
+            break  # idle or daily limit reached
+    return sent

@@ -1,0 +1,6 @@
+# SEO Audit Pro team server on cPanel: only what the light server needs.
+flask>=3.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+psycopg2-binary>=2.9.9
+cryptography>=42.0.0

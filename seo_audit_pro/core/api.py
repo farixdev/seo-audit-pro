@@ -38,6 +38,12 @@ class ApiError(Exception):
 
 
 _local = threading.local()
+SERVER = {}   # what /api/health said about the server (e.g. realtime: false on shared hosting)
+
+
+def live_updates():
+    """False when the server cannot keep a live connection (shared hosting): screens refresh on a timer."""
+    return SERVER.get("realtime", True) is not False
 _refresh_lock = threading.Lock()
 
 
@@ -227,4 +233,5 @@ def health(timeout=5):
     if data.get("app") != "SEO Audit Pro":
         raise ApiError(resp.status_code, "This address does not look like an SEO Audit Pro server.", "bad_server")
     session.set_connection("online" if data.get("status") == "ok" else "offline")
+    SERVER.update(data)
     return data

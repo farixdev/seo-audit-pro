@@ -583,7 +583,9 @@ class Workspace(QWidget):
         self.history.clear()
         self.topbar.set_can_go_back(False)
         self.navigate("dashboard")
-        get_hub().start()
+        if api.live_updates():
+            get_hub().start()
+        self._unread_timer.setInterval(60000 if api.live_updates() else 20000)
         self._unread_timer.start()
         self._refresh_counts()
         pc_work.runner().start()  # audits this person queued run on this computer

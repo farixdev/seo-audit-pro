@@ -179,7 +179,8 @@ class AuditRunner:
             jobs = list(self._jobs.values())
         for job in jobs:
             self._service(job, now)
-        if self.enabled and len(self._jobs) < self.slots and (self._claim_now or now - self._last_claim > CLAIM_EVERY):
+        every = CLAIM_EVERY if api.live_updates() else 15  # without live events, look for new audits more often
+        if self.enabled and len(self._jobs) < self.slots and (self._claim_now or now - self._last_claim > every):
             self._claim()
 
     def _claim(self):

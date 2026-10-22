@@ -5,6 +5,7 @@ Operator commands.
   python -m backend.manage migrate
   python -m backend.manage create-manager --email you@agency.com --name "Your Name"
   python -m backend.manage import-legacy     (one-time import from the old agency_* tables)
+  python -m backend.manage cron              (shared hosting: run every minute; sends queued email)
 """
 
 import argparse
@@ -18,6 +19,44 @@ from backend.util import EMAIL_RE, normalize_company, normalize_domain, normaliz
 def cmd_migrate(_args):
     migrations.migrate()
     print("Database schema is up to date.")
+
+
+def cmd_cron(_args):
+    """One cron run (every minute on shared hosting): send queued email for up to
+    50 seconds and, every 6 hours, prune old security records. Light: it only
+    talks to the database and the mail server."""
+    import json
+    import os
+    import time
+
+    from backend import config, mailer
+
+    lock = os.path.join(config.DATA_DIR, "cron.lock")
+    try:
+        if time.time() - os.path.getmtime(lock) < 300:
+            return  # the previous run is still sending
+    except OSError:
+        pass
+    with open(lock, "w") as fh:
+        fh.write(str(os.getpid()))
+    try:
+        mailer.release_stuck()
+        sent = mailer.drain(50)
+        row = db.query_one("SELECT value FROM app_settings WHERE key = 'cron_maintenance'")
+        last = json.loads(row["value"]).get("at", 0) if row else 0
+        if time.time() - last > 6 * 3600:
+            mailer.maintenance()
+            with db.transaction() as tx:
+                tx.execute("DELETE FROM app_settings WHERE key = 'cron_maintenance'")
+                tx.execute("INSERT INTO app_settings (key, value, updated_at) VALUES (%s, %s, %s)",
+                           ("cron_maintenance", json.dumps({"at": time.time()}), now_iso()))
+        if sent:
+            print(f"{now_iso()} sent {sent} email(s)")
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
 
 
 def cmd_create_manager(args):
@@ -119,8 +158,10 @@ def main():
     cm.add_argument("--email")
     cm.add_argument("--name")
     sub.add_parser("import-legacy")
+    sub.add_parser("cron")
     args = parser.parse_args()
-    {"migrate": cmd_migrate, "create-manager": cmd_create_manager, "import-legacy": cmd_import_legacy}[args.cmd](args)
+    {"migrate": cmd_migrate, "create-manager": cmd_create_manager, "import-legacy": cmd_import_legacy,
+     "cron": cmd_cron}[args.cmd](args)
 
 
 if __name__ == "__main__":

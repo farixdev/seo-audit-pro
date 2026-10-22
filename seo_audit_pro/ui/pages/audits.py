@@ -190,7 +190,7 @@ class QueueView(QWidget):
         self._reload.setSingleShot(True)
         self._reload.timeout.connect(self.load)
         self._poll = QTimer(self)
-        self._poll.setInterval(15000)  # fallback when realtime events are not arriving
+        self._poll.setInterval(15000 if api.live_updates() else 6000)  # fallback when live events are not arriving
         self._poll.timeout.connect(self.load)
 
     def showEvent(self, e):

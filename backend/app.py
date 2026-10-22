@@ -94,7 +94,8 @@ def create_app(start_workers=True):
                 workspace_routes, admin_routes):
         app.register_blueprint(mod.bp)
     errors.register(app)
-    realtime.register_routes(app)
+    if config.REALTIME:
+        realtime.register_routes(app)
 
     @app.after_request
     def _security_headers(resp):
@@ -109,5 +110,6 @@ def create_app(start_workers=True):
         from backend import lead_import
         audit_runner.recover_interrupted()
         lead_import.resume_interrupted()
-        mailer.start_worker()
+        if not config.SHARED_HOSTING:  # shared hosting: the cron job sends email
+            mailer.start_worker()
     return app

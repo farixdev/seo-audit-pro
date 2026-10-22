@@ -750,7 +750,7 @@ class ChatPage(Page):
         self._typing_timer.setSingleShot(True)
         self._typing_timer.timeout.connect(lambda: self.typing_label.setText(""))
         self._poll = QTimer(self)
-        self._poll.setInterval(15000)
+        self._poll.setInterval(15000 if api.live_updates() else 5000)  # no live connection: refresh often
         self._poll.timeout.connect(self._poll_tick)
         self._poll.start()
         self._list_reload = QTimer(self)

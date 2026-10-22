@@ -111,7 +111,7 @@ def get_audit(audit_id):
     load_audit(g.user, audit_id)
     row = db.query_one(_AUDIT_SELECT + " WHERE a.id = %s", (audit_id,))
     data = audit_out(row)
-    data["logs"] = audit_runner.live_logs(audit_id)[-120:]
+    data["logs"] = audit_runner.live_logs(audit_id, row)[-120:]
     if row["status"] == "queued":
         ahead = audit_runner.queue_position(row)
         snap = audit_runner.snapshot()

@@ -488,6 +488,12 @@ def _m006_chat_shares():
     ]
 
 
+def _m007_audit_log_tail():
+    """The last engine log lines of an audit run by an app, kept in the database so
+    every server process (shared hosting runs several) shows the same log."""
+    return ["ALTER TABLE audits ADD COLUMN log_tail TEXT"]
+
+
 MIGRATIONS = [
     (1, "initial schema", _m001_initial),
     (2, "lead bank", _m002_lead_bank),
@@ -495,6 +501,7 @@ MIGRATIONS = [
     (4, "upload data", _m004_upload_data),
     (5, "work in apps", _m005_work_in_apps),
     (6, "chat shares", _m006_chat_shares),
+    (7, "audit log tail", _m007_audit_log_tail),
 ]
 
 # Best-effort performance objects (run outside migrations; failures are logged,

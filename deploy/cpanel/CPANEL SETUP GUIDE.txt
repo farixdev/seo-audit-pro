@@ -1,0 +1,157 @@
+SEO AUDIT PRO - TEAM SERVER ON CPANEL
+=====================================
+
+What this server does
+---------------------
+It only connects your team: sign-in, roles, saving and sharing data in the
+PostgreSQL database, chat, and sending emails. All heavy work (audits, Word and
+PDF reports, reading lead files) runs on each person's own computer in the
+desktop app. So it uses very little of your hosting: a few small Python
+libraries, no background programs, and one light cron job for email.
+
+You need: cPanel with "Setup Python App", "PostgreSQL Databases" and
+"Cron Jobs" (most cPanel hosts have all three). Takes about 20 minutes.
+
+
+STEP 1 - Make a subdomain (recommended)
+---------------------------------------
+cPanel > Domains (or Subdomains) > Create: for example  api.yourdomain.com
+Then cPanel > SSL/TLS Status > select it > "Run AutoSSL", so it has HTTPS.
+(The app talks to the server only over HTTPS.)
+
+
+STEP 2 - Create the database
+----------------------------
+cPanel > PostgreSQL Databases
+  1. "Create New Database": name it  seoaudit
+     (cPanel adds your username in front, e.g.  cpaneluser_seoaudit)
+  2. "Add New User": name  seo , give it a strong password, write it down
+     (becomes e.g.  cpaneluser_seo)
+  3. "Add User To Database": pick that user and database, give ALL privileges.
+
+
+STEP 3 - Upload the server
+--------------------------
+cPanel > File Manager > your home folder (/home/YOURUSER)
+  1. Create a folder:  seoapi
+  2. Open it, Upload  seo-audit-pro-server.zip , then right-click > Extract.
+  3. Turn on "Show Hidden Files" (Settings, top right) so you can see  .env
+  4. Right-click  .env  > Edit. Change the lines marked EDIT:
+
+     DATABASE_URL=postgresql://cpaneluser_seo:YOUR_DB_PASSWORD@localhost:5432/cpaneluser_seoaudit
+     BOOTSTRAP_MANAGER_EMAIL=your email (this is your Manager sign-in)
+     BOOTSTRAP_MANAGER_PASSWORD=a temporary password (at least 10 characters)
+     BOOTSTRAP_MANAGER_NAME=Your Name
+
+     Do NOT change SECRET_KEY or DATA_ENCRYPTION_KEY (they were made for you).
+     If the database password has symbols like @ : / # ?, replace them:
+     @ -> %40   : -> %3A   / -> %2F   # -> %23   ? -> %3F
+  5. Save.
+
+
+STEP 4 - Create the Python app
+------------------------------
+cPanel > Setup Python App > "Create Application"
+  Python version ......... the newest offered (3.9 or newer; 3.11+ is best)
+  Application root ....... seoapi
+  Application URL ........ api.yourdomain.com   (leave the path empty)
+  Application startup file  passenger_wsgi.py
+  Application Entry point . application
+Click "Create".
+
+Then, on the same page:
+  1. In "Configuration files" type  requirements-cpanel.txt , click "Add",
+     then click "Run Pip Install" and pick requirements-cpanel.txt.
+     Wait until it finishes (1-2 minutes).
+  2. At the top of the page there is a line starting with  source /home/...
+     ("Enter to the virtual environment"). Copy it. Open cPanel > Terminal
+     (or SSH), paste it, press Enter, then run:
+
+         python -m backend.manage migrate
+
+     It should say "Database schema is up to date." (this creates the tables).
+     No Terminal on your host? Skip it: the server creates the tables itself
+     on its first start (the first page load takes a few seconds longer).
+  3. Click "RESTART".
+
+
+STEP 5 - Check it works
+-----------------------
+Open in your browser:   https://api.yourdomain.com/api/health
+You should see something like:
+  {"app":"SEO Audit Pro","audits_run_on":"app","realtime":false,"status":"ok",...}
+
+"status":"degraded" means the database line in .env is wrong (Step 3.4).
+An error page: open  seoapi/server_data/logs/  or "stderr.log" in seoapi/
+and send it to your developer.
+
+
+STEP 6 - Cron job for email (important)
+---------------------------------------
+Emails are sent right away when someone presses Send; this cron job is the
+safety net that sends anything left in the queue and does a little clean-up.
+
+cPanel > Cron Jobs > Add New Cron Job
+  Common settings: "Once Per Minute (* * * * *)"
+  Command (one line; change YOURUSER and the Python version folder to yours -
+  the folder name is in the "source ..." line from Step 4):
+
+  cd /home/YOURUSER/seoapi && /home/YOURUSER/virtualenv/seoapi/3.11/bin/python -m backend.manage cron >> /home/YOURUSER/seoapi/server_data/cron.log 2>&1
+
+The cron job is light: it only checks the database and, if there are emails,
+hands them to the mail server, then stops. It never runs audits.
+
+
+STEP 7 - Sign in and set up email
+---------------------------------
+Send your developer the address  https://api.yourdomain.com  so the desktop
+app can be built with it. Then in the app:
+
+  1. Sign in with BOOTSTRAP_MANAGER_EMAIL / BOOTSTRAP_MANAGER_PASSWORD.
+     You will be asked to choose a new password.
+  2. Settings > Email delivery (SMTP). Only the Manager sets this; Team Leads
+     and Agents just send.
+
+     GMAIL
+       Click "Use Gmail settings":  smtp.gmail.com, port 587, STARTTLS
+       Username: the full Gmail address
+       Password: a Google App Password (Google Account > Security >
+                 2-Step Verification > App passwords). The normal Gmail
+                 password does not work.
+       From email: the same Gmail address
+
+     DOMAIN EMAIL (a mailbox you created in cPanel > Email Accounts)
+       Type the full address as Username, click "Use domain email settings":
+       mail.yourdomain.com, port 465, SSL
+       Password: that mailbox's password
+       From email: the same address
+       If "Send test" says the certificate does not match: cPanel > Email
+       Accounts > Connect Devices shows the right server name (often like
+       server123.yourhost.com) - use that as SMTP host.
+       Because the server runs on the same cPanel, "localhost", port 587,
+       STARTTLS also works for mailboxes on this hosting.
+
+  3. Click "Send test", then "Save".
+  Replies to an outreach email go to the person who sent it.
+
+  If Gmail cannot be reached at all: some hosts block outgoing email to other
+  servers. Use a domain mailbox on this hosting instead, or ask your host to
+  allow outgoing SMTP (WHM > "SMTP Restrictions").
+
+  3. Users > add your Team Leads and Agents. Give each one the app zip.
+
+
+UPDATING THE SERVER LATER
+-------------------------
+Upload the new zip into seoapi, Extract and choose to overwrite, but keep your
+.env (do not replace it). Then Setup Python App > RESTART.
+
+
+GOOD TO KNOW
+------------
+* The server can't keep a "live" connection on shared hosting, so the app
+  refreshes on its own: chat every 5 seconds, audit progress every 5 seconds,
+  new audits are picked up within 15 seconds.
+* Audits run only while the app of the person who started them is open.
+* Your data lives in the cPanel PostgreSQL database. Back it up with
+  cPanel > Backup (or the Backup Wizard) like any other database.

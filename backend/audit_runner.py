@@ -239,7 +239,12 @@ def cancel_batch(batch_id):
     return dropped
 
 
-def live_logs(audit_id):
+def live_logs(audit_id, row=None):
+    if row and row.get("log_tail"):  # an audit run by an app: kept in the database
+        try:
+            return json.loads(row["log_tail"])
+        except ValueError:
+            pass
     with _LIVE_LOCK:
         live = _LIVE.get(audit_id)
         return list(live["logs"]) if live else []
@@ -496,12 +501,18 @@ def _context(audit_id):
     return {"row": row, "lead": lead, "requester": requester, "targets": audience(lead, row["requested_by"])}
 
 
-def _write_progress(ctx, state):
+def _write_progress(ctx, state, logs=None):
     audit_id, lead_id = ctx["row"]["id"], ctx["row"]["lead_id"]
-    db.execute("UPDATE audits SET percent = %s, step = %s, pages_processed = %s, pages_discovered = %s, heartbeat_at = %s "
-               "WHERE id = %s AND status = 'running'",
-               (state["percent"], state["step"][:300], state["pages_processed"], state["pages_discovered"], now_iso(),
-                audit_id))
+    if logs is not None:
+        db.execute("UPDATE audits SET percent = %s, step = %s, pages_processed = %s, pages_discovered = %s, "
+                   "heartbeat_at = %s, log_tail = %s WHERE id = %s AND status = 'running'",
+                   (state["percent"], state["step"][:300], state["pages_processed"], state["pages_discovered"],
+                    now_iso(), json.dumps(logs), audit_id))
+    else:
+        db.execute("UPDATE audits SET percent = %s, step = %s, pages_processed = %s, pages_discovered = %s, "
+                   "heartbeat_at = %s WHERE id = %s AND status = 'running'",
+                   (state["percent"], state["step"][:300], state["pages_processed"], state["pages_discovered"],
+                    now_iso(), audit_id))
     realtime.publish(ctx["targets"], {"type": "audit_progress", "audit_id": audit_id, "lead_id": lead_id,
                                       "status": "running", "percent": state["percent"], "step": state["step"],
                                       "pages_processed": state["pages_processed"],
@@ -710,11 +721,18 @@ def job_progress(user, audit_id, device, messages):
     if not mine:
         return {"stop": True, "status": row["status"]}
     live = _app_live(row)
+    # The database row is the truth: another server process may have taken the previous messages.
+    state = _new_state(row)
+    try:
+        logs = json.loads(row.get("log_tail") or "[]")
+    except ValueError:
+        logs = []
     for msg in messages[:300]:
         msg = str(msg)[:500]
-        live["logs"].append(f"{time.strftime('%H:%M:%S')}  {msg}")
-        _apply_message(live["state"], msg)
-    _write_progress(live["ctx"], live["state"])
+        logs.append(f"{time.strftime('%H:%M:%S')}  {msg}")
+        _apply_message(state, msg)
+    live["state"] = state
+    _write_progress(live["ctx"], state, logs[-150:] if messages else None)
     return {"stop": False}
 
 
