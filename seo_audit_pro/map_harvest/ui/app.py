@@ -7,8 +7,8 @@ from PyQt5.QtCore import QSize, QTimer
 from PyQt5.QtGui import QFont, QFontDatabase, QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
-from ui.screen_input import InputScreen
-from ui.screen_results import ResultsScreen
+from seo_audit_pro.map_harvest.ui.screen_input import InputScreen
+from seo_audit_pro.map_harvest.ui.screen_results import ResultsScreen
 
 QSS = """
 QWidget {

@@ -9,8 +9,8 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
 )
 
-from core.exporter import export_csv, FIELD_LABELS
-from core.scraper import ScrapeWorker
+from seo_audit_pro.map_harvest.core.exporter import export_csv, FIELD_LABELS
+from seo_audit_pro.map_harvest.core.scraper import ScrapeWorker
 
 
 class SortableItem(QTableWidgetItem):

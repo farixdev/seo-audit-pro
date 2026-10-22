@@ -10,8 +10,8 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem, QFileDialog,
 )
 
-from core.settings import load_settings, save_settings, add_saved_search
-from ui.domain_list_dialog import DomainListDialog, ListDialog
+from seo_audit_pro.map_harvest.core.settings import load_settings, save_settings, add_saved_search
+from seo_audit_pro.map_harvest.ui.domain_list_dialog import DomainListDialog, ListDialog
 
 
 class InputScreen(QWidget):

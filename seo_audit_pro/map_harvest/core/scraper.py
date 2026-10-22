@@ -20,7 +20,7 @@ import threading
 import time
 import urllib.parse
 
-from core.distutils_compat import *  # noqa: F401,F403 — must load before uc
+from seo_audit_pro.map_harvest.core.distutils_compat import *  # noqa: F401,F403 — must load before uc
 
 import undetected_chromedriver as uc
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -29,9 +29,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from core.parse import parse_feed_html, parse_place_url, place_key
-from core.enrich import enrich_website, ENRICH_KEYS
-from core import filters as recfilters
+from seo_audit_pro.map_harvest.core.parse import parse_feed_html, parse_place_url, place_key
+from seo_audit_pro.map_harvest.core.enrich import enrich_website, ENRICH_KEYS
+from seo_audit_pro.map_harvest.core import filters as recfilters
 
 # ── Timing (seconds) ─────────────────────────────────────────────────────────
 T_SEARCH_LOAD = 2.0
