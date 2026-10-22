@@ -156,11 +156,13 @@ class Runner:
                         break
             self.signals.progress.emit(row, state["pct"], msg.rstrip("…. ")[:120])
 
+        url, competitors, business = url["site"], url["competitors"], url["business"]
         if not re.match(r"^https?://", url, re.I):
             url = "https://" + url
         opts = self.options
         result = engine.run_audit({"url": url, "max_pages": opts["pages"], "psi_strategy": "both",
-                                   "psi_key": opts.get("psi_key") or None, "cancel": self.cancel}, progress=progress)
+                                   "psi_key": opts.get("psi_key") or None, "cancel": self.cancel,
+                                   "competitors": competitors}, progress=progress)
         self.signals.progress.emit(row, 97, "Writing the documents")
         domain = _domain(result.get("url") or url)
         folder = os.path.join(opts["folder"], f"{_safe(domain)} - {datetime.now():%Y-%m-%d %H%M}")
@@ -171,14 +173,35 @@ class Runner:
         report_docx.generate_docx_report(result, technical)
         with open(os.path.join(folder, f"{_safe(domain)} - audit data.json"), "w", encoding="utf-8") as fh:
             json.dump(result, fh, ensure_ascii=False, indent=1, default=str)
-        if opts.get("pdf"):
+        if opts.get("pdf") and __import__("pdf_convert").pdf_supported():
             import pdf_convert
             for docx in (client, technical):
                 self.signals.progress.emit(row, 99, "Making the PDF files")
                 pdf_convert.docx_to_pdf(docx, docx[:-5] + ".pdf")
-        html = os.path.join(folder, f"{_safe(domain)} - Client SEO Report.html")
+        import full_report
+        self.signals.progress.emit(row, 99, "Checking the Google Business Profile")
+        title = ((result.get("home_facts") or {}).get("title") or "").split("|")[0].split(" - ")[0].strip()
+        place, note = full_report.gbp_lookup(business or f"{title} {domain}".strip(), domain, opts.get("psi_key"))
+        base = os.path.join(folder, f"{_safe(domain)} - Full SEO Audit")
+        downloads = [(label, os.path.basename(f)) for label, f in (
+            ("Full audit (PDF)", base + ".pdf"), ("Client report (Word)", client), ("Technical audit (Word)", technical),
+            ("Client report (PDF)", client[:-5] + ".pdf"), ("Technical audit (PDF)", technical[:-5] + ".pdf"))
+            if (f.endswith("Full SEO Audit.pdf") and opts.get("pdf")) or os.path.exists(f)]
+        full_html = base + ".html"
+        with open(full_html, "w", encoding="utf-8") as fh:
+            fh.write(full_report.build(result, downloads, place, note))
+        cbase = os.path.join(folder, f"{_safe(domain)} - Website Health Report (client)")
+        client_downloads = [("Full SEO audit", os.path.basename(full_html))] + [
+            d for d in downloads if d[0] != "Full audit (PDF)" or opts.get("pdf")]
+        if opts.get("pdf"):
+            client_downloads.insert(0, ("This report (PDF)", os.path.basename(cbase + ".pdf")))
+        html = cbase + ".html"
         with open(html, "w", encoding="utf-8") as fh:
-            fh.write(render_html(result, folder, [client, technical]))
+            fh.write(full_report.build_client(result, client_downloads, place, note))
+        if opts.get("pdf"):
+            self.signals.progress.emit(row, 99, "Making the PDF reports")
+            full_report.html_to_pdf(full_html, base + ".pdf")
+            full_report.html_to_pdf(html, cbase + ".pdf")
         sc = result.get("score") or {}
         self.signals.finished.emit(row, True, f"{sc.get('score', '—')}/100 ({sc.get('grade', '')})", html)
 
@@ -211,7 +234,8 @@ class Window(QMainWindow):
         lay.addWidget(sub)
 
         self.links = QPlainTextEdit()
-        self.links.setPlaceholderText("example.com\nhttps://another-site.com\n…")
+        self.links.setPlaceholderText("One website per line. Optional: competitors after it, and the business name after |\n"
+                                      "mysite.com\nmysite.com, competitor1.com, competitor2.com | My Business Name, Toronto")
         self.links.setFixedHeight(120)
         lay.addWidget(self.links)
 
@@ -230,10 +254,11 @@ class Window(QMainWindow):
         opts.addSpacing(12)
         import pdf_convert
         self.pdf = QCheckBox("Also make PDF files")
-        can_pdf = pdf_convert.pdf_supported()
+        import full_report
+        can_pdf = pdf_convert.pdf_supported() or bool(full_report._browser())
         self.pdf.setEnabled(can_pdf)
         self.pdf.setChecked(can_pdf and self.store.value("pdf", "true") == "true")
-        self.pdf.setToolTip("" if can_pdf else "PDF needs Microsoft Word or LibreOffice on this computer.")
+        self.pdf.setToolTip("" if can_pdf else "PDF needs Microsoft Edge, Chrome or Word on this computer.")
         opts.addWidget(self.pdf)
         opts.addSpacing(12)
         self.browser = QCheckBox("Open each report in the browser")
@@ -250,10 +275,12 @@ class Window(QMainWindow):
         browse.clicked.connect(self._browse)
         row2.addWidget(browse)
         row2.addSpacing(12)
-        row2.addWidget(QLabel("PageSpeed key (optional)"))
+        row2.addWidget(QLabel("Google API key (optional)"))
         self.psi = QLineEdit(self.store.value("psi", ""))
         self.psi.setEchoMode(QLineEdit.EchoMode.Password)
-        self.psi.setFixedWidth(200)
+        self.psi.setFixedWidth(220)
+        self.psi.setToolTip("A Google Cloud API key with PageSpeed Insights API and Places API (New) turned on: "
+                            "reliable speed data and the Google Business Profile check.")
         row2.addWidget(self.psi)
         lay.addLayout(row2)
 
@@ -309,11 +336,12 @@ class Window(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(html))
 
     def _start(self):
-        urls = []
+        urls = []  # one job per line: "site, competitor, competitor | Business name, City"
         for line in self.links.toPlainText().splitlines():
-            for part in re.split(r"[\s,;]+", line.strip()):
-                if part and "." in part and part not in urls:
-                    urls.append(part)
+            line, _, business = line.partition("|")
+            parts = [p for p in re.split(r"[\s,;]+", line.strip()) if p and "." in p]
+            if parts and parts[0] not in [u["site"] for u in urls]:
+                urls.append({"site": parts[0], "competitors": parts[1:4], "business": business.strip()})
         if not urls:
             QMessageBox.information(self, APP, "Paste at least one website link.")
             return
@@ -331,12 +359,13 @@ class Window(QMainWindow):
         self.runner.slots = self.slots.value()
         self.runner.options = {"pages": self.pages.value(), "folder": folder, "pdf": self.pdf.isChecked(),
                                "psi_key": self.psi.text().strip()}
-        for url in urls:
+        for job in urls:
             r = self.table.rowCount()
             self.table.insertRow(r)
-            for c, text in enumerate([url, "Waiting", "In the queue", "", ""]):
+            shown = job["site"] + (f"  (+{len(job['competitors'])} competitors)" if job["competitors"] else "")
+            for c, text in enumerate([shown, "Waiting", "In the queue", "", ""]):
                 self.table.setItem(r, c, QTableWidgetItem(text))
-            self.runner.add(r, url)
+            self.runner.add(r, job)
         self.links.clear()
 
     def _stop(self):
