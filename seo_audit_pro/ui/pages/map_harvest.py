@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Map Harvest page integrated into SEO Audit Pro workspace."""
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
 from seo_audit_pro.map_harvest.ui.screen_input import InputScreen

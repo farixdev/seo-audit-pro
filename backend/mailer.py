@@ -7,7 +7,6 @@ time, and never returned by any API or written to logs.
 """
 
 import logging
-import os
 import smtplib
 import ssl
 import threading
