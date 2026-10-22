@@ -25,7 +25,7 @@ a = Analysis(
     hiddenimports=["audit", "crawler", "security_audit", "seo_checks", "scoring", "pagespeed", "authority_traffic",
                    "structured_data", "report_docx", "charts", "llm", "prefs", "pdf_convert",
                    "matplotlib.backends.backend_agg", "seo_audit_pro.brand",
-                   "full_report", "client_report"],
+                   "full_report", "client_report", "mindcob_report"],
     hooksconfig={"matplotlib": {"backends": "Agg"}},
     excludes=["psycopg2", "flask", "tkinter", "IPython", "pytest", "PySide6.QtWebEngineCore",
               "PySide6.QtWebEngineWidgets", "PySide6.QtQuick", "PySide6.QtQml", "PySide6.Qt3DCore",

@@ -191,16 +191,17 @@ class Runner:
         with open(full_html, "w", encoding="utf-8") as fh:
             fh.write(full_report.build(result, downloads, place, note))
         import client_report
+        import mindcob_report
         self.signals.progress.emit(row, 99, "Taking screenshots of the website")
         shots = client_report.screenshots(result.get("final_url") or url, folder)
-        cbase = os.path.join(folder, f"{_safe(domain)} - Website Health Report (client)")
+        cbase = os.path.join(folder, f"{_safe(domain)} - Mindcob Website SEO & Growth Report")
         client_downloads = [("Full SEO audit", os.path.basename(full_html))] + [
             d for d in downloads if d[0] == "Full audit (PDF)" and opts.get("pdf")]
         if opts.get("pdf"):
             client_downloads.insert(0, ("This report (PDF)", os.path.basename(cbase + ".pdf")))
         html = cbase + ".html"
         with open(html, "w", encoding="utf-8") as fh:
-            fh.write(client_report.build(result, client_downloads, place, note, shots))
+            fh.write(mindcob_report.build(result, {"name": "Mindcob"}, business, client_downloads, place, note, shots))
         if opts.get("pdf"):
             self.signals.progress.emit(row, 99, "Making the PDF reports")
             full_report.html_to_pdf(full_html, base + ".pdf")

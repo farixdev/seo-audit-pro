@@ -93,8 +93,30 @@ def save_remote(page, path, suggested, file_filter):
               on_error=lambda e: show_error(page, e, "Download failed"), owner=page)
 
 
+def build_client_report(audit_id):
+    """The Mindcob client report, built on this computer from the stored result
+    (with website screenshots). Returns the saved HTML path."""
+    import gzip
+    import json
+
+    import client_report
+    import mindcob_report
+    packed = api.request("GET", f"/api/audits/{audit_id}/result-data", timeout=120)
+    result = json.loads(gzip.decompress(packed) if packed[:2] == b"\x1f\x8b" else packed)
+    domain = result.get("domain") or "site"
+    folder = os.path.join(settings.downloads_dir(), "Client reports", f"{domain} - {str(audit_id)[:8]}")
+    os.makedirs(folder, exist_ok=True)
+    shots = client_report.screenshots(result.get("final_url") or f"https://{domain}", folder)
+    path = os.path.join(folder, f"{domain} - Mindcob Website SEO & Growth Report.html")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(mindcob_report.build(result, {"name": "Mindcob"}, shots=shots))
+    return path
+
+
 def view_client_report(page, audit_id):
-    open_remote(page, f"/api/audits/{audit_id}/client-html", "Client reports")
+    toast(page, "Building the client report (takes a few seconds)…", "info", 4000)
+    tasks.run(build_client_report, audit_id, on_done=lambda p: QDesktopServices.openUrl(QUrl.fromLocalFile(p)),
+              on_error=lambda e: show_error(page, e, "Could not build the client report"), owner=page)
 
 
 def export_json(page, audit_id, domain):
