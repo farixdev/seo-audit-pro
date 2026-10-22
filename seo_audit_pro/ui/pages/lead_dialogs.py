@@ -34,7 +34,7 @@ class AssigneePicker(QWidget):
         if session.is_manager():
             lay.addWidget(Field("Team", self.team))
         else:
-            self.team.setCurrentIndex(self.team.findData(session.user.get("team_id")))
+            self.team.setCurrentIndex(self.team.findData((session.user or {}).get("team_id")))
         lay.addWidget(Field("Assigned to", self.person))
         self.team.currentIndexChanged.connect(lambda _i: self._fill_people(None))
         self._fill_people(agent_id)

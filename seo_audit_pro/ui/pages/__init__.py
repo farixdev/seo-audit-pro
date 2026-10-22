@@ -20,6 +20,7 @@ _REGISTRY = {
     "audit_logs": ("audit_logs", "AuditLogsPage"),
     "settings": ("settings_page", "SettingsPage"),
     "profile": ("profile", "ProfilePage"),
+    "map_harvest": ("map_harvest", "MapHarvestPage"),
 }
 
 

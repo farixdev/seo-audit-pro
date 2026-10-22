@@ -3,3 +3,5 @@ PySide6>=6.6
 requests>=2.31.0
 keyring>=25.0
 pyinstaller>=6.0
+selenium>=4.18.0
+undetected-chromedriver>=3.5.0
