@@ -61,6 +61,34 @@ def default_folder():
     return os.path.join(os.path.expanduser("~"), "Documents", "SEO Audit Tool")
 
 
+def _resource(*parts):
+    return os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), *parts)
+
+
+def render_html(result, folder, docx_files):
+    """The interactive client report as one HTML page, with buttons to download the
+    Word and PDF versions saved next to it."""
+    import jinja2
+    from backend.report_context import prepare_client_report_context
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(_resource("templates")), autoescape=True)
+    try:
+        with open(_resource("static", "libs", "lucide.min.js"), encoding="utf-8") as fh:
+            lucide = fh.read().replace("</script", r"<\/script")
+    except OSError:
+        lucide = ""
+    downloads = []
+    for path in docx_files:
+        kind = "Client report" if "Client" in os.path.basename(path) else "Technical audit"
+        for ext, fmt_name in ((".docx", "Word"), (".pdf", "PDF")):
+            f = path[:-5] + ext
+            if os.path.exists(f):
+                downloads.append({"href": QUrl.toPercentEncoding(os.path.basename(f)).data().decode(),
+                                  "label": f"{kind} ({fmt_name})"})
+    return env.get_template("client_report.html").render(
+        audit_id=result.get("id") or "", result=result, client_data=prepare_client_report_context(result),
+        lucide_js=lucide, downloads=downloads)
+
+
 class Signals(QObject):
     progress = Signal(int, int, str)       # row, percent, step
     finished = Signal(int, bool, str, str)  # row, ok, score or error, folder
@@ -148,8 +176,11 @@ class Runner:
             for docx in (client, technical):
                 self.signals.progress.emit(row, 99, "Making the PDF files")
                 pdf_convert.docx_to_pdf(docx, docx[:-5] + ".pdf")
+        html = os.path.join(folder, f"{_safe(domain)} - Client SEO Report.html")
+        with open(html, "w", encoding="utf-8") as fh:
+            fh.write(render_html(result, folder, [client, technical]))
         sc = result.get("score") or {}
-        self.signals.finished.emit(row, True, f"{sc.get('score', '—')}/100 ({sc.get('grade', '')})", folder)
+        self.signals.finished.emit(row, True, f"{sc.get('score', '—')}/100 ({sc.get('grade', '')})", html)
 
 
 class Window(QMainWindow):
@@ -204,6 +235,10 @@ class Window(QMainWindow):
         self.pdf.setChecked(can_pdf and self.store.value("pdf", "true") == "true")
         self.pdf.setToolTip("" if can_pdf else "PDF needs Microsoft Word or LibreOffice on this computer.")
         opts.addWidget(self.pdf)
+        opts.addSpacing(12)
+        self.browser = QCheckBox("Open each report in the browser")
+        self.browser.setChecked(self.store.value("browser", "true") == "true")
+        opts.addWidget(self.browser)
         opts.addStretch(1)
         lay.addLayout(opts)
 
@@ -247,7 +282,7 @@ class Window(QMainWindow):
         h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for c, w in ((1, 110), (2, 330), (3, 110), (4, 110)):
             self.table.setColumnWidth(c, w)
-        self.table.cellDoubleClicked.connect(lambda r, _c: self._open(self.folders.get(r)))
+        self.table.cellDoubleClicked.connect(self._open_row)
         lay.addWidget(self.table, 1)
         self._tick = QTimer(self)
         self._tick.setInterval(1000)
@@ -263,6 +298,15 @@ class Window(QMainWindow):
         if path:
             os.makedirs(path, exist_ok=True)
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _open_row(self, row, col):
+        html = self.folders.get(row)
+        if not html:
+            return
+        if col == 4:  # "Open folder"
+            self._open(os.path.dirname(html))
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(html))
 
     def _start(self):
         urls = []
@@ -280,7 +324,8 @@ class Window(QMainWindow):
             QMessageBox.warning(self, APP, "That folder cannot be used. Choose another one.")
             return
         for key, value in (("pages", self.pages.value()), ("slots", self.slots.value()), ("folder", folder),
-                           ("pdf", "true" if self.pdf.isChecked() else "false"), ("psi", self.psi.text().strip())):
+                           ("pdf", "true" if self.pdf.isChecked() else "false"), ("psi", self.psi.text().strip()),
+                           ("browser", "true" if self.browser.isChecked() else "false")):
             self.store.setValue(key, value)
         self.runner.cancel.clear()
         self.runner.slots = self.slots.value()
@@ -305,11 +350,13 @@ class Window(QMainWindow):
         item = self.table.item(row, 1)
         item.setText("Done" if ok else ("Stopped" if info == "Stopped" else "Failed"))
         item.setForeground(QColor("#067647" if ok else "#B42318"))
-        self.table.item(row, 2).setText("Documents saved — double-click to open" if ok else info)
+        self.table.item(row, 2).setText("Saved — double-click to open the report" if ok else info)
         self.table.item(row, 3).setText(info if ok else "")
         self.table.item(row, 4).setText("Open folder" if ok else "")
         if ok:
-            self.folders[row] = folder
+            self.folders[row] = folder  # the HTML report; its folder holds the other files
+            if self.browser.isChecked():
+                QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
     def _update_status(self):
         with self.runner.lock:

@@ -584,6 +584,12 @@
     </div>
 
     <div class="client-nav-actions">
+      {% for d in downloads or [] %}
+      <a class="btn" href="{{ d.href }}" download style="text-decoration: none; background: #fff; color: #18181B; border: 1px solid #D4D4D8;">
+        <i data-lucide="download" style="width: 14px; height: 14px;"></i>
+        <span>{{ d.label }}</span>
+      </a>
+      {% endfor %}
       <button class="btn btn-primary" onclick="window.print()">
         <i data-lucide="printer" style="width: 14px; height: 14px;"></i>
         <span>Print / Save to PDF</span>

@@ -8,7 +8,8 @@ from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
 BASE = SPECPATH
 ASSETS = os.path.join(BASE, "seo_audit_pro", "assets")
-datas = [(ASSETS, os.path.join("seo_audit_pro", "assets"))]
+datas = [(ASSETS, os.path.join("seo_audit_pro", "assets")), (os.path.join(BASE, "templates"), "templates"),
+         (os.path.join(BASE, "static", "libs"), os.path.join("static", "libs"))]
 for pkg in ("trafilatura", "justext", "tld"):
     datas += collect_data_files(pkg, excludes=["**/tests/**"])
 for pkg in ("trafilatura", "htmldate", "courlan", "justext", "requests", "python-docx", "dateparser"):
@@ -23,9 +24,10 @@ a = Analysis(
     datas=datas,
     hiddenimports=["audit", "crawler", "security_audit", "seo_checks", "scoring", "pagespeed", "authority_traffic",
                    "structured_data", "report_docx", "charts", "llm", "prefs", "pdf_convert",
-                   "matplotlib.backends.backend_agg", "seo_audit_pro.brand"],
+                   "matplotlib.backends.backend_agg", "seo_audit_pro.brand",
+                   "jinja2", "backend.report_context"],
     hooksconfig={"matplotlib": {"backends": "Agg"}},
-    excludes=["psycopg2", "flask", "tkinter", "IPython", "pytest", "backend", "PySide6.QtWebEngineCore",
+    excludes=["psycopg2", "flask", "tkinter", "IPython", "pytest", "PySide6.QtWebEngineCore",
               "PySide6.QtWebEngineWidgets", "PySide6.QtQuick", "PySide6.QtQml", "PySide6.Qt3DCore",
               "PySide6.QtCharts", "PySide6.QtMultimedia", "PySide6.QtPdf", "PySide6.QtDesigner",
               "PySide6.QtSql", "PySide6.QtTest", "PySide6.QtPositioning", "PySide6.QtLocation"],
