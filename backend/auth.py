@@ -89,20 +89,14 @@ def require(*roles, allow_pending_password=False):
 # Audits, reports and outreach emails inherit access from their lead.
 # ---------------------------------------------------------------------------
 def lead_scope(user, alias="l"):
-    """SQL fragment + params restricting leads to what ``user`` may access."""
-    if user["role"] == MANAGER:
-        return "1=1", ()
-    if user["role"] == TEAM_LEAD:
-        return f"{alias}.assigned_team_id = %s", (user["team_id"],)
-    return f"{alias}.assigned_agent_id = %s", (user["id"],)
+    """SQL fragment + params restricting leads to what ``user`` may access.
+    All agency members (Managers, Team Leads, and Agents) can view leads."""
+    return "1=1", ()
 
 
 def can_access_lead(user, lead):
-    if user["role"] == MANAGER:
-        return True
-    if user["role"] == TEAM_LEAD:
-        return bool(lead.get("assigned_team_id")) and lead["assigned_team_id"] == user["team_id"]
-    return bool(lead.get("assigned_agent_id")) and lead["assigned_agent_id"] == user["id"]
+    """Allow agency members to access leads."""
+    return True
 
 
 def load_lead(user, lead_id, tx=None):

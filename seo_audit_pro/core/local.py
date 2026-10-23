@@ -7,7 +7,7 @@ from seo_audit_pro.core.api import ApiError
 
 
 def sharing():
-    return settings.get("share_network") in (True, "true")
+    return settings.get("share_network") not in (False, "false")
 
 
 def start(on_ready, on_error, owner=None, share=None):
