@@ -10,7 +10,7 @@ import re
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QCheckBox, QFrame, QLabel, QStackedWidget, QWidget
 
-from seo_audit_pro import TEAM_SERVER_URL, icons, local_server
+from seo_audit_pro import APP_NAME, TEAM_SERVER_URL, icons, local_server
 from seo_audit_pro.core import api, local, settings, tasks
 from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C
@@ -224,17 +224,17 @@ class AuthView(QWidget):
 
     # -- First run: where does the workspace live? ----------------------------
     def _build_welcome(self):
-        p = _Panel("Welcome to SEO Audit Pro", "Choose how you want to use it. You can change this later.")
-        self.opt_local = _OptionCard("monitor", "On this computer",
-                                     "Everything runs and is saved on this PC. Nothing else to install.",
-                                     "Recommended")
-        self.opt_remote = _OptionCard("server", "Connect to a team server",
-                                      "Your team already runs SEO Audit Pro on a server or another computer. "
-                                      "You need its address.")
-        self.opt_local.clicked.connect(self._choose_local)
+        p = _Panel(f"Welcome to {APP_NAME}", "Choose how you want to connect to your agency workspace:")
+        self.opt_remote = _OptionCard("server", "Connect to a Team Server / Manager",
+                                      "Connect to your Manager's computer or server with its address to sign in as an Agent or Team Lead.",
+                                      "Team Members")
+        self.opt_local = _OptionCard("monitor", "Run on this computer (Host / Manager)",
+                                     "Set up this computer as the host and central database. Choose this if you manage the agency.",
+                                     "Host")
         self.opt_remote.clicked.connect(self._choose_remote)
-        p.form.addWidget(self.opt_local)
+        self.opt_local.clicked.connect(self._choose_local)
         p.form.addWidget(self.opt_remote)
+        p.form.addWidget(self.opt_local)
         self.w_status = label("", "Meta", wrap=True)
         self.w_status.setVisible(False)
         p.form.addWidget(self.w_status)
@@ -293,6 +293,9 @@ class AuthView(QWidget):
         self.m_btn.clicked.connect(self._create_manager)
         self.m_confirm.returnPressed.connect(self._create_manager)
         p.form.addWidget(self.m_btn)
+        switch_link = button("Connecting to an existing host/manager instead? Connect with address", "link")
+        switch_link.clicked.connect(self._choose_remote)
+        p.form.addWidget(switch_link)
         p.form.addWidget(label("Your data is saved on this computer, in:", "Meta"))
         where = label(local_server.data_dir(), "Meta", wrap=True, selectable=True)
         p.form.addWidget(where)

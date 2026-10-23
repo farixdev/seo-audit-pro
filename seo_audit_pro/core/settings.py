@@ -36,7 +36,7 @@ def mode():
         return LOCAL
     if TEAM_SERVER_URL:  # this build connects to the team server
         return REMOTE
-    return LOCAL  # default to local standalone mode on this computer
+    return None  # First run on any computer: show the choice!
 
 
 def set_mode(value):
