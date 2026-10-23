@@ -91,13 +91,13 @@ def logo_pixmap(size, dpr=1.0):
 def app_icon():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     candidates = [
-        os.path.join(root, "assets", "Kawaii-Analytics-Sprout-Mascot.ico"),
+        os.path.join(root, "assets", "Cute-Sprout-Mascot-Growth-Chart-Icon.ico"),
         _ICO_PATH,
         os.path.join(root, "assets", "icon.ico"),
     ]
     import sys
     if hasattr(sys, "_MEIPASS"):
-        candidates.insert(0, os.path.join(sys._MEIPASS, "assets", "Kawaii-Analytics-Sprout-Mascot.ico"))
+        candidates.insert(0, os.path.join(sys._MEIPASS, "assets", "Cute-Sprout-Mascot-Growth-Chart-Icon.ico"))
         candidates.insert(1, os.path.join(sys._MEIPASS, "seo_audit_pro", "assets", "app.ico"))
     for cand in candidates:
         if os.path.isfile(cand):
@@ -114,7 +114,7 @@ def write_ico(path, sizes=(16, 20, 24, 32, 40, 48, 64, 128, 256)):
     """Multi-resolution .ico with PNG-compressed entries (Vista+ format)."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     candidates = [
-        os.path.join(root, "assets", "Kawaii-Analytics-Sprout-Mascot.ico"),
+        os.path.join(root, "assets", "Cute-Sprout-Mascot-Growth-Chart-Icon.ico"),
         os.path.join(root, "assets", "icon.ico"),
     ]
     for cand in candidates:
