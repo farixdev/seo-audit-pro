@@ -169,7 +169,7 @@ def main():
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Mindcob.SEOAuditPro")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"{ORG_NAME}.{APP_NAME}.v3")
         except Exception:  # noqa: BLE001
             pass
     app = QApplication(sys.argv)

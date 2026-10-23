@@ -18,37 +18,32 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "dist", "cpanel")
 FILES = ["web_app.py", "passenger_wsgi.py", "config.py", "history_manager.py", "scoring.py", "seo_checks.py",
-         "security_audit.py", "pagespeed.py", "pdf_convert.py", "requirements-cpanel.txt"]
-DIRS = ["backend", "templates"]
+         "security_audit.py", "pagespeed.py", "pdf_convert.py", "mindcob_report.py", "google_maps_scraper.py",
+         "requirements-cpanel.txt"]
+DIRS = ["backend", "templates", "assets"]
 EXTRA = ["static/libs/lucide.min.js"]
 
-ENV = """# SEO Audit Pro team server settings (cPanel). Edit the lines marked EDIT.
-# Keep this file private: it holds the keys that protect sign-ins and the email password.
-
+ENV = """# SEO Audit Pro / Rankly team server settings (cPanel).
+# Pre-configured with your active Neon cloud PostgreSQL database.
 SEO_ENV=production
 SEO_HOSTING=cpanel
 AUDITS_RUN_ON=app
 
-# EDIT: your cPanel PostgreSQL database (cPanel > PostgreSQL Databases).
-# Format: postgresql://DATABASE_USER:PASSWORD@localhost:5432/DATABASE_NAME
-DATABASE_URL=postgresql://CPANELUSER_seo:PASSWORD@localhost:5432/CPANELUSER_seoaudit
+# Active Neon PostgreSQL database (pre-configured)
+DATABASE_URL=postgresql://neondb_owner:npg_YcKQEXg53Zzf@ep-winter-dawn-b4l5t22n-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require
 
-# EDIT: the first Manager account, created the first time the server starts.
-# The password is temporary: the app asks to change it at the first sign-in.
-BOOTSTRAP_MANAGER_EMAIL=you@yourdomain.com
+# First Manager account (change password upon first login)
+BOOTSTRAP_MANAGER_EMAIL=admin@mindcob.com
 BOOTSTRAP_MANAGER_PASSWORD=Change-Me-Now-2026
-BOOTSTRAP_MANAGER_NAME=Agency Manager
+BOOTSTRAP_MANAGER_NAME=Mindcob Manager
 
-# Created for you. Do not change them later: changing DATA_ENCRYPTION_KEY makes the
-# saved email password unreadable, changing SECRET_KEY signs everybody out.
+# Security keys (auto-generated)
 SECRET_KEY={secret}
 DATA_ENCRYPTION_KEY={data_key}
 
-# Audits at a time on each person's computer (Managers can change it in Settings).
 MAX_CONCURRENT_AUDITS=2
 
-# Optional: Google PageSpeed API key (or save it later in the app's Settings).
-PAGESPEED_API_KEY=
+PAGESPEED_API_KEY=AIzaSyDKAEwTDdDdyRWHX4mr7cr5yb2PR4_S8l4
 """
 
 REQUIREMENTS = """# SEO Audit Pro team server on cPanel: only what the light server needs.

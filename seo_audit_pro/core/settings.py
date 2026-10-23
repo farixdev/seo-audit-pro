@@ -25,11 +25,18 @@ def mode():
     """"local" (this computer runs the server), "remote" (a team server), or
     None before the first-run choice. Running from source defaults to remote."""
     value = _store().value("mode")
-    if value in (LOCAL, REMOTE):
-        return value
-    if TEAM_SERVER_URL:  # this build connects to the team server: no first-run choice
+    if value == REMOTE:
+        saved_url = _store().value("api_url", "")
+        if "onrender.com" in saved_url and not TEAM_SERVER_URL:
+            _store().remove("mode")
+            _store().remove("api_url")
+            return LOCAL
         return REMOTE
-    return None if getattr(sys, "frozen", False) or PROFILE else REMOTE  # a profile behaves like a fresh install
+    if value == LOCAL:
+        return LOCAL
+    if TEAM_SERVER_URL:  # this build connects to the team server
+        return REMOTE
+    return LOCAL  # default to local standalone mode on this computer
 
 
 def set_mode(value):
@@ -42,8 +49,11 @@ def set_local_url(url):
 
 def api_url():
     if mode() == LOCAL:
-        return (_RUNTIME["local_url"] or "http://127.0.0.1").rstrip("/")
-    return (_store().value("api_url", DEFAULT_API_URL) or DEFAULT_API_URL).rstrip("/")
+        return (_RUNTIME["local_url"] or "http://127.0.0.1:5057").rstrip("/")
+    url = _store().value("api_url", DEFAULT_API_URL) or DEFAULT_API_URL
+    if "onrender.com" in url and not TEAM_SERVER_URL:
+        return "http://127.0.0.1:5057"
+    return url.rstrip("/")
 
 
 def set_api_url(url):

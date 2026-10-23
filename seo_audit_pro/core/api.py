@@ -230,7 +230,7 @@ def health(timeout=5):
         data = resp.json()
     except ValueError:
         raise ApiError(resp.status_code, "This address does not look like an SEO Audit Pro server.", "bad_server")
-    if data.get("app") != "SEO Audit Pro":
+    if data.get("app") not in ("SEO Audit Pro", "Rankly"):
         raise ApiError(resp.status_code, "This address does not look like an SEO Audit Pro server.", "bad_server")
     session.set_connection("online" if data.get("status") == "ok" else "offline")
     SERVER.update(data)
