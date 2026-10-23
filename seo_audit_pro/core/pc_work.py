@@ -406,9 +406,18 @@ def _build_client_html_pdf(audit_id, pdf_path, cache):
     folder = os.path.join(cache, f"client_{audit_id}")
     os.makedirs(folder, exist_ok=True)
     shots = client_report.screenshots(result.get("final_url") or f"https://{domain}", folder)
-    html_path = os.path.join(folder, f"{domain} - Mindcob Website SEO & Growth Report.html")
+    html_path = os.path.join(folder, f"{domain} - Brighton Website SEO & Growth Report.html")
+    gbp = result.get("gbp")
+    if gbp is None and result.get("gbp_note") != "not_found":
+        try:
+            import google_maps_scraper
+            gbp, note = google_maps_scraper.scrape_google_maps(result.get("final_url") or domain, timeout=12)
+            result["gbp"] = gbp
+            result["gbp_note"] = note
+        except Exception:
+            pass
     with open(html_path, "w", encoding="utf-8") as fh:
-        fh.write(mindcob_report.build(result, {"name": "Mindcob"}, shots=shots))
+        fh.write(mindcob_report.build(result, {"name": "Brighton Analytics"}, gbp=gbp, shots=shots))
     part_pdf = pdf_path + ".part.pdf"
     if not full_report.html_to_pdf(html_path, part_pdf):
         raise ApiError(500, "The client PDF could not be created on this computer. Download the Word (DOCX) report instead.", "pdf_failed")

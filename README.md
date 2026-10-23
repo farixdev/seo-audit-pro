@@ -1,4 +1,4 @@
-# SEO Audit Pro
+# Rankly
 
 Website intelligence for SEO agencies: a Windows desktop application for
 Managers, Team Leads and Agents to manage leads, run real technical SEO and
@@ -16,10 +16,10 @@ secrets. See [docs/architecture.md](docs/architecture.md).
 
 ## For people using the app
 
-Download `SEO-Audit-Pro-Portable-3.0.0.zip`, unzip it, double-click
-`SEOAuditPro.exe` and choose **On this computer**: the app starts its own
+Download `Rankly-Portable-3.0.0.zip`, unzip it, double-click
+`Rankly.exe` and choose **On this computer**: the app starts its own
 built-in server (the same exe with `--serve`), creates its database and keys in
-`%LOCALAPPDATA%\SEO Audit Pro\data`, and asks for the first Manager account.
+`%LOCALAPPDATA%\Rankly\data`, and asks for the first Manager account.
 Nothing else to install. Or choose **Connect to a team server**.
 
 Manuals: [User Manual](docs/manuals/SEO%20Audit%20Pro%20-%20User%20Manual.pdf) ·

@@ -7,7 +7,7 @@ credentials, SMTP passwords or server secrets.
 
 import os
 
-APP_NAME = "SEO Audit Pro"
+APP_NAME = "Rankly"
 APP_VERSION = "3.0.0"
 APP_TAGLINE = "Website Intelligence Platform"
 ORG_NAME = "Mindcob"

@@ -22,33 +22,34 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from seo_audit_pro import APP_VERSION  # noqa: E402
 
-BUILD = os.path.join(ROOT, "dist", "SEOAuditPro")
+BUILD_RANKLY = os.path.join(ROOT, "dist", "Rankly")
+BUILD = BUILD_RANKLY if os.path.isdir(BUILD_RANKLY) else os.path.join(ROOT, "dist", "SEOAuditPro")
 MANUALS = os.path.join(ROOT, "docs", "manuals")
-OUT = os.path.join(ROOT, "dist", f"SEO-Audit-Pro-Portable-{APP_VERSION}.zip")
-TOP = "SEO Audit Pro"
+OUT = os.path.join(ROOT, "dist", f"Rankly-Portable-{APP_VERSION}.zip")
+TOP = "Rankly"
 
-README = f"""SEO Audit Pro {APP_VERSION}
+README = f"""Rankly {APP_VERSION}
 =====================
 
 START
-  1. Unzip this folder somewhere you keep (for example Documents\\SEO Audit Pro).
+  1. Unzip this folder somewhere you keep (for example Documents\\Rankly).
      Do not run the app from inside the zip.
-  2. Double-click SEOAuditPro.exe.
+  2. Double-click Rankly.exe.
   3. If Windows says "Windows protected your PC", click "More info" and then
      "Run anyway". Windows shows this for new apps that are not from the Store.
   4. Choose "On this computer" and create your Manager account. That's it.
 
 KEEP TOGETHER
-  SEOAuditPro.exe needs the _internal folder next to it. Move or copy the whole
-  "SEO Audit Pro" folder, never the exe alone.
+  Rankly.exe needs the _internal folder next to it. Move or copy the whole
+  "Rankly" folder, never the exe alone.
 
 YOUR DATA
-  Saved in %LOCALAPPDATA%\\SEO Audit Pro\\data (the database, reports and logs).
+  Saved in %LOCALAPPDATA%\\Rankly\\data (the database, reports and logs).
   To back up: close the app and copy that folder.
 
 NEEDS
   Windows 10 or 11 (64-bit), 4 GB of memory, an internet connection for audits.
-  PDF reports need Microsoft Word or LibreOffice; Word (.docx) reports always work.
+  PDF client reports are built directly to high-quality PDF deliverable.
 
 HELP
   See "User Manual.pdf" in this folder.
@@ -58,9 +59,11 @@ _FORBIDDEN = (".env", ".secret_key", ".data_encryption_key")
 
 
 def main():
-    exe = os.path.join(BUILD, "SEOAuditPro.exe")
+    exe = os.path.join(BUILD, "Rankly.exe")
     if not os.path.isfile(exe):
-        sys.exit("dist/SEOAuditPro/SEOAuditPro.exe not found - run PyInstaller first (build_exe.bat).")
+        exe = os.path.join(BUILD, "SEOAuditPro.exe")
+    if not os.path.isfile(exe):
+        sys.exit(f"{BUILD}/Rankly.exe not found - run PyInstaller first (build_exe.bat).")
     bad = []
     for base, _dirs, files in os.walk(BUILD):
         for f in files:

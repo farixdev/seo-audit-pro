@@ -18,7 +18,7 @@ from backend import audit_runner, db, events, reports, results
 from backend.auth import AGENT, MANAGER, TEAM_LEAD, idempotent, lead_scope, load_audit, load_lead, require
 from backend.errors import ApiError, conflict, not_found
 from backend.report_context import prepare_client_report_context
-from backend.util import body, now_iso, page_args, paged, rate_limit, text
+from backend.util import body, normalize_company, normalize_domain, now_iso, page_args, paged, rate_limit, text
 
 bp = Blueprint("audits", __name__)
 
@@ -93,13 +93,53 @@ def start_audit():
     me = g.user
     rate_limit(f"audit-start:{me['id']}", 20, 600)
     data = body()
-    lead_id = text(data, "lead_id", required=True, max_len=64, label="Lead")
-    lead = load_lead(me, lead_id)
-    if lead["status"] == "archived":
-        raise ApiError(422, "Restore this lead before auditing it.")
+    lead_id = text(data, "lead_id", required=False, max_len=64, label="Lead")
+    url_input = text(data, "url", required=False, max_len=2000, label="URL") or text(data, "website", required=False, max_len=2000, label="Website")
+
+    if not lead_id and not url_input:
+        raise ApiError(422, "Either choose a lead or enter a website URL to audit.", field="lead_id")
+
+    if lead_id:
+        lead = load_lead(me, lead_id)
+        if lead["status"] == "archived":
+            raise ApiError(422, "Restore this lead before auditing it.")
+    else:
+        domain = normalize_domain(url_input)
+        if not domain:
+            raise ApiError(422, "Enter a valid website address, for example example.com.", field="url")
+        from backend import security
+        scope, params = lead_scope(me)
+        lead = db.query_one(f"SELECT l.* FROM leads l WHERE l.normalized_domain = %s AND {scope} LIMIT 1",
+                            [domain] + list(params))
+        if not lead:
+            full_url = url_input if url_input.lower().startswith(("http://", "https://")) else f"https://{domain}"
+            company_name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
+            lead_id = security.new_id("led_")
+            team_id = me.get("team_id")
+            agent_id = me["id"] if me.get("role") == AGENT else None
+            now = now_iso()
+            company_key = normalize_company(company_name)
+            with db.transaction() as tx:
+                tx.execute(
+                    "INSERT INTO leads (id, company, company_key, website, normalized_domain, status, assigned_team_id, "
+                    "assigned_agent_id, source, created_at, updated_at, version) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)",
+                    (lead_id, company_name, company_key, full_url, domain, "new", team_id, agent_id, "Direct audit", now, now)
+                )
+            lead = db.query_one("SELECT * FROM leads WHERE id = %s", (lead_id,))
+        elif lead.get("status") == "archived":
+            db.execute("UPDATE leads SET status = 'new', updated_at = %s WHERE id = %s", (now_iso(), lead["id"]))
+            lead = db.query_one("SELECT * FROM leads WHERE id = %s", (lead["id"],))
+
     max_pages = data.get("max_pages")
-    if max_pages is not None and not isinstance(max_pages, int):
-        raise ApiError(422, "Max pages must be a whole number.", field="max_pages")
+    if max_pages is not None:
+        try:
+            max_pages = int(max_pages)
+            if not 1 <= max_pages <= 500:
+                raise ApiError(422, "Pages to crawl must be between 1 and 500.", field="max_pages")
+        except (ValueError, TypeError):
+            raise ApiError(422, "Max pages must be a whole number.", field="max_pages")
+
     audit_id = audit_runner.start(me, lead, max_pages)
     return jsonify({"audit": audit_out(db.query_one(_AUDIT_SELECT + " WHERE a.id = %s", (audit_id,)))}), 202
 

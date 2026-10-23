@@ -110,8 +110,8 @@ def build_client_report(audit_id, force=False):
     folder = os.path.join(settings.downloads_dir(), "Client reports", f"{domain} - {str(audit_id)[:8]}")
     os.makedirs(folder, exist_ok=True)
 
-    pdf_path = os.path.join(folder, f"{domain} - Mindcob Website SEO & Growth Report.pdf")
-    html_path = os.path.join(folder, f"{domain} - Mindcob Website SEO & Growth Report.html")
+    pdf_path = os.path.join(folder, f"{domain} - Brighton Website SEO & Growth Report.pdf")
+    html_path = os.path.join(folder, f"{domain} - Brighton Website SEO & Growth Report.html")
 
     # If already generated and not forced, return cached deliverable immediately
     if not force and os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 1000:
@@ -120,8 +120,17 @@ def build_client_report(audit_id, force=False):
         return html_path
 
     shots = client_report.screenshots(result.get("final_url") or f"https://{domain}", folder)
+    gbp = result.get("gbp")
+    if gbp is None and result.get("gbp_note") != "not_found":
+        try:
+            import google_maps_scraper
+            gbp, note = google_maps_scraper.scrape_google_maps(result.get("final_url") or domain, timeout=12)
+            result["gbp"] = gbp
+            result["gbp_note"] = note
+        except Exception:
+            pass
     with open(html_path, "w", encoding="utf-8") as fh:
-        fh.write(mindcob_report.build(result, {"name": "Mindcob"}, shots=shots))
+        fh.write(mindcob_report.build(result, {"name": "Brighton Analytics"}, gbp=gbp, shots=shots))
 
     if full_report.html_to_pdf(html_path, pdf_path):
         # Store to server reports so client download / email has this exact PDF

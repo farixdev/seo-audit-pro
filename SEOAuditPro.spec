@@ -20,6 +20,7 @@ BASE = SPECPATH
 ASSETS = os.path.join(BASE, "seo_audit_pro", "assets")
 
 datas = [
+    (os.path.join(BASE, "assets"), "assets"),
     (ASSETS, os.path.join("seo_audit_pro", "assets")),
     (os.path.join(BASE, "templates"), "templates"),                      # HTML client report
     (os.path.join(BASE, "static", "libs"), os.path.join("static", "libs")),
@@ -66,7 +67,7 @@ a = Analysis(
         "backend.routes.org_routes", "backend.routes.outreach_routes", "backend.routes.workspace_routes",
         "audit", "crawler", "security_audit", "seo_checks", "scoring", "pagespeed", "authority_traffic",
         "structured_data", "history_manager", "report_docx", "report_html", "charts", "llm", "prefs",
-        "full_report", "client_report", "mindcob_report",
+        "full_report", "client_report", "mindcob_report", "google_maps_scraper",
         "flask_sock", "simple_websocket", "openpyxl", "matplotlib.backends.backend_agg",
     ],
     hookspath=[],
@@ -98,7 +99,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="SEOAuditPro",
+    name="Rankly",
     debug=False,
     strip=False,
     upx=False,
@@ -106,4 +107,4 @@ exe = EXE(
     icon=os.path.join(ASSETS, "app.ico"),
     version=os.path.join(BASE, "installer", "version_info.txt"),
 )
-coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="SEOAuditPro")
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="Rankly")

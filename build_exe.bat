@@ -1,10 +1,9 @@
 @echo off
 rem ======================================================================
-rem  Build SEO Audit Pro for Windows (desktop app + built-in server).
+rem  Build Rankly for Windows (desktop app + built-in server).
 rem  Output:
-rem    dist\SEOAuditPro\SEOAuditPro.exe              the app (one folder)
-rem    dist\SEO-Audit-Pro-Portable-3.0.0.zip         portable zip to share
-rem    dist\SEOAuditPro-Setup-3.0.0.exe              only if Inno Setup 6 is installed
+rem    dist\Rankly\Rankly.exe                       the app (one folder)
+rem    dist\Rankly-Portable-3.0.0.zip               portable zip to share
 rem ======================================================================
 setlocal
 cd /d "%~dp0"

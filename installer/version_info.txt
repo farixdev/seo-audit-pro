@@ -4,11 +4,11 @@ VSVersionInfo(
   kids=[
     StringFileInfo([StringTable('040904B0', [
       StringStruct('CompanyName', 'Mindcob'),
-      StringStruct('FileDescription', 'SEO Audit Pro'),
+      StringStruct('FileDescription', 'Rankly'),
       StringStruct('FileVersion', '3.0.0'),
-      StringStruct('InternalName', 'SEOAuditPro'),
-      StringStruct('OriginalFilename', 'SEOAuditPro.exe'),
-      StringStruct('ProductName', 'SEO Audit Pro'),
+      StringStruct('InternalName', 'Rankly'),
+      StringStruct('OriginalFilename', 'Rankly.exe'),
+      StringStruct('ProductName', 'Rankly'),
       StringStruct('ProductVersion', '3.0.0')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]

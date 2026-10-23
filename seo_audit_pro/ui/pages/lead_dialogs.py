@@ -269,6 +269,30 @@ def start_audit(page, lead, on_started=None, max_pages=None):
               owner=page)
 
 
+def start_direct_audit(page, url, on_started=None, max_pages=None):
+    """Start an audit directly from a website URL without needing an existing lead."""
+    key = api.new_idempotency_key()
+
+    def done(res):
+        toast(page, f"Audit started for {url}.", "success")
+        if on_started:
+            on_started(res["audit"])
+        page.ws.navigate("audit", audit_id=res["audit"]["id"])
+
+    def fail(err):
+        if err.status == 409 and err.data.get("audit_id"):
+            toast(page, "An audit is already running for this website. Opening it.", "info")
+            page.ws.navigate("audit", audit_id=err.data["audit_id"])
+        else:
+            show_error(page, err, "Audit not started")
+
+    payload = {"url": url}
+    if max_pages is not None:
+        payload["max_pages"] = max_pages
+    tasks.run(api.post, "/api/audits", payload, idempotency_key=key, on_done=done, on_error=fail,
+              owner=page)
+
+
 def set_archived(page, archived, on_done, leads=None, selection=None):
     """Archive or restore selected leads, or every lead matching a filter."""
     verb = "Archive" if archived else "Restore"

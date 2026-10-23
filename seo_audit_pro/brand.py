@@ -40,7 +40,30 @@ def logo_svg(simplified=False):
     return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">{tile}{body}</svg>'
 
 
+_MASCOT_PATH = os.path.join(os.path.dirname(__file__), "assets", "mascot.png")
+_ICO_PATH = os.path.join(os.path.dirname(__file__), "assets", "app.ico")
+_CACHED_MASCOT = None
+
+
+def _get_mascot_image():
+    global _CACHED_MASCOT
+    if _CACHED_MASCOT is None:
+        p = _MASCOT_PATH
+        if not os.path.isfile(p):
+            root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            p = os.path.join(root, "assets", "Cute Sprout Mascot Bar Chart Icon.png")
+        if os.path.isfile(p):
+            img = QImage(p)
+            if not img.isNull():
+                _CACHED_MASCOT = img
+    return _CACHED_MASCOT
+
+
 def logo_image(size):
+    mascot = _get_mascot_image()
+    if mascot is not None:
+        return mascot.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
     renderer = QSvgRenderer(QByteArray(logo_svg(simplified=size <= 24).encode()))
     img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
     img.fill(Qt.GlobalColor.transparent)
@@ -58,6 +81,14 @@ def logo_pixmap(size, dpr=1.0):
 
 
 def app_icon():
+    p = _ICO_PATH
+    if not os.path.isfile(p):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        p = os.path.join(root, "assets", "Cute Sprout Mascot Bar Chart Icon.ico")
+    if os.path.isfile(p):
+        ic = QIcon(p)
+        if not ic.isNull():
+            return ic
     ic = QIcon()
     for s in (16, 20, 24, 32, 40, 48, 64, 128, 256):
         ic.addPixmap(QPixmap.fromImage(logo_image(s)))
@@ -66,6 +97,13 @@ def app_icon():
 
 def write_ico(path, sizes=(16, 20, 24, 32, 40, 48, 64, 128, 256)):
     """Multi-resolution .ico with PNG-compressed entries (Vista+ format)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src_ico = os.path.join(root, "assets", "Cute Sprout Mascot Bar Chart Icon.ico")
+    if os.path.isfile(src_ico) and os.path.abspath(path) != os.path.abspath(src_ico):
+        import shutil
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        shutil.copyfile(src_ico, path)
+        return
     blobs = []
     for s in sizes:
         buf = QBuffer()

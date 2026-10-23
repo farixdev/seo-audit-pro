@@ -513,6 +513,18 @@ def run_audit(params, progress=None):
     )
     result["traffic"] = traffic
 
+    # 8d) Google Maps & GBP Lookup -------------------------------------
+    _ck(cancel)
+    log("Checking Google Maps & Business Profile…")
+    try:
+        import google_maps_scraper
+        gbp_place, gbp_note = google_maps_scraper.scrape_google_maps(result["final_url"], timeout=12)
+        result["gbp"] = gbp_place
+        result["gbp_note"] = gbp_note
+    except Exception as e:
+        result["gbp"] = None
+        result["gbp_note"] = f"error: {e}"
+
     # 9) build checks + score -------------------------------------------
     _ck(cancel)
     log("Scoring…")

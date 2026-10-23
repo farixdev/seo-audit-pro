@@ -3,13 +3,13 @@
 audits, what is running and what is waiting) with live progress."""
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtWidgets import QFrame, QListWidget, QListWidgetItem, QMenu, QSpinBox, QStackedWidget, QWidget
+from PySide6.QtWidgets import QFrame, QLineEdit, QListWidget, QListWidgetItem, QMenu, QSpinBox, QStackedWidget, QWidget
 
 from seo_audit_pro import icons
 from seo_audit_pro.core import api, fmt, tasks
 from seo_audit_pro.theme import C
 from seo_audit_pro.ui.pages.base import Page
-from seo_audit_pro.ui.pages.lead_dialogs import start_audit
+from seo_audit_pro.ui.pages.lead_dialogs import start_audit, start_direct_audit
 from seo_audit_pro.widgets.common import (MetricStrip, Segmented, Spinner, StatefulArea, button, hbox, label,
                                           vbox)
 from seo_audit_pro.widgets.feedback import Dialog, SearchBox, combo, confirm, show_error, toast
@@ -58,17 +58,33 @@ class LeadPickerDialog(Dialog):
     """Search the caller's (non-archived) leads and pick one to audit."""
 
     def __init__(self, page):
-        super().__init__(page, "Start audit", "Choose a lead. The audit engine crawls its website and scores it "
-                                              "across all ten categories.", 520)
+        super().__init__(page, "Start audit", "Enter a website URL to audit directly, or choose one or more leads "
+                                              "from your Lead Bank.", 540)
         self.page = page
         self.lead = None
         self.leads = []
+        self.direct_url = ""
+
+        # Direct Website URL input
+        u_box = vbox(spacing=4)
+        u_box.addWidget(label("Website URL to audit:", "FieldLabel"))
+        self.url_edit = QLineEdit()
+        self.url_edit.setPlaceholderText("e.g. https://example.com")
+        self.url_edit.setStyleSheet("QLineEdit { border: 1px solid #D0D5DD; border-radius: 6px; padding: 7px 10px; font-size: 13px; }")
+        self.url_edit.textChanged.connect(self._url_changed)
+        self.url_edit.returnPressed.connect(self.choose)
+        u_box.addWidget(self.url_edit)
+        self.body.addLayout(u_box)
+
+        # Divider / label
+        self.body.addWidget(label("— Or choose from Lead Bank —", "Meta"))
+
         self.search = SearchBox("Search company or domain")
         self.search.search.connect(self.load)
         self.body.addWidget(self.search)
         self.list = QListWidget()
         self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        self.list.setMinimumHeight(300)
+        self.list.setMinimumHeight(240)
         self.list.setStyleSheet("QListWidget { border: 1px solid #E4E4E7; border-radius: 6px; padding: 4px; }")
         self.list.itemSelectionChanged.connect(self._selection_changed)
         self.list.itemDoubleClicked.connect(lambda _i: self.choose())
@@ -93,16 +109,36 @@ class LeadPickerDialog(Dialog):
         self._gen = 0
         self.load("")
 
+    def _url_changed(self, text):
+        clean = text.strip()
+        self.direct_url = clean
+        if clean:
+            self.list.clearSelection()
+            self.leads = []
+            self.lead = None
+            self.primary.setEnabled(True)
+            self.primary.setText("Start audit")
+        else:
+            self._selection_changed()
+
     def _selection_changed(self):
         selected = [it.data(Qt.ItemDataRole.UserRole) for it in self.list.selectedItems() if it.data(Qt.ItemDataRole.UserRole)]
         self.leads = selected
         self.lead = selected[0] if len(selected) == 1 else None
         n = len(selected)
-        self.primary.setEnabled(n > 0)
-        if n > 1:
-            self.primary.setText(f"Queue {n} audits")
-        else:
-            self.primary.setText("Start audit")
+        if n > 0:
+            self.direct_url = ""
+            if self.url_edit.text():
+                self.url_edit.blockSignals(True)
+                self.url_edit.clear()
+                self.url_edit.blockSignals(False)
+            self.primary.setEnabled(True)
+            if n > 1:
+                self.primary.setText(f"Queue {n} audits")
+            else:
+                self.primary.setText("Start audit")
+        elif not self.direct_url:
+            self.primary.setEnabled(False)
 
     def load(self, text):
         self._gen += 1
@@ -136,6 +172,13 @@ class LeadPickerDialog(Dialog):
         tasks.run(api.get, "/api/leads", params=params, on_done=done, on_error=fail, owner=self)
 
     def choose(self):
+        url_text = self.url_edit.text().strip()
+        if url_text:
+            self.direct_url = url_text
+            self.leads = []
+            self.lead = None
+            self.accept()
+            return
         selected = [it.data(Qt.ItemDataRole.UserRole) for it in self.list.selectedItems() if it.data(Qt.ItemDataRole.UserRole)]
         if not selected:
             cur = self.list.currentItem()
@@ -451,20 +494,23 @@ class AuditsPage(Page):
 
     def start(self):
         dlg = LeadPickerDialog(self)
-        if dlg.exec() and dlg.leads:
+        if dlg.exec():
             max_pages = dlg.pages_spin.value()
-            if len(dlg.leads) == 1:
-                start_audit(self, dlg.leads[0], max_pages=max_pages)
-            else:
-                from seo_audit_pro.ui.pages.audit_dialogs import BulkAuditDialog
-                ids = [l["id"] for l in dlg.leads]
-                label_text = f"{len(ids)} selected leads"
-                dlg_bulk = BulkAuditDialog(self, {"lead_ids": ids, "label": label_text})
-                dlg_bulk.pages_spin.setValue(max_pages)
-                if dlg_bulk.exec() and dlg_bulk.result:
-                    toast(self, f"{len(ids)} audits queued. Follow them in the Queue tab.", "success")
-                    self.tabs.set_value("queue")
-                    self._switch("queue")
+            if getattr(dlg, "direct_url", ""):
+                start_direct_audit(self, dlg.direct_url, max_pages=max_pages)
+            elif dlg.leads:
+                if len(dlg.leads) == 1:
+                    start_audit(self, dlg.leads[0], max_pages=max_pages)
+                else:
+                    from seo_audit_pro.ui.pages.audit_dialogs import BulkAuditDialog
+                    ids = [l["id"] for l in dlg.leads]
+                    label_text = f"{len(ids)} selected leads"
+                    dlg_bulk = BulkAuditDialog(self, {"lead_ids": ids, "label": label_text})
+                    dlg_bulk.pages_spin.setValue(max_pages)
+                    if dlg_bulk.exec() and dlg_bulk.result:
+                        toast(self, f"{len(ids)} audits queued. Follow them in the Queue tab.", "success")
+                        self.tabs.set_value("queue")
+                        self._switch("queue")
 
     def on_realtime(self, ev):
         if self.views.currentIndex() == 1:
