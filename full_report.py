@@ -470,17 +470,19 @@ def html_to_pdf(html_path, pdf_path, timeout=120):
         return False
     import tempfile
     profile = tempfile.mkdtemp(prefix="seo-pdf-")
+    abs_pdf = os.path.abspath(pdf_path)
+    abs_html = os.path.abspath(html_path)
     try:
         subprocess.run([exe, "--headless=new", "--disable-gpu", "--no-pdf-header-footer", "--no-first-run",
-                        f"--user-data-dir={profile}", f"--print-to-pdf={pdf_path}",
-                        "file:///" + os.path.abspath(html_path).replace("\\", "/")],
+                        f"--user-data-dir={profile}", f"--print-to-pdf={abs_pdf}",
+                        "file:///" + abs_html.replace("\\", "/")],
                        capture_output=True, timeout=timeout, check=False,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.TimeoutExpired):
         return False
     finally:
         shutil.rmtree(profile, ignore_errors=True)
-    return os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 1000
+    return os.path.isfile(abs_pdf) and os.path.getsize(abs_pdf) > 1000
 
 
 # ---------------------------------------------------------------------------

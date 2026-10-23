@@ -321,34 +321,69 @@ def _competitors(result):
             + table + note + "</section>")
 
 
-def screenshots(url, folder, timeout=60):
+def screenshots(url, folder, timeout=40):
     """Desktop and phone screenshots of the live site with Edge/Chrome headless.
     Returns {"desktop": path, "mobile": path} for the ones that worked (JPEG)."""
+    import concurrent.futures
     import shutil
     import subprocess
     import tempfile
     from full_report import _browser
-    exe = _browser()
+
     out = {}
+    # 1. Reuse already captured screenshots if they exist
+    for name in ("desktop", "mobile"):
+        for ext in (".jpg", ".png"):
+            p = os.path.join(folder, f"screenshot-{name}{ext}")
+            if os.path.isfile(p) and os.path.getsize(p) > 2000:
+                out[name] = p
+                break
+    if len(out) == 2:
+        return out
+
+    exe = _browser()
     if not exe:
         return out
+
     phone_ua = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
                 "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
-    for name, size, extra in (("desktop", "1366,860", []), ("mobile", "390,844", [f"--user-agent={phone_ua}"])):
+
+    def capture_one(name, size, extra):
+        if name in out:
+            return name, out[name]
         png = os.path.join(folder, f"screenshot-{name}.png")
         profile = tempfile.mkdtemp(prefix="seo-shot-")
         try:
             subprocess.run([exe, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
-                            f"--user-data-dir={profile}", f"--window-size={size}", "--virtual-time-budget=8000",
+                            "--run-all-compositor-stages-before-draw",
+                            f"--user-data-dir={profile}", f"--window-size={size}", "--virtual-time-budget=2500",
                             f"--screenshot={png}", *extra, url],
                            capture_output=True, timeout=timeout, check=False,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except (OSError, subprocess.TimeoutExpired):
-            continue
+            return name, None
         finally:
             shutil.rmtree(profile, ignore_errors=True)
         if os.path.isfile(png) and os.path.getsize(png) > 2000:
-            out[name] = _to_jpeg(png)
+            return name, _to_jpeg(png)
+        return name, None
+
+    targets = [
+        ("desktop", "1366,860", []),
+        ("mobile", "390,844", [f"--user-agent={phone_ua}"]),
+    ]
+
+    # Run captures concurrently in background threads
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(capture_one, name, size, extra) for name, size, extra in targets]
+        for f in concurrent.futures.as_completed(futures):
+            try:
+                name, path = f.result()
+                if path:
+                    out[name] = path
+            except Exception:
+                pass
+
     return out
 
 

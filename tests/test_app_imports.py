@@ -103,7 +103,8 @@ class AppImportTests(unittest.TestCase):
             config.AUDITS_RUN_ON = mode
 
     def test_preview_checks(self):
-        self.assertEqual(self.preview([["A", _site(), "", "", ""]], who="agent").status_code, 403)
+        self.assertEqual(self.c.post("/api/lead-imports/local", json={"file_name": "x.csv"}).status_code, 401)
+        self.assertEqual(self.preview([["A", _site(), "", "", ""]], who="agent").status_code, 201)
         self.assertEqual(self.preview([["A", _site(), "", "", ""]], name="leads.exe").status_code, 422)
         r = self.c.post("/api/lead-imports/local", headers=self.H["manager"],
                         json={"file_name": "x.csv", "headers": HEADERS, "total_rows": 2_000_000, "sample": []})

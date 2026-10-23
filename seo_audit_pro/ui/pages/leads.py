@@ -386,6 +386,9 @@ class LeadsPage(Page):
         self.status = combo(STATUS_FILTER)
         self.status.currentIndexChanged.connect(lambda _i: self._set(status=self.status.currentData()))
         bar.addWidget(self.status)
+        self.area_filter = combo([("All areas", "")])
+        self.area_filter.currentIndexChanged.connect(lambda _i: self._set(area=self.area_filter.currentData()))
+        bar.addWidget(self.area_filter)
         self.team = combo([("All teams", "")])
         self.agent = combo([("Anyone", "")])
         if session.is_manager():
@@ -504,6 +507,10 @@ class LeadsPage(Page):
         if niche is not None or area is not None:
             self.params.update(niche=niche or "", area=area or "", page=1)
             self.nav.select(niche, area)
+            self.area_filter.blockSignals(True)
+            idx = self.area_filter.findData(area or "")
+            self.area_filter.setCurrentIndex(max(0, idx))
+            self.area_filter.blockSignals(False)
         if batch_id:
             self.params.update(batch_id=batch_id, page=1)
         if tab:
@@ -557,6 +564,10 @@ class LeadsPage(Page):
         self._set(**QUICK_VIEWS.get(value, {}))
 
     def _navigate_tree(self, niche, area):
+        self.area_filter.blockSignals(True)
+        idx = self.area_filter.findData(area or "")
+        self.area_filter.setCurrentIndex(max(0, idx))
+        self.area_filter.blockSignals(False)
         self._set(niche=niche, area=area)
 
     def show_batch_leads(self, batch):
@@ -565,6 +576,9 @@ class LeadsPage(Page):
         self.views.setCurrentIndex(0)
         self.params.update(niche="", area="", status="")
         self.nav.select("", "")
+        self.area_filter.blockSignals(True)
+        self.area_filter.setCurrentIndex(0)
+        self.area_filter.blockSignals(False)
         self._set(batch_id=batch["id"])
 
     def reset_filters(self):
@@ -574,7 +588,7 @@ class LeadsPage(Page):
         self.search.blockSignals(True)
         self.search.clear()
         self.search.blockSignals(False)
-        for box in (self.status, self.team, self.agent):
+        for box in (self.status, self.area_filter, self.team, self.agent):
             box.blockSignals(True)
             box.setCurrentIndex(0)
             box.blockSignals(False)
@@ -623,6 +637,16 @@ class LeadsPage(Page):
     def _render_facets(self, facets):
         self.nav.set_data(facets)
         self._describe_scope()
+        current_area = self.params.get("area") or ""
+        self.area_filter.blockSignals(True)
+        self.area_filter.clear()
+        self.area_filter.addItem("All areas", "")
+        for a in facets.get("areas", []):
+            label_text = f"{a['label']} ({a['count']:,})"
+            self.area_filter.addItem(label_text, a["key"])
+        idx = self.area_filter.findData(current_area)
+        self.area_filter.setCurrentIndex(max(0, idx))
+        self.area_filter.blockSignals(False)
         if self.manage:
             self.head.subtitle.setText(f"{facets.get('total', 0):,} active leads · {len(facets.get('niches', []))} "
                                        f"niches · {len(facets.get('areas', []))} areas · "

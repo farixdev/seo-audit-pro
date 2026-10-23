@@ -53,12 +53,10 @@ class MapHarvestPage(Page):
         self.stack.setCurrentIndex(0)
 
     def activate(self, **params):
-        # Refresh permission visibility on buttons when switching tabs
+        # Allow Agent, Team Lead, and Manager to add leads to Lead Bank
         if hasattr(self.results_screen, "lead_bank_btn"):
             try:
-                from seo_audit_pro.core.session import session
-                can_import = session.is_manager() or session.is_team_lead()
-                self.results_screen.lead_bank_btn.setVisible(can_import)
+                self.results_screen.lead_bank_btn.setVisible(True)
             except Exception:
                 pass
 

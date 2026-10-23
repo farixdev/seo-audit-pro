@@ -55,7 +55,7 @@ _SCHED_LOCK = threading.Lock()
 _AVG = {"at": 0.0, "seconds": 75}
 
 DEFAULT_SETTINGS = {"max_pages": 50, "psi_strategy": "both", "concurrent": config.MAX_CONCURRENT_AUDITS}
-MAX_CONCURRENT = 4
+MAX_CONCURRENT = 8
 WAITING = "Waiting in the queue"
 
 
@@ -145,12 +145,12 @@ def start(user, lead, max_pages=None):
     return audit_id
 
 
-def enqueue_bulk(user, leads, label, skipped):
+def enqueue_bulk(user, leads, label, skipped, max_pages=None):
     """Queue one audit per lead as a batch. ``leads`` were already checked for
     scope, archive state and running audits. Returns the batch id."""
     batch_id = security.new_id("abt_")
     now = now_iso()
-    params = _params()
+    params = _params(max_pages)
     team_id = user["team_id"] if user["role"] != "MANAGER" else None
     rows = [(security.new_id("aud_"), l["id"], user["id"], l["assigned_team_id"], l["website"], "queued", 0, WAITING,
              now, 0, params, batch_id) for l in leads]

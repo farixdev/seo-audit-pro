@@ -245,7 +245,7 @@ class AssignDialog(Dialog):
                   owner=self)
 
 
-def start_audit(page, lead, on_started=None):
+def start_audit(page, lead, on_started=None, max_pages=None):
     """Start an audit for ``lead``; navigates to the live audit view."""
     key = api.new_idempotency_key()
 
@@ -262,7 +262,10 @@ def start_audit(page, lead, on_started=None):
         else:
             show_error(page, err, "Audit not started")
 
-    tasks.run(api.post, "/api/audits", {"lead_id": lead["id"]}, idempotency_key=key, on_done=done, on_error=fail,
+    payload = {"lead_id": lead["id"]}
+    if max_pages is not None:
+        payload["max_pages"] = max_pages
+    tasks.run(api.post, "/api/audits", payload, idempotency_key=key, on_done=done, on_error=fail,
               owner=page)
 
 

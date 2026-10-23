@@ -226,7 +226,13 @@ def bulk_start():
                      f"ORDER BY l.created_at DESC, l.id LIMIT %s", params + [preview["will_queue"]])
     label = text(data, "label", max_len=200) or f"{len(leads):,} selected leads"
     skipped = dict(preview["skipped"], not_now=preview["not_now"])
-    batch_id = audit_runner.enqueue_bulk(me, leads, label, skipped)
+    max_pages = data.get("max_pages")
+    if max_pages is not None:
+        try:
+            max_pages = int(max_pages)
+        except (ValueError, TypeError):
+            max_pages = None
+    batch_id = audit_runner.enqueue_bulk(me, leads, label, skipped, max_pages=max_pages)
     return jsonify({"batch": _batch_out(_load_batch(me, batch_id))}), 202
 
 

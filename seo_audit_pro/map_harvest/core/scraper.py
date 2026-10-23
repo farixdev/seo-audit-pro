@@ -119,10 +119,12 @@ def _chrome_major_version() -> int:
     return 0
 
 
-def get_driver(headless: bool = False):
+def get_driver(headless: bool = False, user_agent: str = ""):
     options = uc.ChromeOptions()
     if headless:
         options.add_argument("--headless=new")
+    if user_agent:
+        options.add_argument(f"--user-agent={user_agent}")
     options.add_argument("--disable-notifications")
     options.add_argument("--lang=en-US")
     options.add_argument("--no-first-run")
@@ -867,6 +869,7 @@ class ScrapeWorker(QThread):
         max_results: int = 0,
         filters: dict = None,
         use_tabs: bool = True,  # kept for backward compatibility (unused)
+        user_agent: str = "",
     ):
         super().__init__()
         self.domains = domains
@@ -876,6 +879,7 @@ class ScrapeWorker(QThread):
         self.max_results = max(0, max_results)
         self.filters = filters or {}
         self.use_tabs = use_tabs
+        self.user_agent = user_agent
         self._driver = None   # set in run(); used by abort() on app close
         self._running = True
         self._paused = False
@@ -927,7 +931,7 @@ class ScrapeWorker(QThread):
     def run(self):
         driver = None
         try:
-            driver = get_driver(headless=self.headless)
+            driver = get_driver(headless=self.headless, user_agent=self.user_agent)
             self._driver = driver
             self._total_collected = 0
             tasks = [(d, a) for d in self.domains for a in self.areas]

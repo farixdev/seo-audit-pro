@@ -424,6 +424,14 @@ class InputScreen(QWidget):
         hint.setWordWrap(True)
         layout.addSpacing(6)
         layout.addWidget(hint)
+        layout.addSpacing(12)
+        ua_row = QHBoxLayout()
+        ua_row.addWidget(QLabel("User-Agent (optional):"))
+        self.user_agent_input = QLineEdit()
+        self.user_agent_input.setPlaceholderText("Default browser agent or custom string")
+        self.user_agent_input.textChanged.connect(self._persist_settings)
+        ua_row.addWidget(self.user_agent_input, stretch=1)
+        layout.addLayout(ua_row)
         layout.addSpacing(22)
 
         layout.addWidget(self._section_label("Result Limit"))
@@ -495,6 +503,9 @@ class InputScreen(QWidget):
         self.headless_cb.blockSignals(True)
         self.headless_cb.setChecked(bool(self.settings.get("headless", False)))
         self.headless_cb.blockSignals(False)
+        self.user_agent_input.blockSignals(True)
+        self.user_agent_input.setText(self.settings.get("user_agent", ""))
+        self.user_agent_input.blockSignals(False)
         export_dir = self.settings.get("export_dir") or ""
         self.export_dir_input.setText(export_dir)
         self._refresh_saved_list()
@@ -516,6 +527,7 @@ class InputScreen(QWidget):
 
     def _persist_settings(self):
         self.settings["headless"] = self.headless_cb.isChecked()
+        self.settings["user_agent"] = self.user_agent_input.text().strip()
         self.settings["max_limit_cap"] = self.limit_cap_spin.value()
         self.settings["default_max_results"] = self.max_results_slider.value()
         self.settings["export_dir"] = self.export_dir_input.text().strip()
@@ -642,6 +654,7 @@ class InputScreen(QWidget):
             "name_exclude": self.name_exclude_input.text(),
             "category_include": self.cat_include_input.text(),
             "category_exclude": self.cat_exclude_input.text(),
+            "user_agent": self.user_agent_input.text().strip(),
         }
 
     def is_headless(self) -> bool:

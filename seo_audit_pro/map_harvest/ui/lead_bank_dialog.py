@@ -51,13 +51,19 @@ class AddToLeadBankDialog(Dialog):
         self.area_input.setText(str(default_area or "").strip())
         fl.addWidget(self.area_input)
 
-        # Optional Assignment (Manager can assign anyone; Team Lead assigns within team)
+        # Optional Assignment (Manager can assign anyone; Team Lead assigns within team; Agent assigns to self)
         assign_box = QWidget()
         al = vbox(assign_box, spacing=6)
-        al.addWidget(label("Assign leads (optional)", "FieldLabel"))
-        user_team = (session.user or {}).get("team_id") if session.is_team_lead() else None
-        self.picker = AssigneePicker(self.options, user_team)
-        al.addWidget(self.picker)
+        if session.is_agent():
+            al.addWidget(label("Assigned to", "FieldLabel"))
+            agent_name = (session.user or {}).get("name") or "You"
+            al.addWidget(label(f"{agent_name} (My Leads)", "Meta"))
+            self.picker = None
+        else:
+            al.addWidget(label("Assign leads (optional)", "FieldLabel"))
+            user_team = (session.user or {}).get("team_id") if session.is_team_lead() else None
+            self.picker = AssigneePicker(self.options, user_team)
+            al.addWidget(self.picker)
         fl.addWidget(assign_box)
 
         self.body.addLayout(fl)
@@ -79,7 +85,11 @@ class AddToLeadBankDialog(Dialog):
             self.show_error("No scraped results to import.")
             return
 
-        team_id, agent_id = self.picker.values()
+        if self.picker:
+            team_id, agent_id = self.picker.values()
+        else:
+            team_id = (session.user or {}).get("team_id")
+            agent_id = (session.user or {}).get("id")
         self.clear_error()
         self.primary.busy(True, "Importing to Bank…")
 

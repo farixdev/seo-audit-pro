@@ -671,7 +671,9 @@ def _batch_visible(me, batch):
         return False
     if me["role"] == MANAGER:
         return True
-    return me["role"] == TEAM_LEAD and (batch["created_by"] == me["id"] or batch.get("team_id") == me["team_id"])
+    if me["role"] == TEAM_LEAD and (batch["created_by"] == me["id"] or batch.get("team_id") == me["team_id"]):
+        return True
+    return me["role"] == AGENT and (batch["created_by"] == me["id"] or batch.get("agent_id") == me["id"])
 
 
 def _load_batch(batch_id):
@@ -698,7 +700,7 @@ def preview_import():
 
 
 @bp.post("/api/lead-imports/local")
-@require(MANAGER, TEAM_LEAD)
+@require(MANAGER, TEAM_LEAD, AGENT)
 def preview_local_import():
     """A file the desktop app read on its own computer: only its column names,
     row count and a sample arrive here. Nothing is imported until it starts."""
@@ -723,7 +725,7 @@ def _gunzip_rows(raw, limit=60 * 1024 * 1024):
 
 
 @bp.post("/api/lead-batches/<batch_id>/rows")
-@require(MANAGER, TEAM_LEAD)
+@require(MANAGER, TEAM_LEAD, AGENT)
 def import_rows(batch_id):
     """One chunk of rows (gzip-compressed JSON list) from the app reading the file."""
     try:
@@ -737,19 +739,19 @@ def import_rows(batch_id):
 
 
 @bp.post("/api/lead-batches/<batch_id>/finish")
-@require(MANAGER, TEAM_LEAD)
+@require(MANAGER, TEAM_LEAD, AGENT)
 def finish_import(batch_id):
     return jsonify({"batch": lead_import.finish_from_app(g.user, batch_id)})
 
 
 @bp.post("/api/lead-batches/<batch_id>/failed")
-@require(MANAGER, TEAM_LEAD)
+@require(MANAGER, TEAM_LEAD, AGENT)
 def import_failed(batch_id):
     return jsonify({"batch": lead_import.fail_from_app(g.user, batch_id, text(body(), "error", max_len=2000))})
 
 
 @bp.post("/api/lead-batches/<batch_id>/start")
-@require(MANAGER, TEAM_LEAD)
+@require(MANAGER, TEAM_LEAD, AGENT)
 @idempotent
 def start_import(batch_id):
     me = g.user
@@ -765,8 +767,11 @@ def start_import(batch_id):
     niche = text(data, "niche", required=True, max_len=80, label="Niche")
     area = text(data, "area", required=True, max_len=120, label="Area")
     with db.transaction() as tx:
-        team_id, agent_id = _resolve_assignment(
-            me, data.get("team_id") or (me["team_id"] if me["role"] == TEAM_LEAD else None), data.get("agent_id"), tx)
+        if me["role"] == AGENT:
+            team_id, agent_id = me["team_id"], me["id"]
+        else:
+            team_id, agent_id = _resolve_assignment(
+                me, data.get("team_id") or (me["team_id"] if me["role"] == TEAM_LEAD else None), data.get("agent_id"), tx)
         tx.execute("""UPDATE lead_batches SET niche = %s, area = %s, niche_key = %s, area_key = %s, mapping = %s,
                           team_id = %s, agent_id = %s WHERE id = %s AND status = 'pending'""",
                    (niche, area, niche.lower(), area.lower(), json.dumps(mapping), team_id, agent_id, batch_id))

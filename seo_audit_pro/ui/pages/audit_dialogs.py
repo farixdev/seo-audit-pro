@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Bulk audit: review what will be audited, then queue it."""
 
-from PySide6.QtWidgets import QCheckBox, QFrame
+from PySide6.QtWidgets import QCheckBox, QFrame, QSpinBox
 
 from seo_audit_pro.core import api, fmt, tasks
 from seo_audit_pro.theme import C
@@ -33,6 +33,18 @@ class BulkAuditDialog(Dialog):
         box.setObjectName("Surface")
         self.rows = vbox(box, (14, 12, 14, 12), 8)
         self.body.addWidget(box)
+
+        # Pages to crawl / scrape per site
+        prow = hbox(spacing=10)
+        prow.addWidget(label("Pages to crawl / scrape per site:", "FieldLabel"))
+        self.pages_spin = QSpinBox()
+        self.pages_spin.setRange(1, 500)
+        self.pages_spin.setValue(50)
+        self.pages_spin.setToolTip("Maximum pages crawled per website (1-500)")
+        prow.addWidget(self.pages_spin)
+        prow.addStretch(1)
+        self.body.addLayout(prow)
+
         self.recent = QCheckBox("")
         self.recent.setVisible(False)
         self.recent.toggled.connect(lambda _c: self.load())
@@ -45,7 +57,7 @@ class BulkAuditDialog(Dialog):
         self.load()
 
     def _payload(self):
-        return dict(self.selection, include_recent=self.recent.isChecked())
+        return dict(self.selection, include_recent=self.recent.isChecked(), max_pages=self.pages_spin.value())
 
     def load(self):
         self.primary.setEnabled(False)

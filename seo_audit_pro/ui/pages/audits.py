@@ -3,7 +3,7 @@
 audits, what is running and what is waiting) with live progress."""
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtWidgets import QFrame, QListWidget, QListWidgetItem, QMenu, QStackedWidget, QWidget
+from PySide6.QtWidgets import QFrame, QListWidget, QListWidgetItem, QMenu, QSpinBox, QStackedWidget, QWidget
 
 from seo_audit_pro import icons
 from seo_audit_pro.core import api, fmt, tasks
@@ -62,15 +62,29 @@ class LeadPickerDialog(Dialog):
                                               "across all ten categories.", 520)
         self.page = page
         self.lead = None
+        self.leads = []
         self.search = SearchBox("Search company or domain")
         self.search.search.connect(self.load)
         self.body.addWidget(self.search)
         self.list = QListWidget()
+        self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.list.setMinimumHeight(300)
         self.list.setStyleSheet("QListWidget { border: 1px solid #E4E4E7; border-radius: 6px; padding: 4px; }")
-        self.list.currentItemChanged.connect(lambda cur, _p: self.primary.setEnabled(bool(cur and cur.data(Qt.ItemDataRole.UserRole))))
+        self.list.itemSelectionChanged.connect(self._selection_changed)
         self.list.itemDoubleClicked.connect(lambda _i: self.choose())
         self.body.addWidget(self.list)
+
+        # Pages to crawl / scrape
+        prow = hbox(spacing=10)
+        prow.addWidget(label("Pages to crawl / scrape:", "FieldLabel"))
+        self.pages_spin = QSpinBox()
+        self.pages_spin.setRange(1, 500)
+        self.pages_spin.setValue(50)
+        self.pages_spin.setToolTip("Maximum pages to crawl for the audit (1-500)")
+        prow.addWidget(self.pages_spin)
+        prow.addStretch(1)
+        self.body.addLayout(prow)
+
         self.status = label("", "Meta")
         self.body.addWidget(self.status)
         self.add_buttons("Start audit")
@@ -78,6 +92,17 @@ class LeadPickerDialog(Dialog):
         self.primary.clicked.connect(self.choose)
         self._gen = 0
         self.load("")
+
+    def _selection_changed(self):
+        selected = [it.data(Qt.ItemDataRole.UserRole) for it in self.list.selectedItems() if it.data(Qt.ItemDataRole.UserRole)]
+        self.leads = selected
+        self.lead = selected[0] if len(selected) == 1 else None
+        n = len(selected)
+        self.primary.setEnabled(n > 0)
+        if n > 1:
+            self.primary.setText(f"Queue {n} audits")
+        else:
+            self.primary.setText("Start audit")
 
     def load(self, text):
         self._gen += 1
@@ -111,9 +136,14 @@ class LeadPickerDialog(Dialog):
         tasks.run(api.get, "/api/leads", params=params, on_done=done, on_error=fail, owner=self)
 
     def choose(self):
-        item = self.list.currentItem()
-        if item and item.data(Qt.ItemDataRole.UserRole):
-            self.lead = item.data(Qt.ItemDataRole.UserRole)
+        selected = [it.data(Qt.ItemDataRole.UserRole) for it in self.list.selectedItems() if it.data(Qt.ItemDataRole.UserRole)]
+        if not selected:
+            cur = self.list.currentItem()
+            if cur and cur.data(Qt.ItemDataRole.UserRole):
+                selected = [cur.data(Qt.ItemDataRole.UserRole)]
+        if selected:
+            self.leads = selected
+            self.lead = selected[0]
             self.accept()
 
 
@@ -421,8 +451,20 @@ class AuditsPage(Page):
 
     def start(self):
         dlg = LeadPickerDialog(self)
-        if dlg.exec() and dlg.lead:
-            start_audit(self, dlg.lead)
+        if dlg.exec() and dlg.leads:
+            max_pages = dlg.pages_spin.value()
+            if len(dlg.leads) == 1:
+                start_audit(self, dlg.leads[0], max_pages=max_pages)
+            else:
+                from seo_audit_pro.ui.pages.audit_dialogs import BulkAuditDialog
+                ids = [l["id"] for l in dlg.leads]
+                label_text = f"{len(ids)} selected leads"
+                dlg_bulk = BulkAuditDialog(self, {"lead_ids": ids, "label": label_text})
+                dlg_bulk.pages_spin.setValue(max_pages)
+                if dlg_bulk.exec() and dlg_bulk.result:
+                    toast(self, f"{len(ids)} audits queued. Follow them in the Queue tab.", "success")
+                    self.tabs.set_value("queue")
+                    self._switch("queue")
 
     def on_realtime(self, ev):
         if self.views.currentIndex() == 1:

@@ -321,6 +321,7 @@ class ResultsScreen(QWidget):
             self._domains, self._areas, self.fields,
             headless=self._headless, max_results=self._max_results,
             filters=self._filters,
+            user_agent=str((self._filters or {}).get("user_agent") or "").strip(),
         )
         self.worker.log_signal.connect(self._on_log)
         self.worker.result_signal.connect(self.add_table_row)
