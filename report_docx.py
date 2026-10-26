@@ -1424,6 +1424,60 @@ def _client_roadmap_section(doc, result):
 
 # ---- Entry Points ----------------------------------------------------------
 
+GBP_STATUS = {"pass": ("OK", "067647", "ECFDF3"), "warn": ("IMPROVE", "B54708", "FFFAEB"),
+              "fail": ("PROBLEM", "B42318", "FEF3F2"), "na": ("NOT CHECKED", "667085", "F2F4F7")}
+
+
+def _gbp_section(doc, result, heading):
+    """Google Business Profile: what was found and every check, or why it is missing.
+    Returns False when the lookup could not run (nothing to say)."""
+    from full_report import gbp_checks
+    place, note = result.get("gbp"), str(result.get("gbp_note") or "")
+    if not place and not note.startswith("not_found"):
+        return False
+    _section_heading(doc, heading)
+    if not place:
+        doc.add_paragraph(
+            "We could not find a Google Business Profile that links to this website or uses its phone number. "
+            "Without a verified profile the business does not appear in Google Maps or the local 3-pack, where most "
+            "\"near me\" customers choose who to call.")
+        _callout(doc, "How we fix it", "Create (or claim) the profile at business.google.com, verify it, then add this "
+                 "website, the phone number shown on the site, opening hours, the main category, photos and a description.",
+                 accent="D92D20")
+        return True
+    name = (place.get("displayName") or {}).get("text", "")
+    facts = [name, place.get("formattedAddress") or "", place.get("nationalPhoneNumber") or ""]
+    if place.get("rating") is not None:
+        facts.append(f"{place['rating']:.1f} stars" + (f" ({place['userRatingCount']} reviews)"
+                                                         if place.get("userRatingCount") is not None else ""))
+    doc.add_paragraph(" | ".join(f for f in facts if f))
+    if place.get("googleMapsUri"):
+        doc.add_paragraph(place["googleMapsUri"]).runs[0].font.size = Pt(7.5)
+    checks = gbp_checks(place, result.get("domain") or "", result.get("gbp_hints"))
+    table = doc.add_table(rows=1, cols=4)
+    table.style = "Table Grid"
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    for i, h in enumerate(("Check", "Status", "What we found", "How to fix")):
+        _cell_text(table.rows[0].cells[i], [(h, {"size": 8.5, "bold": True})])
+    _style_header_row(table)
+    for c in checks:
+        cells = table.add_row().cells
+        word, fg, bg = GBP_STATUS.get(c["status"], GBP_STATUS["na"])
+        _cell_text(cells[0], [(c["label"], {"size": 8.5, "bold": True})])
+        _cell_text(cells[1], [(word, {"size": 7.5, "bold": True, "color": RGBColor.from_string(fg)})],
+                   align=WD_ALIGN_PARAGRAPH.CENTER, valign=WD_ALIGN_VERTICAL.CENTER, shade=bg)
+        _cell_text(cells[2], [(c["detail"], {"size": 8, "color": SLATE})])
+        _cell_text(cells[3], [("" if c["status"] == "pass" else c["fix"], {"size": 8, "color": BRAND_DK})])
+    _set_widths(table, [1.6, 0.9, 2.5, 1.9])
+    ok = sum(1 for c in checks if c["status"] == "pass")
+    rated = sum(1 for c in checks if c["status"] != "na")
+    p = doc.add_paragraph(f"{ok} of {rated} checked items are in place. \"Not checked\" items are not shown to "
+                          "automated checks on Google Maps; a Google Places API key adds them.")
+    p.runs[0].font.size = Pt(8)
+    _spacer(doc, 8)
+    return True
+
+
 def generate_docx_report(result, path, charts=None):
     """Full comprehensive technical agency report."""
     doc = Document()
@@ -1443,6 +1497,8 @@ def generate_docx_report(result, path, charts=None):
     _action_section(doc, result)
     doc.add_page_break()
     _deepdive_section(doc, result, sc)
+    if _gbp_section(doc, result, "Google Business Profile (Local SEO)"):
+        pass
     if result.get("competitors"):
         doc.add_page_break()
         _competitor_section(doc, result, sc, result["competitors"])
@@ -1482,6 +1538,8 @@ def generate_client_docx_report(result, path, charts=None):
     if _client_onpage_audit_section(doc, result):
         _spacer(doc, 10)
     if _client_mobile_audit_section(doc, result):
+        _spacer(doc, 10)
+    if _gbp_section(doc, result, "Google Business Profile (Local SEO)"):
         _spacer(doc, 10)
     if _client_offpage_audit_section(doc, result):
         _spacer(doc, 10)

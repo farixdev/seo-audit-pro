@@ -728,6 +728,22 @@ def pagespeed_for_app():
     return jsonify(audit_runner.pagespeed_for_app(url, data.get("strategy")))
 
 
+@bp.post("/api/places-search")
+@require()
+def places_search_for_app():
+    """Google Places text search for an audit running in an app (Google Business
+    Profile check). Uses the server's Google API key, which never leaves it."""
+    _apps_only()
+    rate_limit(f"places:{g.user['id']}", 120, 600)
+    query = text(body(), "query", required=True, max_len=200, label="Search")
+    key = audit_runner.pagespeed_key()
+    if not key:
+        return jsonify({"places": [], "error": "no_key"})
+    import google_maps_scraper
+    places, err = google_maps_scraper.places_search(query, key)
+    return jsonify({"places": places, "error": err})
+
+
 @bp.get("/api/audits/<audit_id>/result-data")
 @require()
 def result_data(audit_id):

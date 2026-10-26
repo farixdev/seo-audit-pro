@@ -193,6 +193,13 @@ class AuthView(QWidget):
         footer.addWidget(self.change_link)
         footer.addStretch(1)
         lay.addLayout(footer)
+        from seo_audit_pro.widgets.common import signature
+        sig = hbox()
+        sig.setContentsMargins(0, 0, 0, 14)
+        sig.addStretch(1)
+        sig.addWidget(signature())
+        sig.addStretch(1)
+        lay.addLayout(sig)
         self.pages = {}
         self._build_welcome()
         self._build_setup()

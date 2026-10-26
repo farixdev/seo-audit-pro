@@ -541,7 +541,16 @@ def run_audit(params, progress=None):
     log("Checking Google Maps & Business Profile…")
     try:
         import google_maps_scraper
-        gbp_place, gbp_note = google_maps_scraper.scrape_google_maps(result["final_url"], timeout=12)
+        # What the website says (names, phones, city): used to find the listing and
+        # to compare name / phone with it. A listing is only accepted when it links
+        # to this site or lists one of its phone numbers.
+        hints = google_maps_scraper.hints_from_html(home_page.get("html") or "", result["final_url"])
+        if params.get("business"):
+            hints["names"] = [params["business"]] + [n for n in hints["names"] if n != params["business"]]
+        result["gbp_hints"] = hints
+        gbp_place, gbp_note = google_maps_scraper.lookup(
+            result["final_url"], hints, api_key=params.get("places_key") or params.get("psi_key") or None,
+            remote=params.get("places_remote"), timeout=12)
         result["gbp"] = gbp_place
         result["gbp_note"] = gbp_note
     except Exception as e:

@@ -69,6 +69,7 @@ class Runner:
         self.active = 0
         self.slots = 2
         self.pages = 50
+        self.api_key = None   # optional Google API key: PageSpeed + Places (Business Profile)
         self.lock = threading.Lock()
         self.cancel = threading.Event()
 
@@ -134,8 +135,9 @@ class Runner:
         folder = os.path.join(reports_dir(), f"{safe(domain)} - {datetime.now():%Y-%m-%d %H%M%S}")
         os.makedirs(folder, exist_ok=True)
         extras = client_pdf.start(url, os.path.join(folder, "screenshots"))   # runs during the crawl
-        result = engine.run_audit({"url": url, "max_pages": self.pages, "psi_strategy": "both", "psi_key": None,
-                                   "cancel": self.cancel, "competitors": job.get("competitors") or []},
+        result = engine.run_audit({"url": url, "max_pages": self.pages, "psi_strategy": "both", "psi_key": self.api_key,
+                                   "cancel": self.cancel, "competitors": job.get("competitors") or [],
+                                   "business": job.get("business") or ""},
                                   progress=progress)
         domain = domain_of(result.get("final_url") or result.get("url") or url) or domain
         base = os.path.join(folder, safe(domain))

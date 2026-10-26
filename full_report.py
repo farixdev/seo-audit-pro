@@ -162,123 +162,141 @@ def _dimension(result, key):
 
 
 # ---------------------------------------------------------------------------
-# Google Business Profile (Places API, optional key)
+# Google Business Profile
 # ---------------------------------------------------------------------------
-PLACES_FIELDS = ("places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.websiteUri,"
-                 "places.nationalPhoneNumber,places.regularOpeningHours,places.photos,places.primaryTypeDisplayName,"
-                 "places.businessStatus,places.googleMapsUri,places.editorialSummary,places.reviews")
+def gbp_lookup(query, domain, key, timeout=20, hints=None):
+    """Find the business's Google Business Profile (see google_maps_scraper).
+    ``query`` is the business name the user typed (optional). Returns (place, note)."""
+    import google_maps_scraper
+    hints = dict(hints or {})
+    if query:
+        hints["names"] = [query] + [n for n in hints.get("names") or [] if n != query]
+    return google_maps_scraper.lookup(domain, hints, api_key=key or None, timeout=min(timeout, 15))
 
 
-def gbp_lookup(query, domain, key, timeout=20):
-    """Find the business on Google (Places API (New)). Returns (place or None, note)."""
-    import requests
-    if not key:
-        return None, "no_key"
-    try:
-        r = requests.post("https://places.googleapis.com/v1/places:searchText", timeout=timeout,
-                          json={"textQuery": query, "maxResultCount": 5},
-                          headers={"X-Goog-Api-Key": key, "X-Goog-FieldMask": PLACES_FIELDS})
-    except requests.RequestException:
-        return None, "unreachable"
-    if r.status_code != 200:
-        try:
-            msg = r.json().get("error", {}).get("message", "")
-        except ValueError:
-            msg = ""
-        return None, f"api_error: {msg[:200]}"
-    places = r.json().get("places") or []
-    if not places:
-        return None, "not_found"
-    bare = (domain or "").replace("www.", "")
-    for p in places:
-        if bare and bare in (p.get("websiteUri") or ""):
-            return p, "matched_website"
-    return None, "not_found"   # never report another business's profile as this one's
+def _gbp_hours_text(place):
+    return "; ".join((place.get("regularOpeningHours") or {}).get("weekdayDescriptions") or [])
 
 
-def gbp_checks(place, site_domain):
-    """Checklist for a Google Business Profile, each with a solution."""
+def gbp_checks(place, site_domain, hints=None):
+    """Checklist for a Google Business Profile, each with a solution.
+
+    Only what was really read is judged. Places API data is complete (a field it
+    leaves out is really missing on the profile); data read from the public Maps
+    page (limited view) omits some fields, and those checks are 'na' -- never a
+    pass or a fail."""
+    import google_maps_scraper as gms
+    hints = hints or {}
     out = []
+    api = place.get("_source") == "places_api"
 
-    def add(label, ok, detail, fix, sev="medium"):
-        out.append({"label": label, "status": "pass" if ok is True else ("warn" if ok is None else "fail"),
-                    "severity": sev, "detail": detail, "fix": fix, "id": "gbp_" + label.lower().replace(" ", "_")})
+    def add(key, label, status, detail, fix, sev="medium"):
+        out.append({"id": "gbp_" + key, "label": label, "status": status, "severity": sev, "detail": detail,
+                    "fix": fix, "category": "local"})
 
-    # Scraped Google Maps data only contains the fields that were actually
-    # read; any other field is UNKNOWN (not checked), so its check is 'na' —
-    # never a pass or a fail. (Places API data omits a field only when the
-    # profile really lacks it, so there a missing field is a real gap.)
-    scraped = place.get("_source") == "maps_scrape"
+    def na(key, label, fix, sev="medium", why="Not shown to automated checks on Google Maps (needs the Google Places API key)."):
+        add(key, label, "na", why, fix, sev)
 
-    def unknown(key):
-        return scraped and key not in place
-
-    def na(label, fix, sev="medium"):
-        out.append({"label": label, "status": "na", "severity": sev,
-                    "detail": "Not checked — this could not be read from Google Maps.",
-                    "fix": fix, "id": "gbp_" + label.lower().replace(" ", "_")})
-
-    rating, count = place.get("rating"), place.get("userRatingCount")
-    fix = "If the business is shown as closed, correct the status in Google Business Profile."
-    if unknown("businessStatus"):
-        na("Business is open on Google", fix, "critical")
+    # 1. Open for business
+    status = place.get("businessStatus") or ("OPERATIONAL" if api else None)
+    fix = "Correct the business status in Google Business Profile (a closed listing gets no calls)."
+    if status:
+        add("open", "Business shown as open", "pass" if status == "OPERATIONAL" else "fail",
+            "Google shows the business as " + status.replace("_", " ").lower() + ".", fix, "critical")
     else:
-        add("Business is open on Google", place.get("businessStatus") in (None, "OPERATIONAL"),
-            f"Status: {(place.get('businessStatus') or 'operational').replace('_', ' ').lower()}.", fix, "critical")
+        na("open", "Business shown as open", fix, "critical")
+
+    # 2. Claimed by the owner
+    fix = "Claim the profile at business.google.com and verify it, so only you control the listing."
+    if place.get("claimed") is True:
+        add("claimed", "Profile claimed by the owner", "pass",
+            "No \"Claim this business\" link is shown, so the profile is managed.", fix, "critical")
+    elif place.get("claimed") is False:
+        add("claimed", "Profile claimed by the owner", "fail",
+            "Google shows \"Claim this business\": nobody manages this listing and anyone can suggest changes.",
+            fix, "critical")
+    else:
+        na("claimed", "Profile claimed by the owner", fix, "critical", "Could not be read from Google Maps.")
+
+    # 3. Website
     site = place.get("websiteUri") or ""
-    fix = "Add the correct website URL to the profile."
-    if unknown("websiteUri"):
-        na("Website linked", fix, "high")
-    else:
-        add("Website linked", bool(site) and (site_domain.replace("www.", "") in site),
-            f"Website on the profile: {site or 'none'}.", fix, "high")
-    fix = "Add the main phone number (the same one shown on the website)."
-    if unknown("nationalPhoneNumber"):
-        na("Phone number", fix, "high")
-    else:
-        add("Phone number", bool(place.get("nationalPhoneNumber")), f"Phone: {place.get('nationalPhoneNumber') or 'missing'}.",
+    fix = "Add the website address to the profile (the exact domain of this site)."
+    if site and gms.same_site(site, site_domain):
+        add("website", "Website linked", "pass", f"The profile links to {gms._clean_domain(site)}.", fix, "high")
+    elif site:
+        add("website", "Website linked", "fail", f"The profile links to {gms._clean_domain(site)}, not {site_domain}.",
             fix, "high")
-    fix = "Add regular hours and special holiday hours."
-    if unknown("regularOpeningHours"):
-        na("Opening hours", fix, "medium")
     else:
-        add("Opening hours", bool(place.get("regularOpeningHours")),
-            "Opening hours are set." if place.get("regularOpeningHours") else "No opening hours on the profile.",
-            fix, "medium")
-    fix = "Upload at least 10–20 real photos (outside, inside, team, work) and add new ones monthly."
-    if unknown("photos"):
-        na("Photos", fix, "medium")
+        add("website", "Website linked", "fail", "The profile has no website link.", fix, "high")
+
+    # 4. Phone, and does it match the website (NAP)
+    phone = place.get("nationalPhoneNumber") or place.get("internationalPhoneNumber") or ""
+    site_phones = hints.get("phones") or []
+    fix = "Add the main phone number, the same one shown on the website."
+    add("phone", "Phone number listed", "pass" if phone else "fail",
+        f"Phone on the profile: {phone}." if phone else "No phone number on the profile.", fix, "high")
+    fix = "Use one main phone number everywhere: website header/footer, Google profile and directories."
+    if phone and site_phones:
+        ok = gms.same_phone(phone, site_phones)
+        add("phone_match", "Phone matches the website", "pass" if ok else "warn",
+            f"Profile {phone} / website {', '.join(site_phones[:2])}.", fix, "medium")
     else:
-        photos = len(place.get("photos") or [])
-        add("Photos", True if photos >= 10 else (None if photos else False),
-            f"{photos}{'+' if photos >= 10 else ''} photos found.", fix, "medium")
-    fix = "Write a 750-character description with the main services and the city."
-    if unknown("editorialSummary"):
-        na("Business description", fix, "low")
+        na("phone_match", "Phone matches the website", fix, "medium",
+           "No phone number found on the website to compare." if phone else "No phone on the profile.")
+
+    # 5. Name consistency
+    gname = (place.get("displayName") or {}).get("text", "")
+    names = hints.get("names") or []
+    fix = "Use the same business name on the website and on Google (no extra keywords in the Google name)."
+    if gname and names:
+        best = max(gms.name_similarity(gname, n) for n in names)
+        add("name_match", "Business name matches the website", "pass" if best >= 0.5 else "warn",
+            f"Google: \"{gname}\" / website: \"{names[0]}\".", fix, "low")
     else:
-        add("Business description", bool(place.get("editorialSummary")),
-            "A description is shown." if place.get("editorialSummary") else "No description is shown on Google.",
-            fix, "low")
-    fix = "Pick the most specific primary category and add relevant secondary categories."
-    if unknown("primaryTypeDisplayName"):
-        na("Main category", fix, "high")
+        na("name_match", "Business name matches the website", fix, "low", "No business name found on the website to compare.")
+
+    # 6. Address
+    addr = place.get("formattedAddress") or ""
+    fix = "Add the full address (or a service area if you visit customers) so you show up in local searches."
+    add("address", "Address or service area", "pass" if addr else "warn",
+        f"Address: {addr}." if addr else "No address is shown (a service-area business may hide it on purpose).",
+        fix, "medium")
+
+    # 7. Opening hours
+    fix = "Add opening hours for every day, plus holiday hours, so Google can show you as \"Open now\"."
+    if place.get("regularOpeningHours"):
+        text = _gbp_hours_text(place)
+        add("hours", "Opening hours listed", "pass", f"Hours: {text}." if text else "Opening hours are listed.", fix, "medium")
     else:
-        add("Main category", bool(place.get("primaryTypeDisplayName")),
-            f"Category: {(place.get('primaryTypeDisplayName') or {}).get('text', 'not set')}.", fix, "high")
-    if unknown("rating"):
-        na("Rating", "Ask recent customers for reviews with a direct review link.", "high")
-    elif rating is None:
-        add("Rating", False, "No rating yet.", "Ask recent customers for reviews with a direct review link.", "high")
+        add("hours", "Opening hours listed", "fail", "No opening hours on the profile.", fix, "medium")
+
+    # 8. Category
+    cat = (place.get("primaryTypeDisplayName") or {}).get("text", "")
+    fix = "Choose the most specific primary category and add every relevant secondary category."
+    add("category", "Main category set", "pass" if cat else "fail",
+        f"Category: {cat}." if cat else "No category is shown.", fix, "high")
+
+    # 9. Rating
+    rating, count = place.get("rating"), place.get("userRatingCount")
+    fix = "Reply to every review, fix the causes of bad ones and ask happy customers to review."
+    if rating is not None:
+        add("rating", "Star rating 4.5 or higher", "pass" if rating >= 4.5 else ("warn" if rating >= 4.0 else "fail"),
+            f"{rating:.1f} stars" + (f" from {count} reviews." if count is not None else "."), fix, "high")
+    elif api or count == 0:
+        add("rating", "Star rating 4.5 or higher", "fail", "No rating yet: the profile has no reviews.", fix, "high")
     else:
-        add("Rating", True if rating >= 4.5 else (None if rating >= 4.0 else False), f"{rating:.1f} stars.",
-            "Reply to every review, fix the causes of bad ones and ask happy customers to review.", "high")
-    fix = "Ask every happy customer for a review (QR code at the counter, link in invoices and emails)."
-    if unknown("userRatingCount"):
-        na("Number of reviews", fix, "high")
+        na("rating", "Star rating 4.5 or higher", fix, "high")
+
+    # 10. Number of reviews
+    fix = "Ask every happy customer for a review (QR code at the counter, link in invoices and follow-up emails)."
+    if count is not None:
+        add("reviews", "At least 50 reviews", "pass" if count >= 50 else ("warn" if count >= 10 else "fail"),
+            f"{count} reviews on Google.", fix, "high")
     else:
-        count = count or 0
-        add("Number of reviews", True if count >= 50 else (None if count >= 10 else False), f"{count} reviews.",
-            fix, "high")
+        na("reviews", "At least 50 reviews", fix, "high")
+
+    # 11. Recent reviews
+    fix = "Keep new reviews coming every month: Google favours active profiles."
     latest = None
     for rv in place.get("reviews") or []:
         t = rv.get("publishTime")
@@ -290,8 +308,38 @@ def gbp_checks(place, site_domain):
                 pass
     if latest:
         days = (datetime.now(timezone.utc) - latest).days
-        add("Recent reviews", True if days <= 60 else (None if days <= 180 else False),
-            f"Newest review shown: {days} days ago.", "Keep a steady flow of new reviews every month.", "medium")
+        add("recent_reviews", "A review in the last 2 months", "pass" if days <= 60 else ("warn" if days <= 180 else "fail"),
+            f"Newest review Google returned: {days} days ago.", fix, "medium")
+    else:
+        na("recent_reviews", "A review in the last 2 months", fix, "medium")
+
+    # 12. Photos
+    fix = "Upload 10-20+ real photos (outside, inside, team, work done) and add new ones every month."
+    if api:
+        photos = len(place.get("photos") or [])
+        add("photos", "10 or more photos", "pass" if photos >= 10 else ("warn" if photos else "fail"),
+            f"{photos}{'+' if photos >= 10 else ''} photos on the profile.", fix, "medium")
+    else:
+        na("photos", "10 or more photos", fix, "medium")
+
+    # 13. Description / summary
+    fix = "Write the business description (up to 750 characters) with your main services and the city."
+    if api:
+        summ = (place.get("editorialSummary") or {}).get("text", "")
+        add("summary", "Business summary shown", "pass" if summ else "warn",
+            f"Google shows: \"{summ[:140]}\"." if summ else "Google shows no summary for this business.", fix, "low")
+    else:
+        na("summary", "Business summary shown", fix, "low")
+
+    # 14. Booking / order / quote button
+    fix = "Add a booking, appointment, quote or order link to the profile so customers can act straight from Google."
+    acts = place.get("actions")
+    if acts is not None:
+        add("actions", "Booking or order button", "pass" if acts else "warn",
+            f"Shown: {', '.join(acts[:3])}." if acts else "No booking, appointment or order button on the listing.",
+            fix, "low")
+    else:
+        na("actions", "Booking or order button", fix, "low", "Could not be read from Google Maps.")
     return out
 
 
@@ -420,7 +468,7 @@ def build(result, downloads=(), gbp=None, gbp_note="no_key"):
             body.append("<div class='empty'>No problems found in this area.</div>")
         body.append(_passed_list(sec_checks))
         if key == "local":
-            body.append(_gbp_section(gbp, gbp_note, domain))
+            body.append(_gbp_section(gbp, gbp_note, domain, result.get("gbp_hints")))
         body.append("</section>")
         parts.append("".join(body))
 
@@ -455,16 +503,16 @@ def _measured_note(d):
     return str(src)
 
 
-def _gbp_section(place, note, domain):
+def _gbp_section(place, note, domain, hints=None):
     head = "<h3>Google Business Profile</h3>"
     if place:
         name = (place.get("displayName") or {}).get("text", "")
         link = place.get("googleMapsUri")
         info = (f"<div class='card'><b>{E(name)}</b><br>{E(place.get('formattedAddress') or '')}"
                 + (f"<br><a href='{E(link)}'>Open on Google Maps</a>" if link else "")
-                + ("" if note == "matched_website" else "<br><span class='note'>Matched by name: check that this is the right business.</span>")
+                + ("<br><span class='note'>Matched by the phone number on the website.</span>" if note == "matched_phone" else "")
                 + "</div>")
-        checks = gbp_checks(place, domain)
+        checks = gbp_checks(place, domain, hints)
         problems = [c for c in checks if c["status"] in ("fail", "warn")]
         good = [c for c in checks if c["status"] == "pass"]
         cards = "".join(_issue_card(c) for c in problems) or "<div class='empty'>The profile looks complete.</div>"
@@ -596,7 +644,7 @@ def build_client(result, downloads=(), gbp=None, gbp_note="no_key", per_area=4):
     mob = (psi.get("scores") or {}).get("performance") if psi.get("ok") else None
     problems = [c for c in checks if c.get("status") in ("fail", "warn")]
     urgent = [c for c in problems if c.get("severity") in ("critical", "high")]
-    gbp_issues = [c for c in gbp_checks(gbp, domain) if c["status"] in ("fail", "warn")] if gbp else []
+    gbp_issues = [c for c in gbp_checks(gbp, domain, result.get("gbp_hints")) if c["status"] in ("fail", "warn")] if gbp else []
     dl = "".join(f'<a class="btn" href="{E(f)}" download>⬇ {E(lbl)}</a>' for lbl, f in downloads)
     speed_line = (f"Your home page takes about <b>{_ms(lcp)}</b> to show its main content on a phone "
                   f"(Google's target is under 2.5 s). Mobile speed score: <b>{mob}/100</b>."

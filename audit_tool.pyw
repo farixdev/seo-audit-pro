@@ -162,7 +162,7 @@ class Runner:
         opts = self.options
         result = engine.run_audit({"url": url, "max_pages": opts["pages"], "psi_strategy": "both",
                                    "psi_key": opts.get("psi_key") or None, "cancel": self.cancel,
-                                   "competitors": competitors}, progress=progress)
+                                   "competitors": competitors, "business": business}, progress=progress)
         self.signals.progress.emit(row, 97, "Writing the documents")
         domain = _domain(result.get("url") or url)
         folder = os.path.join(opts["folder"], f"{_safe(domain)} - {datetime.now():%Y-%m-%d %H%M}")
@@ -181,7 +181,7 @@ class Runner:
         import full_report
         self.signals.progress.emit(row, 99, "Checking the Google Business Profile")
         title = ((result.get("home_facts") or {}).get("title") or "").split("|")[0].split(" - ")[0].strip()
-        place, note = full_report.gbp_lookup(business or f"{title} {domain}".strip(), domain, opts.get("psi_key"))
+        place, note = result.get("gbp"), result.get("gbp_note") or "not_found"   # found during the audit
         base = os.path.join(folder, f"{_safe(domain)} - Full SEO Audit")
         downloads = [(label, os.path.basename(f)) for label, f in (
             ("Full audit (PDF)", base + ".pdf"), ("Client report (Word)", client), ("Technical audit (Word)", technical),
@@ -315,6 +315,14 @@ class Window(QMainWindow):
             self.table.setColumnWidth(c, w)
         self.table.cellDoubleClicked.connect(self._open_row)
         lay.addWidget(self.table, 1)
+        try:
+            from seo_audit_pro.widgets.common import signature
+            mark = QHBoxLayout()
+            mark.addStretch(1)
+            mark.addWidget(signature())
+            lay.addLayout(mark)
+        except Exception:  # noqa: BLE001 - the maker's mark is optional
+            pass
         self._tick = QTimer(self)
         self._tick.setInterval(1000)
         self._tick.timeout.connect(self._update_status)

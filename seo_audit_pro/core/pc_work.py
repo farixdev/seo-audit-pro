@@ -218,6 +218,8 @@ class AuditRunner:
                 job.messages.append(line.get("text") or "")
             elif t == "psi":
                 threading.Thread(target=self._pagespeed, args=(job, line), daemon=True).start()
+            elif t == "places":
+                threading.Thread(target=self._places, args=(job, line), daemon=True).start()
             elif t == "done":
                 job.outcome = ("done", None)
             elif t == "error":
@@ -264,6 +266,17 @@ class AuditRunner:
                       "top_opportunities": []}
         try:
             _write_json(os.path.join(job.folder, f"psi-{int(line.get('id') or 0)}.json"), answer)
+        except OSError:
+            pass
+
+    def _places(self, job, line):
+        """Google Places search for the Business Profile check, with the server's key."""
+        try:
+            answer = api.post("/api/places-search", {"query": line.get("query") or ""}, timeout=60)
+        except ApiError as e:
+            answer = {"places": [], "error": f"unreachable: {e.message}"}
+        try:
+            _write_json(os.path.join(job.folder, f"places-{int(line.get('id') or 0)}.json"), answer)
         except OSError:
             pass
 

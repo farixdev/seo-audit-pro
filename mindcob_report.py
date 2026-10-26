@@ -256,7 +256,18 @@ def build(result, company=None, business=None, downloads=(), gbp=None, gbp_note=
         gbp_note = result.get("gbp_note") or gbp_note
 
     checks = [c for c in (result.get("checks") or []) if c.get("category") != "offpage"]
-    gbp_all = gbp_checks(gbp, domain) if gbp else []
+    gbp_all = gbp_checks(gbp, domain, result.get("gbp_hints")) if gbp else []
+    # The search ran and found no listing that links to this site or uses its
+    # phone number: that is a real finding (customers can't find it on Maps).
+    gbp_missing = not gbp and str(gbp_note or "").startswith("not_found")
+    if gbp_missing:
+        gbp_all = [{"id": "gbp_found", "label": "Google Business Profile found", "status": "fail",
+                    "severity": "critical", "category": "local",
+                    "detail": "We could not find a Google Business Profile that links to this website or uses its "
+                              "phone number.",
+                    "fix": "Create (or claim) the profile at business.google.com, verify it, and add this website "
+                           "and the phone number shown on the site."}]
+    local_shown = bool(gbp) or gbp_missing
     all_checks = checks + gbp_all
 
     # Dynamic steps: Local SEO is ONLY added if GBP profile is found!
@@ -268,7 +279,7 @@ def build(result, company=None, business=None, downloads=(), gbp=None, gbp_note=
         ("onpage", "On-page SEO",
          "Content, titles, descriptions, headings, internal links, URLs, images and calls to action — what decides your rankings and clicks."),
     ]
-    if gbp:
+    if local_shown:
         active_steps.append(
             ("local", "Local SEO & Google Business Profile",
              "Whether nearby customers find you on Google Maps and in the local 3-pack before your competitors.")
@@ -279,12 +290,12 @@ def build(result, company=None, business=None, downloads=(), gbp=None, gbp_note=
     )
     steps = [(i + 1, k, t, d) for i, (k, t, d) in enumerate(active_steps)]
 
-    by_step = {n: [c for c in all_checks if step_of_check(c, bool(gbp)) == n] for n, *_ in steps}
-    problems = sorted([c for c in all_checks if c.get("status") in ("fail", "warn") and step_of_check(c, bool(gbp)) is not None],
+    by_step = {n: [c for c in all_checks if step_of_check(c, local_shown) == n] for n, *_ in steps}
+    problems = sorted([c for c in all_checks if c.get("status") in ("fail", "warn") and step_of_check(c, local_shown) is not None],
                       key=lambda c: (SEV_ORDER.get(c.get("severity"), 9), c.get("status") != "fail"))
     urgent = [c for c in problems if c.get("severity") in ("critical", "high")]
-    passed = [c for c in all_checks if c.get("status") == "pass" and step_of_check(c, bool(gbp)) is not None]
-    rated = [c for c in all_checks if c.get("status") in ("pass", "warn", "fail") and step_of_check(c, bool(gbp)) is not None]
+    passed = [c for c in all_checks if c.get("status") == "pass" and step_of_check(c, local_shown) is not None]
+    rated = [c for c in all_checks if c.get("status") in ("pass", "warn", "fail") and step_of_check(c, local_shown) is not None]
 
     psi = result.get("psi") or {}
     mob, desk = psi.get("mobile") or {}, psi.get("desktop") or {}
@@ -323,7 +334,7 @@ def build(result, company=None, business=None, downloads=(), gbp=None, gbp_note=
 
     step_cards = []
     for n, _k, t, _d in steps:
-        items_n = [c for c in problems if step_of_check(c, bool(gbp)) == n]
+        items_n = [c for c in problems if step_of_check(c, local_shown) == n]
         urg_n = [c for c in items_n if c.get("severity") in ("critical", "high")]
         passed_n = [c for c in by_step[n] if c.get("status") == "pass"]
         status_color = "#D92D20" if urg_n else ("#F79009" if items_n else "#079455")
@@ -352,7 +363,7 @@ def build(result, company=None, business=None, downloads=(), gbp=None, gbp_note=
             meas("Secure connection (HTTPS)", "Yes" if (result.get("final_url") or "").startswith("https") else "No",
                  "Yes", (result.get("final_url") or "").startswith("https"))]
 
-    issues_per_area = [(f"{n}. " + t.split(" &")[0].split(" (")[0], len([c for c in problems if step_of_check(c, bool(gbp)) == n]))
+    issues_per_area = [(f"{n}. " + t.split(" &")[0].split(" (")[0], len([c for c in problems if step_of_check(c, local_shown) == n]))
                        for n, _k, t, _d in steps]
 
     p.append(f"""<section class="page">{_header(cname, "Executive summary", domain)}
@@ -384,7 +395,7 @@ website on a laptop and on a phone, captured during the audit.</p><div class="mo
 
     # The active steps
     for n, key, title, desc in steps:
-        items = _unique([c for c in problems if step_of_check(c, bool(gbp)) == n])
+        items = _unique([c for c in problems if step_of_check(c, local_shown) == n])
         good = [c for c in by_step[n] if c.get("status") == "pass"]
         urg_n = [c for c in items if c.get("severity") in ("critical", "high")]
 
@@ -433,7 +444,7 @@ website on a laptop and on a phone, captured during the audit.</p><div class="mo
     # Action Plan / Roadmap
     road = []
     for n, _k, title, _d in steps:
-        items = _unique([c for c in problems if step_of_check(c, bool(gbp)) == n])
+        items = _unique([c for c in problems if step_of_check(c, local_shown) == n])
         if not items:
             continue
         lines = "".join(f"<li><span class='pill {'p-bad' if c.get('severity') in ('critical', 'high') else 'p-warn'}'>"
@@ -468,6 +479,8 @@ def _gbp_block(place, domain, gbp_all):
     # Only real passes count as verified; 'na' items (data that could not be
     # read) render as a neutral "Not checked", never as a pass or a problem.
     good = sum(1 for c in gbp_all if c["status"] == "pass")
+    rated = sum(1 for c in gbp_all if c["status"] != "na")
+    unseen = len(gbp_all) - rated
 
     def _dot(st):
         return "#101828" if st == "pass" else ("#D0D5DD" if st == "na" else "#FECDCA")
@@ -488,10 +501,13 @@ def _gbp_block(place, domain, gbp_all):
     rating_str = (f" · ★ {rating:.1f}" + (f" ({reviews} reviews)" if reviews is not None else "")) if rating else ""
 
     return (f"<div class='box'><div style='display:flex;justify-content:space-between;align-items:center'><div>"
-            f"<p class='eyebrow'>Google Business Profile</p><h3>Your Google Maps listing: {good} of {len(gbp_all)} essentials verified</h3>"
+            f"<p class='eyebrow'>Google Business Profile</p><h3>Your Google Maps listing: {good} of {rated} checked items in place</h3>"
             f"<p class='note'><b>{E(name)}</b>{rating_str} · {E(place.get('formattedAddress') or place.get('address') or '')}"
             + (f" · <a href='{E(link)}' target='_blank'>Open on Google Maps</a>" if link else "") + "</p></div>"
-            f"<span class='pill p-ok'>{good} / {len(gbp_all)} verified</span></div><div class='checklist'>{items}</div></div>")
+            f"<span class='pill p-ok'>{good} / {rated} in place</span></div><div class='checklist'>{items}</div>"
+            + (f"<p class='note'>{unseen} item{'s are' if unseen != 1 else ' is'} not shown to automated checks on Google "
+               "Maps (review count, photos, recent reviews, summary); a Google Places API key adds them.</p>" if unseen else "")
+            + "</div>")
 
 
 def _security_block(result, checks):

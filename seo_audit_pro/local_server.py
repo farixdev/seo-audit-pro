@@ -61,8 +61,11 @@ def _port_free(port, host):
 
 
 def pick_port(preferred=None, host="127.0.0.1"):
+    # Check both addresses: on Windows 127.0.0.1:N can still be bound while a
+    # shared server listens on 0.0.0.0:N, and requests would reach that one.
+    hosts = {host, "127.0.0.1", "0.0.0.0"}
     for port in [p for p in (preferred, DEFAULT_PORT) if p] + list(range(DEFAULT_PORT + 1, DEFAULT_PORT + 40)):
-        if _port_free(port, host):
+        if all(_port_free(port, h) for h in hosts):
             return port
     with socket.socket() as s:
         s.bind((host, 0))

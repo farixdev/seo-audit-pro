@@ -516,3 +516,40 @@ class Segmented(QWidget):
     def set_text(self, value, text):
         if value in self.buttons:
             self.buttons[value].setText(text)
+
+
+GITHUB_URL = "https://github.com/farixdev"
+
+
+def signature(compact=False):
+    """Maker's mark: "by Faris" in a handwritten style, with the GitHub link.
+    Quiet on purpose (small, grey); ``compact`` stacks it for narrow places."""
+    box = QWidget()
+    row = (vbox if compact else hbox)(box, spacing=0 if compact else 6)
+    by = QLabel("crafted by")
+    by.setStyleSheet(f"color: {C['text_3']}; font-size: 10px;")
+    name = QLabel("Faris")
+    font = QFont("Segoe Script")
+    if not font.exactMatch():
+        font = QFont("Brush Script MT")
+    font.setPixelSize(17 if compact else 15)
+    font.setItalic(True)
+    name.setFont(font)
+    name.setStyleSheet(f"color: {C['text_2']}; padding-bottom: 2px;")
+    link = QLabel(f'<a href="{GITHUB_URL}" style="color: {C["text_3"]}; text-decoration: none;">github/farixdev</a>')
+    link.setStyleSheet("font-size: 10px;")
+    link.setOpenExternalLinks(True)
+    link.setToolTip(GITHUB_URL)
+    link.setCursor(Qt.CursorShape.PointingHandCursor)
+    if compact:
+        line = hbox(spacing=5)
+        line.addWidget(by, 0, Qt.AlignmentFlag.AlignBottom)
+        line.addWidget(name, 0, Qt.AlignmentFlag.AlignBottom)
+        line.addStretch(1)
+        row.addLayout(line)
+        row.addWidget(link)
+    else:
+        for w in (by, name, link):
+            row.addWidget(w, 0, Qt.AlignmentFlag.AlignVCenter)
+    box.setToolTip(f"Made by Faris · {GITHUB_URL}")
+    return box

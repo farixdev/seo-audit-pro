@@ -149,7 +149,7 @@ def build(result, downloads=(), gbp=None, gbp_note="no_key", shots=None, per_sec
     sc = result.get("score") or {}
     score = sc.get("score") or 0
     checks = result.get("checks") or []
-    gbp_items = [c for c in gbp_checks(gbp, domain) if c["status"] in ("fail", "warn")] if gbp else []
+    gbp_items = [c for c in gbp_checks(gbp, domain, result.get("gbp_hints")) if c["status"] in ("fail", "warn")] if gbp else []
     problems = sorted([c for c in checks if c.get("status") in ("fail", "warn")] + gbp_items,
                       key=lambda c: (SEV_ORDER.get(c.get("severity"), 9), c.get("status") != "fail"))
     by_group = {}
@@ -371,8 +371,8 @@ def screenshots(url, folder, timeout=40):
         profile = tempfile.mkdtemp(prefix="seo-shot-")
         try:
             subprocess.run([exe, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
-                            "--run-all-compositor-stages-before-draw",
                             f"--user-data-dir={profile}", f"--window-size={size}", "--virtual-time-budget=2500",
+                            "--timeout=15000",   # take the shot after 15 s even if the page never settles
                             f"--screenshot={png}", *extra, url],
                            capture_output=True, timeout=timeout, check=False,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -406,6 +406,12 @@ def screenshots(url, folder, timeout=40):
     for t in threads:
         t.join(timeout + 5)
     out.update({k: v for k, v in found.items() if v})
+    # One more try, one at a time, for a shot that failed (busy pages sometimes stall Edge).
+    for name, size, extra in targets:
+        if name not in out:
+            got = capture_one(name, size, extra)[1]
+            if got:
+                out[name] = got
 
     return out
 

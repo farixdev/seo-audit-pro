@@ -65,6 +65,32 @@ def _pagespeed_via_app(folder, channel):
     return run_pagespeed
 
 
+def _places_via_app(folder, channel):
+    """Google Places search through the app and the team server (the key stays
+    there): returns (places, error) like google_maps_scraper.places_search."""
+    numbers = itertools.count(1000)
+    lock = threading.Lock()
+
+    def search(query):
+        with lock:
+            n = next(numbers)
+        answer = os.path.join(folder, f"places-{n}.json")
+        channel.send({"t": "places", "id": n, "query": query})
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            if os.path.isfile(answer):
+                try:
+                    with open(answer, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    return data.get("places") or [], data.get("error")
+                except (OSError, ValueError):
+                    pass
+            time.sleep(0.3)
+        return [], "unreachable: no answer from the team server"
+
+    return search
+
+
 def _write_json(path, data):
     part = path + ".part"
     with open(part, "w", encoding="utf-8") as fh:
@@ -78,7 +104,7 @@ def _run_audit(job, folder, channel):
     import audit as engine
 
     params = {"url": job["url"], "max_pages": job["max_pages"], "psi_strategy": job["psi_strategy"],
-              "psi_key": None, "cancel": threading.Event()}
+              "psi_key": None, "cancel": threading.Event(), "places_remote": _places_via_app(folder, channel)}
     # Screenshots and the Google Maps profile run while the site is crawled.
     import client_pdf
     shots_dir = os.path.join(folder, "client")

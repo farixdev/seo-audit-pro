@@ -156,6 +156,10 @@ class Sidebar(QFrame):
         self.nav_layout = vbox(self.nav_host, spacing=2)
         self.scroll.setWidget(self.nav_host)
         lay.addWidget(self.scroll, 1)
+        from seo_audit_pro.widgets.common import signature
+        self.signature = signature(compact=True)
+        self.signature.setContentsMargins(8, 6, 0, 6)
+        lay.addWidget(self.signature)
         self.toggle = QToolButton()
         self.toggle.setIcon(icons.icon("panel_left", C["text_2"], 16))
         self.toggle.setToolTip("Collapse sidebar")
@@ -198,6 +202,7 @@ class Sidebar(QFrame):
         self.collapsed = not self.collapsed
         end = self.COLLAPSED if self.collapsed else self.EXPANDED
         self.brand_text.setVisible(not self.collapsed)
+        self.signature.setVisible(not self.collapsed)
         for sl in getattr(self, "section_labels", []):
             sl.setVisible(not self.collapsed)
         for item in self.items.values():

@@ -13,8 +13,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHeaderView, QSpinBox,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 from seo_audit_pro import APP_NAME, quick_audit
-from seo_audit_pro.widgets.common import PageHeader, button, hbox, label, logo_label, vbox
-from seo_audit_pro.widgets.feedback import confirm, text_area, toast
+from seo_audit_pro.widgets.common import PageHeader, button, hbox, label, logo_label, signature, vbox
+from seo_audit_pro.core import settings
+from seo_audit_pro.widgets.feedback import confirm, line_edit, text_area, toast
 
 AUDIT_COLS = ["Website", "Status", "Progress", "Score"]
 
@@ -65,6 +66,14 @@ class AuditPage(_Body):
         self.slots.setRange(1, 6)
         self.slots.setValue(2)
         opts.addWidget(self.slots)
+        opts.addSpacing(14)
+        opts.addWidget(label("Google API key (optional)", "FieldLabel"))
+        self.key = line_edit("For full Business Profile and speed data", settings.get("quick_google_key") or "")
+        self.key.setEchoMode(self.key.EchoMode.Password)
+        self.key.setFixedWidth(230)
+        self.key.setToolTip("A Google Cloud API key with the Places API (New) and PageSpeed Insights API turned on. "
+                            "Without it the Business Profile is read from the public Google Maps page (fewer details).")
+        opts.addWidget(self.key)
         opts.addStretch(1)
         self.status = label("Ready", "Meta")
         opts.addWidget(self.status)
@@ -106,6 +115,8 @@ class AuditPage(_Body):
         self.runner.cancel.clear()
         self.runner.slots = self.slots.value()
         self.runner.pages = self.pages.value()
+        self.runner.api_key = self.key.text().strip() or None
+        settings.put("quick_google_key", self.key.text().strip())
         for job in jobs:
             job_id = self._next_id
             self._next_id += 1
@@ -298,6 +309,9 @@ class QuickPortal(QWidget):
             sl.addWidget(item)
             self.nav[key] = item
         sl.addStretch(1)
+        mark = signature(compact=True)
+        mark.setContentsMargins(8, 0, 0, 8)
+        sl.addWidget(mark)
         back = button("Sign in to a workspace", "link")
         back.clicked.connect(self._leave)
         sl.addWidget(back)
