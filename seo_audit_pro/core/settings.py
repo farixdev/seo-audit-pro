@@ -94,9 +94,22 @@ def asset_dir():
 
 
 def downloads_dir():
+    """Documents\\SEO Audit Pro; when Windows blocks writing there (Controlled
+    folder access, an OneDrive folder that is offline, a read-only drive) the
+    app's own folder in AppData is used instead, so saving never fails."""
     path = os.path.join(os.path.expanduser("~"), "Documents", "SEO Audit Pro")
-    os.makedirs(path, exist_ok=True)
-    return path
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, f".write-test-{os.getpid()}")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(probe)
+        return path
+    except OSError:
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        fallback = os.path.join(base, "SEO Audit Pro", "Documents")
+        os.makedirs(fallback, exist_ok=True)
+        return fallback
 
 
 def log_dir():

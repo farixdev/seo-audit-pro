@@ -154,6 +154,7 @@ class AuditPage(_Body):
         self.table.setItem(r, 1, _item("Done" if ok else ("Stopped" if info == "Stopped" else "Failed"),
                                        "#067647" if ok else "#B42318"))
         self.table.item(r, 2).setText("Saved — double-click to open the report" if ok else info)
+        self.table.item(r, 2).setToolTip("" if ok else info)   # the full reason, also when the column is narrow
         self.table.item(r, 3).setText(info if ok else "")
         if ok:
             entry["report"] = report

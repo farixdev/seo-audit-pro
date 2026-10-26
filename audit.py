@@ -14,7 +14,10 @@ an error but never aborts the report.
 
 import re
 import collections
-from concurrent.futures import ThreadPoolExecutor, as_completed
+# From the submodules: in Python 3.15 "concurrent.futures.ThreadPoolExecutor" can still be an
+# unresolved lazy import when this module loads (it then fails with "lazy_import is not callable").
+from concurrent.futures._base import as_completed
+from concurrent.futures.thread import ThreadPoolExecutor
 from datetime import datetime
 from urllib.parse import urlparse
 

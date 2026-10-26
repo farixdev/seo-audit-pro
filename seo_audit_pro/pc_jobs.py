@@ -195,29 +195,9 @@ def _read_leads_rows(job, folder, channel):
     channel.send({"t": "rows", "total": number})
 
 
-_FETCH_PROBLEMS = [  # (words in the engine's "Could not fetch the site: ..." text, plain explanation)
-    (("RemoteDisconnected", "Connection aborted", "ConnectionResetError", "reset by peer"),
-     "The website closed the connection without answering. It may block automated visits; try again later."),
-    (("timed out", "Timeout"), "The website took too long to answer. Try again later."),
-    (("getaddrinfo", "NameResolutionError", "Failed to resolve", "Name or service not known"),
-     "The website address could not be found. Check the lead's website."),
-    (("SSLError", "CERTIFICATE_VERIFY_FAILED", "certificate"),
-     "The website's security certificate is not valid, so it could not be checked safely."),
-    (("Max retries exceeded", "ConnectionError", "refused"), "The website could not be reached. Try again later."),
-]
-
-
 def _message(exc):
-    if getattr(exc, "message", None):  # the lead file reader explains what is wrong with a file
-        return str(exc.message)[:300]
-    if isinstance(exc, ValueError):  # the engine raises ValueError with text meant for people
-        text = str(exc)
-        if text.startswith("Could not fetch the site"):
-            for words, plain in _FETCH_PROBLEMS:
-                if any(w in text for w in words):
-                    return plain
-        return text[:300]
-    return "The audit could not be completed because of an unexpected error."
+    from seo_audit_pro.errors import explain
+    return explain(exc)[0]
 
 
 def main(argv=None):

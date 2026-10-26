@@ -33,7 +33,7 @@ import os
 import re
 import threading
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures.thread import ThreadPoolExecutor  # not the lazy package attribute (Python 3.15)
 
 from backend import cache, config, db, events, realtime, security
 from backend.errors import ApiError

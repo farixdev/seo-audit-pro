@@ -8,6 +8,7 @@ summary the Reports list reads.
 """
 
 import json
+import logging
 import os
 import re
 import threading
@@ -21,13 +22,38 @@ STAGES = [("fetching homepage", 5), ("robots", 10), ("crawling the site", 12), (
           ("authority", 88), ("scoring", 92), ("competitor", 94), ("executive summary", 96)]
 CRAWL_RE = re.compile(r"crawled (\d+)/(\d+) pages", re.I)
 SUMMARY = "audit.json"
+log = logging.getLogger("seo_audit_pro.quick")
+
+
+def _writable(path):
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, f".write-test-{os.getpid()}")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
 
 
 def reports_dir():
+    """Documents\\SEO Audit Pro\\Quick audits, or — when Windows blocks writing
+    there (Controlled folder access, OneDrive, a full or read-only disk) — the
+    app's own folder, which is always writable."""
     from seo_audit_pro.core import settings
-    path = os.path.join(settings.downloads_dir(), "Quick audits")
-    os.makedirs(path, exist_ok=True)
-    return path
+    try:
+        path = os.path.join(settings.downloads_dir(), "Quick audits")
+    except OSError:
+        path = ""
+    if path and _writable(path):
+        return path
+    from seo_audit_pro.local_server import app_dir
+    fallback = os.path.join(app_dir(), "Quick audits")
+    if path:
+        log.warning("Cannot write to %s; saving quick audits to %s", path, fallback)
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
 
 
 def domain_of(url):
@@ -53,6 +79,23 @@ def saved_audits():
         info["folder"] = os.path.join(root, name)
         out.append(info)
     return sorted(out, key=lambda i: i.get("finished_at") or "", reverse=True)
+
+
+def _save_failure(job, message, code):
+    """Write the full error (with traceback) to the app log and to
+    work/failed/<time>-<site>.log. Returns that file's path."""
+    detail = traceback.format_exc()
+    log.error("Quick audit of %s failed (%s): %s\n%s", job.get("site"), code, message, detail)
+    try:
+        from seo_audit_pro.local_server import app_dir
+        folder = os.path.join(app_dir(), "work", "failed")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"{datetime.now():%Y%m%d-%H%M%S}-{safe(domain_of(job.get('site')))}.log")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(f"{job.get('site')}\n{code}: {message}\n\n{detail}")
+        return path
+    except OSError:
+        return ""
 
 
 class Signals(QObject):
@@ -99,10 +142,18 @@ class Runner:
     def _run(self, job_id, job):
         try:
             self._audit(job_id, job)
-        except Exception as e:  # noqa: BLE001
-            traceback.print_exc()
-            msg = str(e) if isinstance(e, ValueError) else "The audit could not be completed."
-            self.signals.finished.emit(job_id, False, "Stopped" if self.cancel.is_set() else msg[:300], "")
+        except BaseException as e:  # noqa: BLE001 - every failure gets a reason on screen and a log
+            folder = job.get("_folder")
+            if folder and not os.path.isfile(os.path.join(folder, SUMMARY)):
+                import shutil
+                shutil.rmtree(folder, ignore_errors=True)   # nothing finished: no empty folder in Reports
+            if self.cancel.is_set():
+                self.signals.finished.emit(job_id, False, "Stopped", "")
+            else:
+                from seo_audit_pro.errors import explain
+                msg, code = explain(e)
+                path = _save_failure(job, msg, code)
+                self.signals.finished.emit(job_id, False, msg + (f"  [details: {path}]" if path else ""), "")
         finally:
             with self.lock:
                 self.active -= 1
@@ -134,6 +185,7 @@ class Runner:
         domain = domain_of(url)
         folder = os.path.join(reports_dir(), f"{safe(domain)} - {datetime.now():%Y-%m-%d %H%M%S}")
         os.makedirs(folder, exist_ok=True)
+        job["_folder"] = folder
         extras = client_pdf.start(url, os.path.join(folder, "screenshots"))   # runs during the crawl
         result = engine.run_audit({"url": url, "max_pages": self.pages, "psi_strategy": "both", "psi_key": self.api_key,
                                    "cancel": self.cancel, "competitors": job.get("competitors") or [],

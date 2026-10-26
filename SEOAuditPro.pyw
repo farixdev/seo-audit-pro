@@ -12,6 +12,9 @@ if __name__ == "__main__":
     if "--job" in sys.argv[1:]:
         from seo_audit_pro.pc_jobs import main as job
         job(sys.argv[1:])
+    elif "--selftest" in sys.argv[1:]:   # run one Scrape & Audit audit in the hidden window, log the result
+        from seo_audit_pro.app import selftest
+        selftest(sys.argv[1:])
     elif "--serve" in sys.argv[1:]:
         from seo_audit_pro.local_server import serve
         serve(sys.argv[1:])

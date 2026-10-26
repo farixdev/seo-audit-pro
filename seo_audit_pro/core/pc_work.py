@@ -15,6 +15,7 @@ import gzip
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -205,7 +206,8 @@ class AuditRunner:
         try:
             proc = _start_job(folder, dict(info, kind="audit"))
         except OSError as e:
-            self._post_failed(info["audit_id"], f"The audit could not be started on this computer: {e}")
+            self._post_failed(info["audit_id"], "The audit could not be started on this computer: Windows refused to "
+                                                f"start it ({e}). Antivirus often does this: allow Rankly and try again.")
             return
         with self._lock:
             self._jobs[info["audit_id"]] = _Job(info, folder, proc)
@@ -233,13 +235,14 @@ class AuditRunner:
                 self._post_progress(job, now)
             return
         if job.outcome is None:
-            job.outcome = ("error", "The audit stopped unexpectedly on this computer.")
+            job.outcome = ("error", _crash_message(job))
         if job.messages:
             self._post_progress(job, now)
         if job.outcome[0] == "done":
             if now >= job.next_upload:
                 self._upload(job, now)
         else:
+            _keep_failure_log(job, job.outcome[1])
             self._post_failed(job.id, job.outcome[1])
             self._forget(job)
 
@@ -307,6 +310,9 @@ class AuditRunner:
                 job.next_upload = now + RETRY_EVERY  # keep the result and try again
                 return
             log.warning("Audit %s result refused: %s", job.id, e.message)
+            if e.status not in (404, 409):   # cancelled or taken over elsewhere: nothing to report
+                self._post_failed(job.id, "The audit finished on this computer but the team server refused its "
+                                          f"result: {e.message}")
         self._keep_here(job, packed)
         self._forget(job)
         self._claim_now = True
@@ -343,6 +349,51 @@ class AuditRunner:
 
 
 _RUNNER = AuditRunner()
+
+
+def _crash_message(job):
+    """Why a job ended without saying done or error: the last error in its log,
+    or what its exit code means."""
+    code = job.proc.poll()
+    tail = ""
+    try:
+        with open(os.path.join(job.folder, "worker.log"), encoding="utf-8", errors="replace") as fh:
+            tail = fh.read()[-4000:]
+    except OSError:
+        pass
+    last = [ln.strip() for ln in tail.splitlines() if ln.strip()]
+    err = next((ln for ln in reversed(last) if re.match(r"^[A-Za-z_.]+(Error|Exception)\b", ln)), "")
+    if code in (3221225477, -1073741819):
+        why = "it crashed (memory access violation)"
+    elif code in (3221225786, -1073741510, 1) and not err:
+        why = "it was closed by Windows or another program (often antivirus)"
+    elif code == 3221225495 or (err and "MemoryError" in err):
+        why = "this computer ran out of memory"
+    else:
+        why = f"it stopped (exit code {code})"
+    detail = f" Last error: {err[:200]}" if err else ""
+    return (f"The audit program on this computer ended before finishing: {why}.{detail} Try again; if it repeats, "
+            "allow Rankly in the antivirus.")
+
+
+def _keep_failure_log(job, message):
+    """Keep the log of a failed audit (the job folder itself is removed)."""
+    try:
+        keep = work_dir("failed")
+        logs = sorted(os.listdir(keep))
+        for old in logs[:-30]:   # the 30 newest are enough
+            os.remove(os.path.join(keep, old))
+        with open(os.path.join(job.folder, "worker.log"), encoding="utf-8", errors="replace") as fh:
+            body = fh.read()[-200000:]
+    except OSError:
+        body = ""
+    try:
+        with open(os.path.join(work_dir("failed"), f"{time.strftime('%Y%m%d-%H%M%S')}-{job.id}.log"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(f"{job.info.get('url')}\n{message}\n\n{body}")
+    except OSError:
+        pass
+    log.warning("Audit %s failed: %s", job.id, message)
 
 
 def runner():

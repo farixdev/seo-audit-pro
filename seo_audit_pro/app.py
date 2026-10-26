@@ -265,3 +265,45 @@ def _watch_local_server(app):
 
 if __name__ == "__main__":
     main()
+
+
+def selftest(argv):
+    """``Rankly.exe --selftest <website> <folder>``: run one Scrape & Audit audit
+    inside the real app window (hidden), the way a user does, and write
+    selftest.log in <folder>. Exit code 0 = the audit finished."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    args = [a for a in argv if not a.startswith("--")]
+    site, out = (args + ["https://example.com", os.getcwd()])[:2]
+    os.makedirs(out, exist_ok=True)
+    report = open(os.path.join(out, "selftest.log"), "w", encoding="utf-8", buffering=1)
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+    from seo_audit_pro.core import settings
+    from seo_audit_pro.theme import stylesheet
+    app = QApplication(sys.argv[:1])
+    app.setStyleSheet(stylesheet(settings.asset_dir()))
+    _setup_logging()
+    settings.downloads_dir = lambda: out
+    from seo_audit_pro.ui.main_window import MainWindow
+    window = MainWindow()
+    window.enter_quick()
+    page = window.quick.audit
+    page.pages.setValue(3)
+
+    def progress(_id, pct, step):
+        report.write(f"{pct}% {step}\n")
+
+    def finished(_id, ok, info, path):
+        report.write(f"FINISHED ok={ok} {info} {path}\n")
+        # Keep the window running a little (as a user would), then leave without tearing it down.
+        linger = int(os.environ.get("RANKLY_SELFTEST_LINGER", "0") or 0)
+        QTimer.singleShot(linger * 1000, lambda: (report.write("STILL RUNNING OK\n"), report.close(),
+                                                  os._exit(0 if ok else 1)))
+
+    window.quick.runner.signals.progress.connect(progress)
+    window.quick.runner.signals.finished.connect(finished)
+    page.queue([{"site": site, "competitors": [], "business": ""}])
+    QTimer.singleShot(600000, lambda: (report.write("TIMEOUT\n"), app.quit()))
+    app.exec()
+    report.close()
+    os._exit(1)

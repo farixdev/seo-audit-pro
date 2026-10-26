@@ -20,7 +20,10 @@ import re
 import socket
 import ssl
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+# From the submodules: in Python 3.15 "concurrent.futures.ThreadPoolExecutor" can still be an
+# unresolved lazy import when this module loads (it then fails with "lazy_import is not callable").
+from concurrent.futures._base import as_completed
+from concurrent.futures.thread import ThreadPoolExecutor
 from urllib.parse import urlparse, urljoin, urldefrag, urlsplit, urlunsplit
 
 import requests
