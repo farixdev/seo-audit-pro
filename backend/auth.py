@@ -88,15 +88,43 @@ def require(*roles, allow_pending_password=False):
 # Lead scope — the single source of truth for who may see which lead.
 # Audits, reports and outreach emails inherit access from their lead.
 # ---------------------------------------------------------------------------
+_MANAGER_IDS_SQL = "(SELECT mgr.id FROM users mgr WHERE mgr.role = 'MANAGER')"
+
+
 def lead_scope(user, alias="l"):
     """SQL fragment + params restricting leads to what ``user`` may access.
-    All agency members (Managers, Team Leads, and Agents) can view leads."""
-    return "1=1", ()
+
+    Managers see every lead. Leads a Manager created are visible to everyone.
+    Otherwise a Team Lead sees their team's leads and an Agent sees the leads
+    assigned to them."""
+    if user["role"] == MANAGER:
+        return "1=1", ()
+    if user["role"] == TEAM_LEAD:
+        return (f"({alias}.assigned_team_id = %s OR {alias}.created_by IN {_MANAGER_IDS_SQL})",
+                (user["team_id"],))
+    return (f"({alias}.assigned_agent_id = %s OR {alias}.created_by IN {_MANAGER_IDS_SQL})",
+            (user["id"],))
+
+
+def _created_by_manager(lead):
+    creator = lead.get("created_by")
+    if not creator:
+        return False
+    return bool(db.query_one("SELECT 1 AS ok FROM users WHERE id = %s AND role = %s", (creator, MANAGER)))
+
+
+def can_edit_lead(user, lead):
+    """Own-agent / own-team rule (Manager: all). Used for changes to a lead."""
+    if user["role"] == MANAGER:
+        return True
+    if user["role"] == TEAM_LEAD:
+        return bool(lead.get("assigned_team_id")) and lead["assigned_team_id"] == user["team_id"]
+    return bool(lead.get("assigned_agent_id")) and lead["assigned_agent_id"] == user["id"]
 
 
 def can_access_lead(user, lead):
-    """Allow agency members to access leads."""
-    return True
+    """Read access: mirrors ``lead_scope``."""
+    return can_edit_lead(user, lead) or _created_by_manager(lead)
 
 
 def load_lead(user, lead_id, tx=None):
@@ -109,7 +137,7 @@ def load_lead(user, lead_id, tx=None):
 
 def load_audit(user, audit_id):
     row = db.query_one(
-        """SELECT a.*, l.company, l.normalized_domain, l.assigned_team_id, l.assigned_agent_id
+        """SELECT a.*, l.company, l.normalized_domain, l.assigned_team_id, l.assigned_agent_id, l.created_by
            FROM audits a JOIN leads l ON l.id = a.lead_id WHERE a.id = %s""", (audit_id,))
     if not row or not can_access_lead(user, row):
         raise not_found("Audit")

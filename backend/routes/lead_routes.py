@@ -15,7 +15,8 @@ import zlib
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from backend import cache, db, events, lead_import, security
-from backend.auth import AGENT, MANAGER, TEAM_LEAD, can_access_lead, idempotent, lead_scope, load_lead, require
+from backend.auth import (AGENT, MANAGER, TEAM_LEAD, can_access_lead, can_edit_lead, idempotent, lead_scope, load_lead,
+                          require)
 from backend.errors import ApiError, conflict, forbidden, not_found
 from backend.util import (body, email_value, normalize_company, normalize_domain, normalize_phone, now_iso,
                           page_args, paged, rate_limit, text)
@@ -79,7 +80,10 @@ def lead_filter(me, args):
     if me["role"] in (MANAGER, TEAM_LEAD) and arg("agent_id"):
         where.append("l.assigned_agent_id = %s")
         params.append(arg("agent_id"))
-    if arg("assigned") == "unassigned":
+    if arg("assigned") == "mine":
+        where.append("l.assigned_agent_id = %s")
+        params.append(me["id"])
+    elif arg("assigned") == "unassigned":
         where.append("l.assigned_agent_id IS NULL")
     elif arg("assigned") == "assigned":
         where.append("l.assigned_agent_id IS NOT NULL")
@@ -348,6 +352,8 @@ def update_lead(lead_id):
     me = g.user
     data = body()
     lead = load_lead(me, lead_id)
+    if not can_edit_lead(me, lead):
+        raise forbidden("You can view this lead but only its assigned owner or a Manager can edit it.")
     fields = _lead_fields(data, partial=True)
     if "status" in data:
         status = text(data, "status", max_len=20)
@@ -540,17 +546,19 @@ def _set_archived(data, archived):
     ids, by_filter = _target_ids(me, data)
     now = now_iso()
     done = 0
+    guard = " AND assigned_team_id = %s" if me["role"] == TEAM_LEAD else ""
+    gp = [me["team_id"]] if me["role"] == TEAM_LEAD else []
     for chunk in _chunks(ids, 1000):
         ph = ",".join(["%s"] * len(chunk))
         with db.transaction() as tx:
             if archived:
                 tx.execute(f"UPDATE leads SET status = 'archived', version = version + 1, updated_at = %s "
-                           f"WHERE id IN ({ph}) AND status <> 'archived'", [now] + chunk)
+                           f"WHERE id IN ({ph}) AND status <> 'archived'{guard}", [now] + chunk + gp)
             else:
                 tx.execute(f"""UPDATE leads SET version = version + 1, updated_at = %s,
                                    status = CASE WHEN last_audit_id IS NOT NULL THEN 'audited'
                                                  WHEN assigned_agent_id IS NOT NULL THEN 'assigned' ELSE 'new' END
-                               WHERE id IN ({ph}) AND status = 'archived'""", [now] + chunk)
+                               WHERE id IN ({ph}) AND status = 'archived'{guard}""", [now] + chunk + gp)
             done += tx.rowcount
     events.audit(me, "LEADS_ARCHIVED" if archived else "LEADS_RESTORED", "lead", ids[0] if len(ids) == 1 else None,
                  {"count": done, "by_filter": by_filter, "filter": data.get("filter") if by_filter else None})
@@ -859,7 +867,7 @@ def batch_rejects(batch_id):
     me = g.user
     for r in rows:  # only reveal existing leads the caller can see
         if r["existing_lead_id"]:
-            lead = db.query_one("SELECT assigned_team_id, assigned_agent_id FROM leads WHERE id = %s", (r["existing_lead_id"],))
+            lead = db.query_one("SELECT assigned_team_id, assigned_agent_id, created_by FROM leads WHERE id = %s", (r["existing_lead_id"],))
             if not lead or not can_access_lead(me, lead):
                 r["existing_lead_id"] = None
     return jsonify(paged(rows, total, page, size))

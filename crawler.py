@@ -309,6 +309,9 @@ def parse_robots(text):
     agents_rules = {}      # agent -> {"disallow":[], "allow":[]}
     sitemaps = []
     current = []
+    # Consecutive User-agent lines share one group: a new group only starts
+    # when a User-agent line follows at least one rule line.
+    in_rules = True
     for raw in (text or "").splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line or ":" not in line:
@@ -316,9 +319,15 @@ def parse_robots(text):
         field, _, value = line.partition(":")
         field = field.strip().lower()
         value = value.strip()
+        if field in ("disallow", "allow"):
+            in_rules = True
         if field == "user-agent":
             ua = value.lower()
-            current = [ua]
+            if in_rules:
+                current = []
+                in_rules = False
+            if ua not in current:
+                current.append(ua)
             agents_rules.setdefault(ua, {"disallow": [], "allow": []})
         elif field == "disallow" and current:
             for ua in current:
@@ -376,6 +385,13 @@ def fetch_sitemaps(sitemap_urls, session=None, timeout=20, proxy=None,
         except requests.RequestException as e:
             errors.append("%s → %s" % (sm, e))
             continue
+        if body[:2] == b"\x1f\x8b":  # .xml.gz sitemap (not auto-decoded)
+            try:
+                import gzip
+                body = gzip.decompress(body)
+            except Exception as e:
+                errors.append("%s → gzip: %s" % (sm, e))
+                continue
         locs, is_index = _parse_sitemap_xml(body)
         if is_index:
             had_index = True
@@ -390,6 +406,8 @@ def fetch_sitemaps(sitemap_urls, session=None, timeout=20, proxy=None,
     return {
         "urls": out_urls,
         "count": len(out_urls),
+        # True when the max_urls cap was hit, so count is a lower bound.
+        "capped": len(out_urls) >= max_urls,
         "maps_fetched": len(seen_maps),
         "errors": errors,
         "had_index": had_index,

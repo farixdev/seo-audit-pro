@@ -144,6 +144,9 @@ class AppRunnerTests(Base):
             self.assertEqual(r.get_json()["report"]["ready"], 1)
             self.assertEqual(self.c.put(f"/api/reports/{docx['id']}/file", data=fake_docx,
                                         headers=self.H["agent_b1"]).status_code, 404)
+            # Once ready, only the person who ran the audit (or a Manager) may replace the file.
+            self.assertEqual(self.c.put(f"/api/reports/{docx['id']}/file", data=fake_docx,
+                                        headers=self.H["lead_a"]).status_code, 403)
             r = self.c.post(f"/api/outreach/emails/{eid}/send", headers=self.H["agent_a1"])
             self.assertEqual(r.status_code, 200, r.get_json())
             self.assertEqual(mailer._process_one(), "sent")

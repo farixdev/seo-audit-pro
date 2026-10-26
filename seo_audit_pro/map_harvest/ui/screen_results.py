@@ -40,6 +40,7 @@ class SortableItem(QTableWidgetItem):
 class ResultsScreen(QWidget):
     stop_signal = pyqtSignal()
     home_signal = pyqtSignal()
+    audit_signal = pyqtSignal(list)   # quick portal: [{"site": url, "business": name}]
 
     TOAST_MS = 6000
 
@@ -47,6 +48,7 @@ class ResultsScreen(QWidget):
         super().__init__()
         self.worker = None
         self.results = []
+        self.all_results = []   # every business of this run (results is emptied between searches)
         self.fields = []
         self._domains = []
         self._areas = []
@@ -60,6 +62,7 @@ class ResultsScreen(QWidget):
         self._stopped_by_user = False
         self._toast_timer = None
         self._search_text = ""
+        self.quick_mode = False   # Scrape & Audit portal: no Lead Bank, audit the websites instead
         self._build()
 
     def _build(self):
@@ -84,6 +87,13 @@ class ResultsScreen(QWidget):
         self.lead_bank_btn.setToolTip("Import scraped leads directly into the agency Lead Bank")
         self.lead_bank_btn.clicked.connect(self._on_add_to_lead_bank)
 
+        self.audit_btn = QPushButton("Audit websites")
+        self.audit_btn.setObjectName("lead_bank_btn")
+        self.audit_btn.setFixedHeight(30)
+        self.audit_btn.setToolTip("Send every business with a website to the audit queue")
+        self.audit_btn.clicked.connect(self._on_audit_clicked)
+        self.audit_btn.hide()
+
         self.pause_btn = QPushButton("Pause")
         self.pause_btn.setObjectName("outlined")
         self.pause_btn.setFixedHeight(30)
@@ -103,6 +113,7 @@ class ResultsScreen(QWidget):
         top_row.addWidget(name_lbl)
         top_row.addStretch()
         top_row.addWidget(self.lead_bank_btn)
+        top_row.addWidget(self.audit_btn)
         top_row.addWidget(self.export_btn)
         top_row.addWidget(self.pause_btn)
         top_row.addWidget(self.action_btn)
@@ -222,6 +233,7 @@ class ResultsScreen(QWidget):
         self._is_running = True
         self._is_paused = False
         self.lead_bank_btn.setEnabled(False)
+        self.audit_btn.setEnabled(False)
         self.pause_btn.setText("Pause")
         self.pause_btn.setEnabled(True)
         self.pause_btn.show()
@@ -240,19 +252,26 @@ class ResultsScreen(QWidget):
         self._restyle(self.action_btn)
         self.action_btn.setEnabled(True)
         self.table.setSortingEnabled(True)  # allow header-click sorting once done
+        if self.quick_mode:
+            self.lead_bank_btn.hide()
+            self.audit_btn.show()
+            self.audit_btn.setEnabled(bool(self.audit_targets()))
+            self.audit_btn.setText(f"Audit {len(self.audit_targets())} websites")
+            return
         try:
             from seo_audit_pro.core.session import session
-            can_import = session.is_manager() or session.is_team_lead()
+            can_import = bool(session.user)   # every signed-in role may import (the server checks)
             self.lead_bank_btn.setVisible(can_import)
-            self.lead_bank_btn.setEnabled(can_import and len(self.results) > 0)
+            self.lead_bank_btn.setEnabled(can_import and len(self.all_results) > 0)
         except Exception:
-            self.lead_bank_btn.setEnabled(len(self.results) > 0)
+            self.lead_bank_btn.setEnabled(len(self.all_results) > 0)
 
     # ── setup / worker ───────────────────────────────────────────────────────
     def setup(self, domains, areas, fields, headless=False, max_results=50,
               export_dir="", filters=None):
         self._stopped_by_user = False
         self.results = []
+        self.all_results = []
         self._domains = list(domains)
         self._areas = list(areas) if isinstance(areas, list) else [areas]
         self._headless = headless
@@ -375,6 +394,7 @@ class ResultsScreen(QWidget):
     # ── table ────────────────────────────────────────────────────────────────
     def add_table_row(self, data: dict):
         self.results.append(data)
+        self.all_results.append(data)
         row = self.table.rowCount()
         self.table.insertRow(row)
 
@@ -429,6 +449,22 @@ class ResultsScreen(QWidget):
             hide = bool(self._search_text) and not self._row_matches(row, self._search_text)
             self.table.setRowHidden(row, hide)
         self._update_row_count()
+
+    def audit_targets(self):
+        """Websites in the table (one per site), with the business name."""
+        out, seen = [], set()
+        for rec in self.all_results:
+            site = str(rec.get("website") or "").strip()
+            key = site.lower().split("://")[-1].removeprefix("www.").rstrip("/")
+            if site and key not in seen:
+                seen.add(key)
+                out.append({"site": site, "business": str(rec.get("name") or "").strip()})
+        return out
+
+    def _on_audit_clicked(self):
+        targets = self.audit_targets()
+        if targets:
+            self.audit_signal.emit(targets)
 
     def _record_for_row(self, row: int) -> dict:
         it = self.table.item(row, 0)
@@ -596,7 +632,7 @@ class ResultsScreen(QWidget):
         self._notify_task_export(d, a, len(self.results), False)
 
     def _on_add_to_lead_bank(self):
-        if not self.results:
+        if not self.all_results:
             self._show_toast("No scraped leads to add to the Lead Bank.")
             return
         d, a = self._current_task()
@@ -605,11 +641,15 @@ class ResultsScreen(QWidget):
             from seo_audit_pro.map_harvest.ui.lead_bank_dialog import AddToLeadBankDialog
 
             def open_dialog(options):
-                dlg = AddToLeadBankDialog(self, self.results, default_domain=d, default_area=a, options=options)
+                dlg = AddToLeadBankDialog(self, self.all_results, default_domain=d, default_area=a, options=options)
                 dlg.leads_imported.connect(self._on_leads_imported)
                 dlg.exec()
 
-            tasks.run(api.get, "/api/workspace/options", on_done=open_dialog, on_error=lambda _e: open_dialog({}))
+            from seo_audit_pro.core.session import session
+            if session.is_manager() or session.is_team_lead():   # agents add leads to themselves
+                tasks.run(api.get, "/api/assignees", on_done=open_dialog, on_error=lambda _e: open_dialog({}))
+            else:
+                open_dialog({})
         except Exception as e:
             self._show_toast(f"Could not open Lead Bank import: {e}")
 

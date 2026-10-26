@@ -113,8 +113,10 @@ class AuditQueueTests(unittest.TestCase):
         ids = []
         for _ in range(n):
             site = f"https://q-{uuid.uuid4().hex[:10]}.example/"
-            r = self.c.post("/api/leads", json={"company": f"Queue {uuid.uuid4().hex[:5]}", "website": site,
-                                                "agent_id": agent["id"]}, headers=self.H["manager"])
+            # Created by the agent: a manager's leads are visible to everyone, which would defeat the scoping checks.
+            who = next(n for n in ("a1", "a2", "b1") if getattr(self, n)["id"] == agent["id"])
+            r = self.c.post("/api/leads", json={"company": f"Queue {uuid.uuid4().hex[:5]}", "website": site},
+                            headers=self.H[who])
             self.assertEqual(r.status_code, 201, r.get_json())
             ids.append(r.get_json()["lead"])
         return ids
@@ -184,8 +186,9 @@ class AuditQueueTests(unittest.TestCase):
         self.assertEqual(r.get_json()["preview"]["will_queue"], 2)
         # Team Lead filter selection stays inside the team.
         pv = self.c.post("/api/audits/bulk/preview", json={"filter": {}}, headers=self.H["lead"]).get_json()
-        team_total = db.scalar("SELECT COUNT(*) FROM leads WHERE assigned_team_id = %s AND status <> 'archived'",
-                               (self.team,))
+        # (their team's leads plus leads a manager entered, which everyone may see)
+        team_total = db.scalar("SELECT COUNT(*) FROM leads WHERE (assigned_team_id = %s OR created_by IN "
+                               "(SELECT id FROM users WHERE role = 'MANAGER')) AND status <> 'archived'", (self.team,))
         self.assertEqual(pv["selected"], team_total)
         # Batches are private to their creator's scope.
         self.engine.release(mine[0]["website"])

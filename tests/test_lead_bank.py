@@ -119,8 +119,9 @@ class LeadBankTests(unittest.TestCase):
     def test_facets_summary_and_filters(self):
         niche = f"Roofers {uuid.uuid4().hex[:4]}"
         rows = [[f"Roof {i}", _site(), "", "", "", "", "", ""] for i in range(5)]
-        p = self.upload(_csv(rows), name=f"{niche} - Dallas TX.csv").get_json()
-        self.run_import(p, team_id=self.team_a)
+        # Imported by Team A's lead, so the leads stay scoped to Team A.
+        p = self.upload(_csv(rows), name=f"{niche} - Dallas TX.csv", who="lead_a").get_json()
+        self.run_import(p, who="lead_a", team_id=self.team_a)
         facets = self.c.get("/api/leads/facets", headers=self.H["manager"]).get_json()
         # Match on the key: the label is title-cased from the file name ("ab12" → "Ab12").
         node = next(n for n in facets["niches"] if n["key"] == niche.lower())
@@ -131,14 +132,18 @@ class LeadBankTests(unittest.TestCase):
         self.assertEqual(listed["total"], 5)
         summary = self.c.get("/api/leads/summary", query_string=flt, headers=self.H["manager"]).get_json()
         self.assertEqual((summary["total"], summary["unassigned"], summary["audited"]), (5, 5, 0))
-        # Team B's agent cannot see them anywhere.
+        # Team B's agent cannot see them anywhere. Compare keys: labels are
+        # title-cased, so a label check would almost always pass vacuously.
         other = self.c.get("/api/leads/facets", headers=self.H["agent_b1"]).get_json()
-        self.assertFalse(any(n["label"] == niche for n in other["niches"]))
+        self.assertFalse(any(n["key"] == niche.lower() for n in other["niches"]))
+        listed = self.c.get("/api/leads", query_string=flt, headers=self.H["agent_b1"]).get_json()
+        self.assertEqual(listed["total"], 0)
 
     def test_select_all_matching_split_and_scope(self):
         niche = f"Plumbers {uuid.uuid4().hex[:4]}"
         rows = [[f"Pipe {i}", _site(), "", "", "", "", "", ""] for i in range(10)]
-        self.run_import(self.upload(_csv(rows), name=f"{niche} in Leeds.csv").get_json(), team_id=self.team_a)
+        self.run_import(self.upload(_csv(rows), name=f"{niche} in Leeds.csv", who="lead_a").get_json(),
+                        who="lead_a", team_id=self.team_a)
         flt = {"niche": niche.lower()}
         r = self.c.post("/api/leads/bulk-assign", json={"filter": flt, "expected_count": 9, "mode": "split",
                                                         "team_id": self.team_a}, headers=self.H["manager"])
@@ -154,6 +159,7 @@ class LeadBankTests(unittest.TestCase):
         self.assertEqual(hist, 10)
         mine = self.c.get("/api/leads", query_string=flt, headers=self.H["agent_a1"]).get_json()
         self.assertEqual(mine["total"], 5)
+        self.assertEqual(self.c.get("/api/leads", query_string=flt, headers=self.H["agent_b1"]).get_json()["total"], 0)
         # Team Lead cannot pull another team's leads in through a filter.
         r = self.c.post("/api/leads/bulk-assign", json={"filter": flt, "expected_count": 10, "team_id": self.team_b,
                                                         "agent_id": self.agent_b1["id"]}, headers=self.H["lead_a"])

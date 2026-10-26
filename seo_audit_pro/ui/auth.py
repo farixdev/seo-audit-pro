@@ -169,6 +169,7 @@ class _OptionCard(QFrame):
 
 class AuthView(QWidget):
     signed_in = Signal()
+    quick_requested = Signal()   # "Scrape & Audit" without an account
 
     def __init__(self):
         super().__init__()
@@ -201,6 +202,17 @@ class AuthView(QWidget):
         self._build_change()
         self._build_server()
         self.refresh_server_label()
+
+    def _quick_link(self, panel):
+        link = button("Just scrape && audit — no account needed", "link")
+        link.setToolTip("Scrape Google Maps and audit websites on this computer, without signing in")
+        link.clicked.connect(self.quick_requested.emit)
+        row = hbox()
+        row.addStretch(1)
+        row.addWidget(link)
+        row.addStretch(1)
+        panel.form.addSpacing(4)
+        panel.form.addLayout(row)
 
     def refresh_server_label(self):
         if settings.mode() == settings.LOCAL:
@@ -238,6 +250,7 @@ class AuthView(QWidget):
         self.w_status = label("", "Meta", wrap=True)
         self.w_status.setVisible(False)
         p.form.addWidget(self.w_status)
+        self._quick_link(p)
         self.pages["welcome"] = p
         self.stack.addWidget(p)
 
@@ -299,6 +312,7 @@ class AuthView(QWidget):
         p.form.addWidget(label("Your data is saved on this computer, in:", "Meta"))
         where = label(local_server.data_dir(), "Meta", wrap=True, selectable=True)
         p.form.addWidget(where)
+        self._quick_link(p)
         self.pages["setup"] = p
         self.stack.addWidget(p)
 
@@ -361,6 +375,7 @@ class AuthView(QWidget):
         self.email.returnPressed.connect(lambda: self.password.setFocus())
         self.password.returnPressed.connect(self._sign_in)
         p.form.addWidget(self.signin_btn)
+        self._quick_link(p)
         self.pages["signin"] = p
         self.stack.addWidget(p)
 

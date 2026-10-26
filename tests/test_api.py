@@ -167,7 +167,8 @@ class RbacTests(Base):
         self.assertEqual(r.get_json()["user"]["team_id"], self.team_a)
 
     def test_lead_idor(self):
-        lead = self.create_lead("manager", agent_id=self.agent_a1["id"])
+        # A lead an agent added stays scoped to that agent (and their Team Lead).
+        lead = self.create_lead("agent_a1")
         lid = lead["id"]
         self.assertEqual(self.c.get(f"/api/leads/{lid}", headers=self.H["agent_a1"]).status_code, 200)
         self.assertEqual(self.c.get(f"/api/leads/{lid}", headers=self.H["lead_a"]).status_code, 200)
@@ -179,12 +180,46 @@ class RbacTests(Base):
         listed = self.c.get("/api/leads?page_size=200", headers=self.H["lead_b"]).get_json()["items"]
         self.assertNotIn(lid, [l["id"] for l in listed])
 
+    def test_manager_lead_visible_to_all_but_editable_only_by_owner(self):
+        lead = self.create_lead("manager", agent_id=self.agent_a1["id"])
+        lid = lead["id"]
+        for who in ("agent_a1", "agent_a2", "agent_b1", "lead_a", "lead_b"):
+            self.assertEqual(self.c.get(f"/api/leads/{lid}", headers=self.H[who]).status_code, 200, who)
+        for who in ("agent_a2", "agent_b1", "lead_b"):
+            self.assertEqual(self.c.patch(f"/api/leads/{lid}", json={"company": "Pwned", "version": lead["version"]},
+                                          headers=self.H[who]).status_code, 403, who)
+            self.assertEqual(self.c.post(f"/api/leads/{lid}/assign", json={"agent_id": self.agent_b1["id"]},
+                                         headers=self.H[who]).status_code, 403, who)
+        # Team lead B cannot archive team A's lead even though they can see it.
+        r = self.c.post("/api/leads/archive", json={"lead_ids": [lid]}, headers=self.H["lead_b"])
+        self.assertEqual(r.get_json()["updated"], 0)
+        r = self.c.patch(f"/api/leads/{lid}", json={"notes": "Called", "version": lead["version"]},
+                         headers=self.H["agent_a1"])
+        self.assertEqual(r.status_code, 200, r.get_json())
+        mine = self.c.get("/api/leads?assigned=mine&page_size=200", headers=self.H["agent_a2"]).get_json()["items"]
+        self.assertNotIn(lid, [l["id"] for l in mine])
+        mine = self.c.get("/api/leads?assigned=mine&page_size=200", headers=self.H["agent_a1"]).get_json()["items"]
+        self.assertIn(lid, [l["id"] for l in mine])
+
+    def test_direct_url_audit_does_not_restore_archived_lead(self):
+        lead = self.create_lead("agent_a1")
+        r = self.c.post("/api/leads/archive", json={"lead_ids": [lead["id"]]}, headers=self.H["lead_a"])
+        self.assertEqual(r.get_json()["updated"], 1)
+        r = self.c.post("/api/audits", json={"url": lead["website"]}, headers=self.H["agent_a1"])
+        self.assertEqual(r.status_code, 422, r.get_json())
+        self.assertEqual(db.scalar("SELECT status FROM leads WHERE id = %s", (lead["id"],)), "archived")
+
     def test_team_lead_cannot_assign_across_teams(self):
-        lead = self.create_lead("manager", team_id=self.team_a)
+        lead = self.create_lead("lead_a")
         r = self.c.post(f"/api/leads/{lead['id']}/assign", json={"agent_id": self.agent_b1["id"]}, headers=self.H["lead_a"])
         self.assertEqual(r.status_code, 403)
         r = self.c.post(f"/api/leads/{lead['id']}/assign", json={"agent_id": self.agent_a1["id"]}, headers=self.H["lead_b"])
         self.assertEqual(r.status_code, 404)
+        # A Manager's lead is visible to Team Lead B, but still not assignable by them.
+        mgr_lead = self.create_lead("manager", team_id=self.team_a)
+        r = self.c.post(f"/api/leads/{mgr_lead['id']}/assign", json={"agent_id": self.agent_a1["id"]},
+                        headers=self.H["lead_b"])
+        self.assertEqual(r.status_code, 403)
         r = self.c.post(f"/api/leads/{lead['id']}/assign", json={"agent_id": self.agent_a1["id"]}, headers=self.H["agent_a1"])
         self.assertEqual(r.status_code, 403)
         r = self.c.post(f"/api/leads/{lead['id']}/assign", json={"agent_id": self.agent_a1["id"]}, headers=self.H["lead_a"])
@@ -198,7 +233,7 @@ class RbacTests(Base):
         self.assertEqual(self.c.get(f"/api/teams/{self.team_b}", headers=self.H["lead_a"]).status_code, 404)
 
     def test_search_is_scoped(self):
-        lead = self.create_lead("manager", company="Zebra Unique Holdings", team_id=self.team_b)
+        lead = self.create_lead("lead_b", company="Zebra Unique Holdings")
         r = self.c.get("/api/search?q=zebra unique", headers=self.H["agent_a1"]).get_json()
         self.assertEqual(r["leads"], [])
         r = self.c.get("/api/search?q=zebra unique", headers=self.H["lead_b"]).get_json()
@@ -215,7 +250,7 @@ class LeadIntegrityTests(Base):
             self.assertEqual(r.status_code, 409, variant)
 
     def test_duplicate_does_not_leak_other_team_lead_id(self):
-        self.create_lead("manager", website="secret-team-b.com", team_id=self.team_b)
+        self.create_lead("lead_b", website="secret-team-b.com")
         r = self.c.post("/api/leads", json={"company": "X", "website": "secret-team-b.com"}, headers=self.H["agent_a1"])
         self.assertEqual(r.status_code, 409)
         self.assertNotIn("existing_lead_id", r.get_json())
@@ -370,8 +405,7 @@ class AuditWorkflowTests(Base):
         self.fail("audit did not finish")
 
     def test_full_audit_report_and_outreach_flow(self):
-        lead = self.create_lead("manager", agent_id=self.agent_a1["id"], email="owner@client-site.com",
-                                contact_name="Dana Smith")
+        lead = self.create_lead("agent_a1", email="owner@client-site.com", contact_name="Dana Smith")
         self.gate.clear()
         r = self.c.post("/api/audits", json={"lead_id": lead["id"]}, headers=self.H["agent_a1"])
         self.assertEqual(r.status_code, 202, r.get_json())
@@ -403,7 +437,7 @@ class AuditWorkflowTests(Base):
             self.assertEqual(self.c.get(f"/api/audits/{audit_id}/result", headers=self.H[who]).status_code, 404)
         res = self.c.get(f"/api/audits/{audit_id}/result", headers=self.H["lead_a"]).get_json()
         self.assertEqual(len(res["checks"]), len(real["checks"]))
-        self.assertTrue(res["authority"]["is_estimated"])
+        self.assertFalse(res["authority"]["is_estimated"])  # never guessed: measured (Moz) or not shown
 
         # Lead updated from the real result.
         lead_now = self.c.get(f"/api/leads/{lead['id']}", headers=self.H["agent_a1"]).get_json()["lead"]
@@ -498,7 +532,7 @@ class AuditWorkflowTests(Base):
             smtp.close()
 
     def test_cancel_running_audit(self):
-        lead = self.create_lead("manager", agent_id=self.agent_a2["id"])
+        lead = self.create_lead("agent_a2")
         self.gate.clear()
         audit_id = self.c.post("/api/audits", json={"lead_id": lead["id"]}, headers=self.H["agent_a2"]).get_json()["audit"]["id"]
         self._wait(audit_id, self.H["agent_a2"], ("running",))

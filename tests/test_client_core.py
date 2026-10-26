@@ -12,12 +12,14 @@ import unittest
 from tests import helpers as h  # sets up the isolated server environment first
 
 from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
 from werkzeug.serving import make_server
 
 from seo_audit_pro.core import api, settings
 from seo_audit_pro.core.session import session
 
-_APP = QCoreApplication.instance() or QCoreApplication([])
+# A QApplication (not QCoreApplication): other test modules build widgets in the same process.
+_APP = QCoreApplication.instance() or QApplication(["test", "-platform", "offscreen"])
 
 
 def _free_port():

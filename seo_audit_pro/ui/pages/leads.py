@@ -37,7 +37,7 @@ from seo_audit_pro.widgets.table import Column, DataTable
 STATUS_FILTER = [("Any status", ""), ("New", "new"), ("Assigned", "assigned"), ("Audited", "audited"),
                  ("Contacted", "contacted"), ("Qualified", "qualified"), ("Won", "won"), ("Lost", "lost"),
                  ("Archived", "archived")]
-QUICK_VIEWS = {"": {}, "unassigned": {"assigned": "unassigned"}, "not_audited": {"audited": "no"},
+QUICK_VIEWS = {"": {}, "everyone": {}, "unassigned": {"assigned": "unassigned"}, "not_audited": {"audited": "no"},
                "audited": {"audited": "yes"}, "contacted": {"outreach": "yes"}, "not_contacted": {"outreach": "no"}}
 REASONS = {"no_website": "No website", "invalid_website": "Website not usable",
            "duplicate_in_file": "Duplicate within file", "duplicate_existing": "Already in lead bank"}
@@ -336,6 +336,26 @@ class ImportsView(QWidget):
         load()
 
 
+def can_manage_lead(row):
+    """Display hint (the server enforces it): may this user assign, archive or
+    restore ``row``? Managers: any lead. Team Leads: only their team's leads.
+    Leads a Manager added are visible to everyone but not manageable by all."""
+    if session.is_manager():
+        return True
+    if session.is_team_lead():
+        team = (session.user or {}).get("team_id")
+        return bool(team) and (row or {}).get("assigned_team_id") == team
+    return False
+
+
+def can_edit_lead(row):
+    """Display hint: may this user edit ``row`` (manager, its team's lead, or
+    the agent it is assigned to)?"""
+    if session.is_agent():
+        return bool(session.user_id) and (row or {}).get("assigned_agent_id") == session.user_id
+    return can_manage_lead(row)
+
+
 # ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
@@ -347,6 +367,8 @@ class LeadsPage(Page):
         self.manage = not session.is_agent()
         self.title = "Lead Bank" if self.manage else "My Leads"
         self.params = {"page": 1, "page_size": 50, "sort": "created", "order": "desc"}
+        if not self.manage:
+            self.params["assigned"] = "mine"  # "My Leads": the leads assigned to this agent
         self.options = None
         self.all_matching = False
         self.total = 0
@@ -401,7 +423,8 @@ class LeadsPage(Page):
         views = [("All", ""), ("Unassigned", "unassigned"), ("Not audited", "not_audited"), ("Audited", "audited"),
                  ("Contacted", "contacted"), ("Not contacted", "not_contacted")]
         if not self.manage:
-            views = [v for v in views if v[1] != "unassigned"]
+            # "Mine" is the agent's own leads; "All visible" adds the leads a Manager shared with everyone.
+            views = [("Mine", ""), ("All visible", "everyone")] + [v for v in views[2:]]
         self.quick = Segmented(views)
         self.quick.changed.connect(self._quick)
         ml.addWidget(self.quick, 0, Qt.AlignmentFlag.AlignLeft)
@@ -561,7 +584,10 @@ class LeadsPage(Page):
     def _quick(self, value):
         for k in ("assigned", "audited", "outreach"):
             self.params[k] = ""
-        self._set(**QUICK_VIEWS.get(value, {}))
+        kv = dict(QUICK_VIEWS.get(value, {}))
+        if not self.manage and value != "everyone":
+            kv.setdefault("assigned", "mine")
+        self._set(**kv)
 
     def _navigate_tree(self, niche, area):
         self.area_filter.blockSignals(True)
@@ -584,6 +610,8 @@ class LeadsPage(Page):
     def reset_filters(self):
         for k in FILTER_KEYS:
             self.params[k] = ""
+        if not self.manage:
+            self.params["assigned"] = "mine"
         self.batch_label = ""
         self.search.blockSignals(True)
         self.search.clear()
@@ -676,10 +704,13 @@ class LeadsPage(Page):
             self.select_all_btn.setText(f"Select all {self.total:,} matching")
         self.select_all_btn.setVisible(bool(ids) and (self.all_matching or (len(ids) == page_rows and self.total > page_rows)))
         archived_view = self.params.get("status") == "archived"
+        # A Team Lead can see a Manager's leads from other teams but cannot assign or archive them.
+        manageable = self.manage and (self.all_matching or session.is_manager()
+                                      or all(can_manage_lead(r) for r in self.table.selected_rows()))
         self.bulk_buttons["audit"].setVisible(not archived_view)
-        self.bulk_buttons["archive"].setVisible(self.manage and not archived_view)
-        self.bulk_buttons["restore"].setVisible(self.manage and archived_view)
-        self.bulk_buttons["assign"].setVisible(self.manage and not archived_view)
+        self.bulk_buttons["archive"].setVisible(manageable and not archived_view)
+        self.bulk_buttons["restore"].setVisible(manageable and archived_view)
+        self.bulk_buttons["assign"].setVisible(manageable and not archived_view)
 
     def _toggle_all_matching(self):
         self.all_matching = not self.all_matching
@@ -798,7 +829,7 @@ class LeadsPage(Page):
             m.addAction(icons.icon("check", C["text_2"]),
                         "Update outreach…" if row.get("last_contact_at") else "Mark outreached…",
                         lambda: self._mark_outreach(row))
-        if self.manage:
+        if self.manage and can_manage_lead(row):
             m.addSeparator()
             if row["status"] != "archived":
                 m.addAction(icons.icon("user_check", C["text_2"]), "Assign…", lambda: self._assign(leads=[row]))

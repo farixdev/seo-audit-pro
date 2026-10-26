@@ -105,11 +105,12 @@ def page_facts(page):
 
     soup = BeautifulSoup(html, "html.parser")
 
-    title = ""
-    if soup.title and soup.title.string:
-        title = soup.title.string.strip()
-    elif soup.title:
-        title = soup.title.get_text(" ", strip=True)
+    # The document title lives in <head>; an SVG <title> elsewhere is not it.
+    title_tag = soup.head.find("title") if soup.head else None
+    if title_tag is None:
+        title_tag = next((t for t in soup.find_all("title")
+                          if t.find_parent("svg") is None), None)
+    title = title_tag.get_text(" ", strip=True) if title_tag else ""
     f["title"] = title
     f["title_len"] = len(title)
 
@@ -135,13 +136,21 @@ def page_facts(page):
     f["canonical_ok"] = (_norm_for_compare(canonical) == _norm_for_compare(final_url)
                          if canonical else None)
 
-    rob = soup.find("meta", attrs={"name": re.compile(r"^robots$", re.I)})
-    robots_meta = (rob.get("content") or "").lower() if rob else ""
-    x_robots = _hget(headers, "X-Robots-Tag").lower()
+    # meta robots + meta googlebot; "none" == "noindex, nofollow".
+    robots_meta = " ".join(
+        (m.get("content") or "").lower() for m in soup.find_all(
+            "meta", attrs={"name": re.compile(r"^(robots|googlebot)$", re.I)}))
+    x_robots = str(_hget(headers, "X-Robots-Tag")).lower()
+
+    def _has(directives, word):
+        return bool(re.search(r"(^|[\s,:])%s([\s,;]|$)" % word, directives))
+
     f["robots_meta"] = robots_meta
     f["x_robots"] = x_robots
-    f["noindex"] = ("noindex" in robots_meta) or ("noindex" in x_robots)
-    f["nofollow"] = ("nofollow" in robots_meta) or ("nofollow" in x_robots)
+    f["noindex"] = any(_has(d, "noindex") or _has(d, "none")
+                       for d in (robots_meta, x_robots))
+    f["nofollow"] = any(_has(d, "nofollow") or _has(d, "none")
+                        for d in (robots_meta, x_robots))
 
     f["lang"] = (soup.html.get("lang") if soup.html else "") or ""
     vp = soup.find("meta", attrs={"name": re.compile(r"^viewport$", re.I)})
@@ -182,7 +191,8 @@ def page_facts(page):
     # Images (extended)
     imgs = soup.find_all("img")
     f["images_total"] = len(imgs)
-    f["images_with_alt"] = sum(1 for i in imgs if (i.get("alt") or "").strip())
+    # alt="" marks a decorative image — that is correct, not missing.
+    f["images_with_alt"] = sum(1 for i in imgs if i.has_attr("alt"))
     f["img_lazy"] = sum(1 for i in imgs
                         if (i.get("loading") or "").lower() == "lazy")
     f["img_srcset"] = sum(1 for i in imgs if i.get("srcset"))
@@ -275,8 +285,27 @@ def page_facts(page):
     has_map = bool(soup.find("iframe", src=re.compile(r"google\.com/maps|maps\.google", re.I)) or
                    soup.find("a", href=re.compile(r"maps\.app\.goo\.gl|google\.com/maps", re.I)))
     phone_links = [a.get("href") for a in soup.find_all("a", href=True) if (a.get("href") or "").startswith("tel:")]
-    has_phone = bool(phone_links or re.search(r"\b(?:\+?1[-.]?)?\(?[2-9]\d{2}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", html))
-    has_address = bool(re.search(r"\b(suite|ste|avenue|ave|street|st|road|rd|blvd|boulevard|highway|hwy|way|drive|dr)\b", html, re.I))
+    # Phone / address / review text is matched on VISIBLE text only (scripts,
+    # styles and markup can contain digit runs and words like "st" or "rating").
+    vis_soup = BeautifulSoup(html, "html.parser")
+    for t in vis_soup(["script", "style", "noscript", "template", "svg"]):
+        t.decompose()
+    visible = vis_soup.get_text(" ", strip=True)
+    has_phone = bool(phone_links or re.search(r"\b(?:\+?1[-.]?)?\(?[2-9]\d{2}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", visible))
+    addr_schema = bool(re.search(
+        r'"@type"\s*:\s*(?:\[[^\]]*)?"(?:PostalAddress|LocalBusiness)"'
+        r'|schema\.org/(?:PostalAddress|LocalBusiness)|"streetAddress"\s*:',
+        html, re.I))
+    street_re = (r"\b\d{1,6}[A-Za-z]?\s+(?:[A-Z0-9][\w.'-]*\s+){1,4}"
+                 r"(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|"
+                 r"Lane|Ln|Way|Court|Ct|Highway|Hwy|Place|Pl|Parkway|Pkwy|"
+                 r"Crescent|Cres|Terrace|Circle|Cir|Trail|Square|Sq)\b")
+    has_address = addr_schema or bool(re.search(street_re, visible))
+    rating_schema = bool(re.search(
+        r'"@type"\s*:\s*(?:\[[^\]]*)?"AggregateRating"'
+        r'|schema\.org/AggregateRating|"aggregateRating"\s*:', html, re.I))
+    has_reviews = rating_schema or bool(re.search(r"\breviews?\b", visible,
+                                                  re.I))
     citations = []
     for c_domain in ["yelp.com", "yellowpages", "bing.com/maps", "facebook.com", "tripadvisor", "bbb.org"]:
         if c_domain in html.lower():
@@ -287,7 +316,7 @@ def page_facts(page):
         "phone_count": len(phone_links),
         "has_address": has_address,
         "citations": citations,
-        "has_reviews": bool(re.search(r"(review|rating|testimonial|trustpilot|google-review)", html, re.I)),
+        "has_reviews": has_reviews,
     }
 
     # External / Outbound link classification (Off-page signals)
@@ -393,10 +422,16 @@ def _technical_checks(ctx, home, all_facts):
                         "pass", "critical", "low", "No blanket crawl block.",
                         scope="site"))
 
+    sm_errors = sitemap.get("errors") or []
+    # Errors that are not plain "not found" responses mean we couldn't read it.
+    sm_unreadable = bool(sm_errors) and not all(
+        re.search(r"HTTP (404|410)$", e) for e in sm_errors)
     if sitemap.get("count"):
+        shown = ("%d+" % sitemap["count"]) if sitemap.get("capped") else \
+            "%d" % sitemap["count"]
         out.append(_chk("sitemap_present", "technical", "XML sitemap", "pass",
-                        "high", "low", "Sitemap found with %d URL(s)%s." % (
-                            sitemap["count"], " (sitemap index)" if
+                        "high", "low", "Sitemap found with %s URL(s)%s." % (
+                            shown, " (sitemap index)" if
                             sitemap.get("had_index") else ""), scope="site"))
         out.append(_chk("sitemap_in_robots", "technical", "Sitemap in robots.txt",
                         "pass" if robots.get("sitemaps") else "warn", "low",
@@ -405,6 +440,12 @@ def _technical_checks(ctx, home, all_facts):
                         "Sitemap exists but isn't referenced in robots.txt.",
                         "" if robots.get("sitemaps") else
                         "Add a 'Sitemap:' line to robots.txt.", scope="site"))
+    elif sm_unreadable:
+        out.append(_chk("sitemap_present", "technical", "XML sitemap", "na",
+                        "high", "med",
+                        "Sitemap could not be fetched or read (%s), so it was "
+                        "not checked." % sm_errors[0][:120],
+                        scope="site"))
     else:
         out.append(_chk("sitemap_present", "technical", "XML sitemap", "fail",
                         "high", "med",
@@ -654,13 +695,14 @@ def _onpage_checks(ctx, home, all_facts):
                         why="The title is the strongest on-page ranking and "
                         "click-through signal.", scope="home"))
     else:
-        if 50 <= tl <= 60:
-            st, fix, det = "pass", "", "Title is %d chars — ideal." % tl
-        elif 30 <= tl <= 65:
-            st, fix, det = "warn", "Aim for 50–60 characters.", \
-                "Title is %d chars." % tl
+        if 30 <= tl <= 60:
+            st, fix, det = "pass", "", "Title is %d chars — within the 30–60 range." % tl
+        elif 15 <= tl <= 75:
+            st, fix, det = "warn", "Aim for 30–60 characters.", \
+                "Title is %d chars (%s)." % (tl, "short" if tl < 30 else
+                                             "may be truncated in results")
         else:
-            st, fix = "fail", "Rewrite to 50–60 characters."
+            st, fix = "fail", "Rewrite to 30–60 characters."
             det = "Title is %d chars (%s)." % (tl, "too short" if tl < 30
                                                else "too long")
         out.append(_chk("title_length", "onpage", "Title length", st, "high",
@@ -670,16 +712,14 @@ def _onpage_checks(ctx, home, all_facts):
     if not home["meta_desc"]:
         out.append(_chk("metadesc_present", "onpage", "Meta description", "fail",
                         "high", "low", "Homepage has no meta description.",
-                        "Add a 120–160 char meta description.", scope="home"))
+                        "Add a 70–160 char meta description.", scope="home"))
     else:
-        if 120 <= ml <= 160:
-            st, fix, det = "pass", "", "Meta description is %d chars — ideal." % ml
-        elif 70 <= ml <= 165:
-            st, fix, det = "warn", "Aim for 120–160 characters.", \
-                "Meta description is %d chars." % ml
+        if 70 <= ml <= 160:
+            st, fix, det = "pass", "", "Meta description is %d chars — within the 70–160 range." % ml
         else:
-            st, fix = "warn", "Rewrite to 120–160 characters."
-            det = "Meta description is %d chars." % ml
+            st, fix = "warn", "Rewrite to 70–160 characters."
+            det = "Meta description is %d chars (%s)." % (
+                ml, "short" if ml < 70 else "may be truncated in results")
         out.append(_chk("metadesc_length", "onpage", "Meta description length",
                         st, "medium", "low", det, fix, scope="home"))
 
@@ -787,7 +827,7 @@ def _onpage_checks(ctx, home, all_facts):
         out.append(_chk("onpage_orphan_pages", "onpage", "Internal Linking & Orphan Risk",
                         "pass" if not orphan_pages else "warn", "medium", "med",
                         "All crawled pages have healthy internal link connectivity." if not orphan_pages else
-                        f"{len(orphan_pages)} crawled page(s) have 1 or fewer incoming internal links (orphan risk).",
+                        f"{len(orphan_pages)} crawled page(s) have no incoming internal links from the other crawled pages (orphan risk).",
                         "" if not orphan_pages else "Add contextual internal links to these pages from higher-authority parent pages.",
                         where=orphan_pages[:10], scope="site"))
 
@@ -973,12 +1013,16 @@ def _content_checks(ctx, home, all_facts):
                         scope="home"))
         in_title = kw.lower() in (home.get("title") or "").lower()
         in_h1 = any(kw.lower() in h.lower() for h in home.get("h1_texts", []))
+        # The "primary keyword" is guessed from the most frequent phrase, so
+        # this is informational only — never scored as a pass or a problem.
         out.append(_chk("title_keyword_align", "content",
                         "Primary keyword in title/H1",
-                        "pass" if (in_title or in_h1) else "warn", "low", "low",
-                        "Primary topic \"%s\" appears in the title/H1." % kw if
+                        "info", "low", "low",
+                        "Most frequent phrase \"%s\" (auto-detected, may not be "
+                        "your target keyword) appears in the title/H1." % kw if
                         (in_title or in_h1) else
-                        "Primary topic \"%s\" isn't in the title or H1." % kw,
+                        "Most frequent phrase \"%s\" (auto-detected, may not be "
+                        "your target keyword) isn't in the title or H1." % kw,
                         "" if (in_title or in_h1) else
                         "Work the primary topic into the title and H1.",
                         scope="home"))
@@ -1190,9 +1234,12 @@ def _security_checks(ctx, home):
         return security_audit.generate_security_checks_catalog(sec_data, ctx, home)
 
     final_url = home.get("final_url") or home.get("url") or ""
-    all_facts = ctx.get("all_facts") or [home]
+    # Raw page objects (with html) when the caller has them; facts lack html,
+    # in which case the HTML-based checks report 'na'.
+    raw_pages = ctx.get("pages") or ctx.get("all_facts") or [home]
+    home_raw = ctx.get("home_page") or home
     try:
-        sec_data = security_audit.run_full_security_audit(final_url, home, all_facts, timeout=4)
+        sec_data = security_audit.run_full_security_audit(final_url, home_raw, raw_pages, timeout=4)
         return security_audit.generate_security_checks_catalog(sec_data, ctx, home)
     except Exception:
         pass
@@ -1315,11 +1362,13 @@ def _local_checks(ctx, home, all_facts):
 
     # 1. Google Business Profile & Maps Presence
     has_map = ls.get("has_map", False)
-    out.append(_chk("local_gbp_maps", "local", "Google Maps & GBP Visibility",
+    # This only sees the website: it can't tell whether a Business Profile
+    # exists or is verified, so the wording claims nothing about GBP status.
+    out.append(_chk("local_gbp_maps", "local", "Google Maps Link / Embed on Site",
                     "pass" if has_map else "warn", "medium", "low",
-                    "Google Maps integration / location link detected." if has_map
-                    else "No embedded Google Map or direct Google Business link found on site.",
-                    "" if has_map else "Embed a Google Maps iframe or link directly to your verified Google Business Profile.",
+                    "A Google Maps embed or Maps link was found on the homepage." if has_map
+                    else "No embedded Google Map or Google Maps link found on the homepage.",
+                    "" if has_map else "Embed a Google Map or link to your Google Maps listing from the homepage or contact page.",
                     why="Google Maps presence strongly signals localized trust and supports Local Pack rankings.",
                     scope="home"))
 
@@ -1380,27 +1429,41 @@ def _local_checks(ctx, home, all_facts):
 def _offpage_checks(ctx, home, all_facts):
     out = []
     auth = ctx.get("authority") or {}
-    da = auth.get("domain_authority", 35)
-    pa = auth.get("page_authority", 32)
-    src_label = auth.get("source", "Authority Model")
+    # Authority is only ever a real third-party measurement (Moz) — never a
+    # made-up default. When it wasn't measured the check is 'na' (unscored).
+    da = auth.get("domain_authority")
+    pa = auth.get("page_authority")
+    src_label = auth.get("source") or "not measured"
 
     # 1. Domain Authority (DA) Score
-    da_status = "pass" if da >= 40 else ("warn" if da >= 20 else "fail")
-    out.append(_chk("offpage_domain_authority", "offpage", "Domain Authority (DA)",
-                    da_status, "high", "high",
-                    f"Domain Authority: {da}/100 ({src_label})." if da_status == "pass" else
-                    f"Domain Authority: {da}/100 — opportunity to build high-quality industry backlinks.",
-                    "" if da_status == "pass" else "Implement a digital PR and authoritative backlink building campaign to elevate domain equity.",
-                    why="Higher domain authority correlates strongly with competitive keyword ranking capability.",
-                    scope="site"))
+    if da is None:
+        out.append(_chk("offpage_domain_authority", "offpage", "Domain Authority (DA)",
+                        "na", "high", "high",
+                        "Domain Authority was not measured (needs a backlink data "
+                        "provider such as a Moz API key).", scope="site"))
+    else:
+        da_status = "pass" if da >= 40 else ("warn" if da >= 20 else "fail")
+        out.append(_chk("offpage_domain_authority", "offpage", "Domain Authority (DA)",
+                        da_status, "high", "high",
+                        f"Domain Authority: {da}/100 ({src_label})." if da_status == "pass" else
+                        f"Domain Authority: {da}/100 ({src_label}) — opportunity to build high-quality industry backlinks.",
+                        "" if da_status == "pass" else "Implement a digital PR and authoritative backlink building campaign to elevate domain equity.",
+                        why="Higher domain authority correlates strongly with competitive keyword ranking capability.",
+                        scope="site"))
 
     # 2. Page Authority (PA) Score
-    pa_status = "pass" if pa >= 35 else ("warn" if pa >= 18 else "fail")
-    out.append(_chk("offpage_page_authority", "offpage", "Page Authority (PA)",
-                    pa_status, "medium", "high",
-                    f"Homepage Authority: {pa}/100 ({src_label}).",
-                    "" if pa_status == "pass" else "Acquire targeted external backlinks pointing directly to key landing pages.",
-                    scope="home"))
+    if pa is None:
+        out.append(_chk("offpage_page_authority", "offpage", "Page Authority (PA)",
+                        "na", "medium", "high",
+                        "Page Authority was not measured (needs a backlink data "
+                        "provider such as a Moz API key).", scope="home"))
+    else:
+        pa_status = "pass" if pa >= 35 else ("warn" if pa >= 18 else "fail")
+        out.append(_chk("offpage_page_authority", "offpage", "Page Authority (PA)",
+                        pa_status, "medium", "high",
+                        f"Homepage Authority: {pa}/100 ({src_label}).",
+                        "" if pa_status == "pass" else "Acquire targeted external backlinks pointing directly to key landing pages.",
+                        scope="home"))
 
     # 3. Outbound Link Ratio & Hygiene
     ext_dofollow = home.get("external_dofollow_count", 0)
@@ -1429,7 +1492,7 @@ def _offpage_checks(ctx, home, all_facts):
                         scope="site"))
     else:
         out.append(_chk("offpage_toxic_risk", "offpage", "Outbound Link Safety",
-                        "pass", "low", "low",
+                        "info", "low", "low",
                         "No suspicious or spammy external link destinations detected.",
                         "", scope="site"))
     return out

@@ -643,18 +643,19 @@ class AuditDetailPage(Page):
         top.addWidget(score_card, 3)
 
         est = Card(padding=20, spacing=8)
-        est.body.addWidget(label("Estimated reach", "SectionTitle"))
-        est.body.addWidget(label("Algorithmic estimates from crawl signals — not third-party ranking data.", "Meta", wrap=True))
+        est.body.addWidget(label("Authority & reach", "SectionTitle"))
+        est.body.addWidget(label("Measured only with a backlink data provider (Moz). Without one these are not "
+                                 "measured — the audit never guesses them.", "Meta", wrap=True))
         auth = r.get("authority") or {}
         traffic = r.get("traffic") or {}
         grid = QGridLayout()
         grid.setVerticalSpacing(6)
-        rows = [("Domain authority (estimated)", auth.get("domain_authority")),
-                ("Page authority (estimated)", auth.get("page_authority")),
-                ("Monthly visits (estimated)", fmt.number(traffic.get("monthly_visits")) if traffic else None)]
+        rows = [("Domain authority (Moz)", auth.get("domain_authority")),
+                ("Page authority (Moz)", auth.get("page_authority")),
+                ("Monthly visits", fmt.number(traffic.get("monthly_visits")) if traffic.get("monthly_visits") else None)]
         for i, (k, v) in enumerate(rows):
             grid.addWidget(label(k, "Muted"), i, 0)
-            val = label("Not available" if v in (None, "") else str(v))
+            val = label("Not measured" if v in (None, "") else str(v))
             val.setStyleSheet("font-weight: 600;" if v not in (None, "") else f"color: {C['text_3']};")
             grid.addWidget(val, i, 1, Qt.AlignmentFlag.AlignRight)
         est.body.addLayout(grid)

@@ -55,10 +55,16 @@ class MapHarvestIntegrationTests(unittest.TestCase):
         results._set_idle_mode()
         self.assertFalse(results.lead_bank_btn.isHidden())
 
-        # Agent
+        # Agent (adds leads to themselves; the server checks the rest)
         session.user = {"id": "usr_ag", "role": "AGENT", "team_id": "team_1", "is_active": 1}
         results._set_idle_mode()
+        self.assertFalse(results.lead_bank_btn.isHidden())
+
+        # Scrape & Audit portal: no Lead Bank, an audit button instead
+        results.quick_mode = True
+        results._set_idle_mode()
         self.assertTrue(results.lead_bank_btn.isHidden())
+        self.assertFalse(results.audit_btn.isHidden())
 
     def test_lead_bank_dialog_instantiation(self):
         sample = [

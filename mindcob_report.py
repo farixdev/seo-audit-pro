@@ -465,15 +465,27 @@ def _gbp_block(place, domain, gbp_all):
     if not place:
         return ""
     name = (place.get("displayName") or {}).get("text", "") or place.get("name") or ""
+    # Only real passes count as verified; 'na' items (data that could not be
+    # read) render as a neutral "Not checked", never as a pass or a problem.
     good = sum(1 for c in gbp_all if c["status"] == "pass")
+
+    def _dot(st):
+        return "#101828" if st == "pass" else ("#D0D5DD" if st == "na" else "#FECDCA")
+
+    def _txt(c):
+        if c["status"] == "pass":
+            return c["detail"]
+        if c["status"] == "na":
+            return "Not checked"
+        return c["fix"]
     items = "".join(
-        f"<div class='ck'><span class='dot' style='background:{'#101828' if c['status'] == 'pass' else '#FECDCA'}'></span>"
-        f"<div><b>{E(c['label'])}</b><div>{E(c['detail'] if c['status'] == 'pass' else c['fix'])}</div></div></div>"
+        f"<div class='ck'><span class='dot' style='background:{_dot(c['status'])}'></span>"
+        f"<div><b>{E(c['label'])}</b><div>{E(_txt(c))}</div></div></div>"
         for c in gbp_all)
     link = place.get("googleMapsUri") or place.get("maps_link")
     rating = place.get("rating")
-    reviews = place.get("userRatingCount") or place.get("review_count") or 0
-    rating_str = f" · ★ {rating:.1f} ({reviews} reviews)" if rating else ""
+    reviews = place.get("userRatingCount") or place.get("review_count")
+    rating_str = (f" · ★ {rating:.1f}" + (f" ({reviews} reviews)" if reviews is not None else "")) if rating else ""
 
     return (f"<div class='box'><div style='display:flex;justify-content:space-between;align-items:center'><div>"
             f"<p class='eyebrow'>Google Business Profile</p><h3>Your Google Maps listing: {good} of {len(gbp_all)} essentials verified</h3>"
@@ -494,6 +506,19 @@ def _security_block(result, checks):
     ssl = result.get("ssl_cert") or {}
     https = (result.get("final_url") or "").startswith("https")
     redir = (result.get("http_redirect") or {}).get("redirects_to_https")
+    rc = sec.get("sec_http_redirect")
+    if rc is not None:
+        # The check knows the difference between "not tested" and "port 80 closed".
+        if rc.get("status") in ("na", "info"):
+            redir_cell = '<span class="pill p-na">Not checked</span>'
+        elif rc.get("status") == "pass" and "port closed" in (rc.get("detail") or ""):
+            redir_cell = _pill(True, "HTTP closed", "No")
+        else:
+            redir_cell = _pill(rc.get("status") == "pass", "Yes", "No")
+    elif result.get("http_redirect") is None:
+        redir_cell = '<span class="pill p-na">Not checked</span>'
+    else:
+        redir_cell = _pill(bool(redir), "Yes", "No")
     headers = [("HSTS", "hsts"), ("Content-Security-Policy", "csp"), ("Clickjacking protection", "x_frame_options"),
                ("X-Content-Type-Options", "x_content_type"), ("Referrer-Policy", "referrer_policy"),
                ("Permissions-Policy", "permissions_policy")]
@@ -501,7 +526,7 @@ def _security_block(result, checks):
     right = (f"<tr><td>HTTPS encryption</td><td style='text-align:right'>{_pill(https, 'On', 'Off')}</td></tr>"
              f"<tr><td>Certificate valid until</td><td style='text-align:right'><b>{E(str(ssl.get('not_after') or '—'))}</b>"
              + (f" <span class='note'>({ssl.get('days_left')} days)</span>" if ssl.get("days_left") is not None else "") + "</td></tr>"
-             f"<tr><td>HTTP → HTTPS redirect</td><td style='text-align:right'>{_pill(bool(redir), 'Yes', 'No')}</td></tr>"
+             f"<tr><td>HTTP → HTTPS redirect</td><td style='text-align:right'>{redir_cell}</td></tr>"
              f"<tr><td>Mixed content</td><td style='text-align:right'>{state('mixed_content')}</td></tr>"
              f"<tr><td>Old protocols (TLS 1.0/1.1) off</td><td style='text-align:right'>{state('tls_deprecated_protocols')}</td></tr>"
              f"<tr><td>Email spoofing guard (SPF)</td><td style='text-align:right'>{state('dns_spf')}</td></tr>"

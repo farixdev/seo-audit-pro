@@ -148,7 +148,8 @@ def _analyze_competitor(url, proxy=None, psi_key=None):
                           "primary_keyword": _top_bigram(mt)}
     except Exception:
         pass
-    ctx = {"home": home, "all_facts": [home], "robots": robots, "sitemap": sm,
+    ctx = {"home": home, "all_facts": [home], "pages": [page],
+           "home_page": page, "robots": robots, "sitemap": sm,
            "http_redirect": None, "broken_links": None, "psi": psi,
            "structured": structured, "content": content,
            "enabled": {k for k, _l, _w in seo_checks.CATEGORIES}}
@@ -469,12 +470,32 @@ def run_audit(params, progress=None):
     result["ssl_cert"] = ssl_cert
 
     # In-degree / orphan pages analysis from crawl graph
-    in_degrees = {f["final_url"]: 0 for f in all_facts}
+    # URLs are compared normalized (no #fragment / trailing slash, lower-case
+    # host, www-insensitive); a page is orphaned only when NO other crawled
+    # page links to it.
+    def _graph_key(u):
+        p = urlparse(u or "")
+        host = (p.hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        path = (p.path or "/").rstrip("/") or "/"
+        return host + path + ("?" + p.query if p.query else "")
+
+    home_key = _graph_key(result["final_url"])
+    sources = {}
+    url_for_key = {}
     for f in all_facts:
+        k = _graph_key(f.get("final_url") or f.get("url"))
+        sources.setdefault(k, set())
+        url_for_key.setdefault(k, f.get("final_url") or f.get("url"))
+    for f in all_facts:
+        src = _graph_key(f.get("final_url") or f.get("url"))
         for il in f.get("internal_links", []):
-            if il in in_degrees and il != f["final_url"]:
-                in_degrees[il] += 1
-    orphan_pages = [u for u, cnt in in_degrees.items() if cnt <= 1 and u != result["final_url"]]
+            tk = _graph_key(il)
+            if tk in sources and tk != src:
+                sources[tk].add(src)
+    orphan_pages = [url_for_key[k] for k, srcs in sources.items()
+                    if not srcs and k != home_key]
     result["orphan_pages"] = orphan_pages
 
     # 8c) Passive Website Security Audit ---------------------------------
@@ -483,8 +504,11 @@ def run_audit(params, progress=None):
     if "security" in enabled:
         log("Running passive security audit (headers, SSL, cookies, DNS, files)…")
         try:
+            # Raw crawled pages (they carry the HTML the mixed-content,
+            # verbose-error and source-map scans need; facts don't).
+            raw_pages = [pages[u] for u in order if u in pages]
             sec_audit = security_audit.run_full_security_audit(
-                result["final_url"], home_page, all_facts, proxy=proxy, timeout=6
+                result["final_url"], home_page, raw_pages, proxy=proxy, timeout=6
             )
         except Exception as e:
             errors.append("security audit: %s" % e)
@@ -494,23 +518,22 @@ def run_audit(params, progress=None):
         ssl_cert = sec_audit["ssl"]
         result["ssl_cert"] = ssl_cert
 
-    log("Evaluating Domain Authority (DA) & Traffic…")
-    psi_score = ((psi.get("mobile") or {}).get("scores") or {}).get("performance")
-    authority = authority_traffic.calculate_authority_scores(
-        result["final_url"], crawl_facts=all_facts, home_facts=home_facts,
-        psi_score=psi_score, ssl_info=ssl_cert
-    )
+    # Authority & traffic: only real third-party measurements (Moz, when a
+    # key is configured). Nothing is estimated or invented — unmeasured
+    # values are None with source "not_measured".
+    log("Checking Domain Authority (DA)…")
+    try:
+        authority = authority_traffic.calculate_authority_scores(
+            result["final_url"])
+    except Exception as e:
+        errors.append("authority: %s" % e)
+        authority = authority_traffic.not_measured_authority()
     result["authority"] = authority
 
-    da_val = authority.get("domain_authority", 35)
     for f in all_facts:
-        is_home = (f.get("final_url") == result["final_url"]) or (f.get("url") == result["final_url"])
-        f["page_authority"] = authority_traffic.calculate_page_authority(f, da_score=da_val, is_home=is_home)
+        f["page_authority"] = authority_traffic.calculate_page_authority(f)
 
-    traffic = authority_traffic.estimate_monthly_traffic(
-        result["domain"], da_score=da_val,
-        pages_crawled=len(all_facts)
-    )
+    traffic = authority_traffic.estimate_monthly_traffic(result["domain"])
     result["traffic"] = traffic
 
     # 8d) Google Maps & GBP Lookup -------------------------------------

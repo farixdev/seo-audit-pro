@@ -79,7 +79,7 @@ def dashboard():
 
     recent_audits = db.query(f"""SELECT a.id, a.status, a.score, a.grade, a.created_at, a.completed_at, a.percent,
                                         l.company, l.normalized_domain, u.name AS requested_by_name
-                                 {audit_base.replace('WHERE', 'LEFT JOIN users u ON u.id = a.requested_by WHERE')}
+                                 {audit_base.replace('WHERE', 'LEFT JOIN users u ON u.id = a.requested_by WHERE', 1)}
                                  ORDER BY a.created_at DESC LIMIT 8""", sp)
 
     team_perf = []

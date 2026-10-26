@@ -113,7 +113,7 @@ def compute(checks):
     if idx.get("noindex_pages", {}).get("status") == "fail":
         penalty_total += 10
         penalties.append("Homepage set to noindex (-10)")
-    if idx.get("https_active", {}).get("status") == "fail":
+    if idx.get("sec_https_active", {}).get("status") == "fail":
         penalty_total += 8
         penalties.append("Site not served over HTTPS (-8)")
     crit_fails = [c for c in checks

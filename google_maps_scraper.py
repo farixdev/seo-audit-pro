@@ -78,6 +78,11 @@ def scrape_google_maps(url_or_domain: str, timeout: int = 15):
     """Search Google Maps for the website domain.
 
     Returns (place_dict, note). If no profile is found, returns (None, 'not_found').
+
+    Only fields that were actually read from the page are included (the dict
+    carries "_source": "maps_scrape"); a missing key means "not checked", never
+    a guessed value. Another business's listing is never returned in place of
+    the audited one.
     """
     domain = _clean_domain(url_or_domain)
     if not domain:
@@ -148,8 +153,10 @@ def scrape_google_maps(url_or_domain: str, timeout: int = 15):
                 website = href or txt
                 if website:
                     break
-            if not website:
-                website = f"https://{domain}"
+            if not website or domain not in _clean_domain(website):
+                # The listing links a different website (or none), so it can't
+                # be confirmed as this business: never report someone else's.
+                return None, "not_found"
 
             category = ""
             for el in driver.find_elements(By.CSS_SELECTOR, 'button[jsaction*="category"], button.DkEaL'):
@@ -159,7 +166,7 @@ def scrape_google_maps(url_or_domain: str, timeout: int = 15):
                     break
 
             rating = None
-            reviews = 0
+            reviews = None
             for el in driver.find_elements(By.CSS_SELECTOR, "div.F7nice"):
                 txt = el.text.strip()
                 lines = [l.strip() for l in txt.split("\n") if l.strip()]
@@ -201,49 +208,51 @@ def scrape_google_maps(url_or_domain: str, timeout: int = 15):
             has_hours = bool(driver.find_elements(By.CSS_SELECTOR, "button[data-item-id='oh'], button[aria-label*='Hours']"))
 
             if name:
-                place = {
-                    "displayName": {"text": name},
-                    "formattedAddress": address,
-                    "rating": rating,
-                    "userRatingCount": reviews,
-                    "websiteUri": website,
-                    "nationalPhoneNumber": phone,
-                    "primaryTypeDisplayName": {"text": category} if category else None,
-                    "businessStatus": "OPERATIONAL",
-                    "googleMapsUri": place_url,
-                    "regularOpeningHours": {"periods": [1]} if has_hours else None,
-                    "photos": [1] * 12,
-                }
-                return place, "found"
+                # Only what was really read off the page. Status, photos,
+                # description and review dates are not scraped, so they are
+                # absent (= not checked), never filled with placeholders.
+                place = {"_source": "maps_scrape",
+                         "displayName": {"text": name},
+                         "googleMapsUri": place_url}
+                if address:
+                    place["formattedAddress"] = address
+                if rating is not None:
+                    place["rating"] = rating
+                if reviews is not None:
+                    place["userRatingCount"] = reviews
+                if website:
+                    place["websiteUri"] = website
+                if phone:
+                    place["nationalPhoneNumber"] = phone
+                if category:
+                    place["primaryTypeDisplayName"] = {"text": category}
+                if has_hours:
+                    place["regularOpeningHours"] = {"present": True}
+                return place, ("matched_website" if website else "found")
 
         # Case 2: Results feed cards
         cards = driver.find_elements(By.XPATH, '//a[contains(@href, "/maps/place")]')
         if cards:
             best_card = None
+            stem = re.sub(r"[^a-z0-9]", "", domain.split(".")[0])
             for card_a in cards:
                 href = card_a.get_attribute("href") or ""
                 label = card_a.get_attribute("aria-label") or ""
-                if domain in href.lower() or (label and domain.split(".")[0] in label.lower()):
+                label_key = re.sub(r"[^a-z0-9]", "", label.lower())
+                if domain in href.lower() or (len(stem) >= 4 and stem in label_key):
                     best_card = card_a
                     break
             if not best_card:
-                best_card = cards[0]
+                # No card matches this business: never substitute another one.
+                return None, "not_found"
 
             name = best_card.get_attribute("aria-label") or best_card.text or ""
             href = best_card.get_attribute("href") or ""
             if name:
-                place = {
-                    "displayName": {"text": name},
-                    "formattedAddress": "",
-                    "rating": None,
-                    "userRatingCount": 0,
-                    "websiteUri": f"https://{domain}",
-                    "nationalPhoneNumber": "",
-                    "primaryTypeDisplayName": None,
-                    "businessStatus": "OPERATIONAL",
-                    "googleMapsUri": href,
-                    "photos": [],
-                }
+                # A feed card only shows the name and link; nothing else is known.
+                place = {"_source": "maps_scrape",
+                         "displayName": {"text": name},
+                         "googleMapsUri": href}
                 return place, "found_in_feed"
 
         # If we got here and didn't find place page or cards, check once more

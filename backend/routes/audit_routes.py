@@ -15,8 +15,8 @@ import zlib
 from flask import Blueprint, Response, g, jsonify, request, send_file
 
 from backend import audit_runner, db, events, reports, results
-from backend.auth import AGENT, MANAGER, TEAM_LEAD, idempotent, lead_scope, load_audit, load_lead, require
-from backend.errors import ApiError, conflict, not_found
+from backend.auth import AGENT, MANAGER, TEAM_LEAD, can_edit_lead, idempotent, lead_scope, load_audit, load_lead, require
+from backend.errors import ApiError, conflict, forbidden, not_found
 from backend.report_context import prepare_client_report_context
 from backend.util import body, normalize_company, normalize_domain, now_iso, page_args, paged, rate_limit, text
 
@@ -122,12 +122,15 @@ def start_audit():
             with db.transaction() as tx:
                 tx.execute(
                     "INSERT INTO leads (id, company, company_key, website, normalized_domain, status, assigned_team_id, "
-                    "assigned_agent_id, source, created_at, updated_at, version) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)",
-                    (lead_id, company_name, company_key, full_url, domain, "new", team_id, agent_id, "Direct audit", now, now)
+                    "assigned_agent_id, source, created_by, created_at, updated_at, version) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)",
+                    (lead_id, company_name, company_key, full_url, domain, "new", team_id, agent_id, "Direct audit",
+                     me["id"], now, now)
                 )
             lead = db.query_one("SELECT * FROM leads WHERE id = %s", (lead_id,))
         elif lead.get("status") == "archived":
+            if me["role"] not in (MANAGER, TEAM_LEAD) or not can_edit_lead(me, lead):
+                raise ApiError(422, "Restore this lead first.")
             db.execute("UPDATE leads SET status = 'new', updated_at = %s WHERE id = %s", (now_iso(), lead["id"]))
             lead = db.query_one("SELECT * FROM leads WHERE id = %s", (lead["id"],))
 
@@ -173,7 +176,8 @@ def cancel_audit(audit_id):
     row = load_audit(me, audit_id)
     if row["status"] not in ("queued", "running"):
         raise conflict("This audit is no longer running.")
-    if me["role"] not in (MANAGER, TEAM_LEAD) and row["requested_by"] != me["id"]:
+    if (me["role"] != MANAGER and row["requested_by"] != me["id"]
+            and not (me["role"] == TEAM_LEAD and can_edit_lead(me, row))):
         raise ApiError(403, "Only the person who started this audit, a Team Lead or a Manager can cancel it.")
     audit_runner.cancel(audit_id)
     events.audit(me, "AUDIT_CANCEL_REQUESTED", "audit", audit_id)
@@ -417,8 +421,8 @@ def audit_result(audit_id):
         "psi": {"mobile": psi_summary("mobile"), "desktop": psi_summary("desktop")},
         "authority": {"domain_authority": authority.get("domain_authority"),
                       "page_authority": authority.get("page_authority"),
-                      "is_estimated": bool(authority.get("is_estimated", True)), "source": authority.get("source")},
-        "traffic": {"monthly_visits": traffic.get("monthly_visits"), "is_estimated": True} if traffic else None,
+                      "is_estimated": False, "source": authority.get("source")},
+        "traffic": {"monthly_visits": traffic.get("monthly_visits")} if traffic else None,
         "exec_summary": res.get("exec_summary"), "exec_summary_source": res.get("exec_summary_source"),
         "data_gaps": res.get("errors") or [],
     })
@@ -602,7 +606,11 @@ def upload_report_file(report_id):
     rep = db.query_one("SELECT * FROM reports WHERE id = %s", (report_id,))
     if not rep:
         raise not_found("Report")
-    load_audit(g.user, rep["audit_id"])  # IDOR guard via the lead
+    audit = load_audit(g.user, rep["audit_id"])  # IDOR guard via the lead
+    # Once a report is ready only the person who ran the audit (or a Manager)
+    # may replace its file; anyone who can see it may supply a missing one.
+    if rep["ready"] and g.user["role"] != MANAGER and audit.get("requested_by") != g.user["id"]:
+        raise forbidden("Only the person who ran this audit or a Manager can replace its report file.")
     rate_limit(f"report-file:{g.user['id']}", 60, 600)
     rep = reports.store_file(rep, request.get_data(cache=False))
     return jsonify({"report": {"id": rep["id"], "ready": rep["ready"], "size_bytes": rep["size_bytes"]}})

@@ -27,6 +27,8 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.auth)
         self.stack.addWidget(self.workspace)
         self.auth.signed_in.connect(self.enter_workspace)
+        self.auth.quick_requested.connect(self.enter_quick)
+        self.quick = None   # Scrape & Audit portal, made on first use
         self.workspace.logout_requested.connect(self.sign_out)
         session.expired.connect(self._expired)
         session.password_change_required.connect(self._must_change)
@@ -58,6 +60,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         settings.put("window_geometry", self.saveGeometry())
+        if self.quick is not None:
+            self.quick.stop()
         self.workspace.stop()
         super().closeEvent(e)
 
@@ -87,6 +91,15 @@ class MainWindow(QMainWindow):
         self.auth.refresh_server_label()
         self.auth.show_page(page, notice, kind)
         self._switch(self.auth)
+
+    def enter_quick(self):
+        if self.quick is None:
+            from seo_audit_pro.ui.quick_portal import QuickPortal
+            self.quick = QuickPortal()
+            self.quick.leave.connect(lambda: self.show_auth("welcome" if settings.mode() is None else "signin"))
+            self.stack.addWidget(self.quick)
+        self._switch(self.quick)
+        self.quick.start()
 
     def enter_workspace(self):
         self._switch(self.workspace)

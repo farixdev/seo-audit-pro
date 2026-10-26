@@ -582,55 +582,62 @@ def _scorecard_section(doc, result, sc):
 
 
 def _authority_traffic_section(doc, result):
+    """Shows only values a real data provider measured. Unmeasured DA/PA/
+    traffic/keywords (None) are never shown as numbers; when nothing was
+    measured the whole section is omitted."""
     auth = result.get("authority") or {}
     traffic = result.get("traffic") or {}
-    if not auth and not traffic:
+
+    def _num(v):
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    da = _num(auth.get("domain_authority"))
+    pa = _num(auth.get("page_authority"))
+    visits = _num(traffic.get("monthly_visits"))
+    kws = _num(traffic.get("ranking_keywords"))
+    tiles = []
+    if da is not None:
+        tiles.append((str(int(da)), "DOMAIN AUTHORITY (DA)", _score_rgb(da)))
+    if pa is not None:
+        tiles.append((str(int(pa)), "PAGE AUTHORITY (PA)", _score_rgb(pa)))
+    if visits is not None:
+        tiles.append(("{:,}".format(int(visits)), "MONTHLY VISITS", BRAND_DK))
+    if kws is not None:
+        tiles.append(("{:,}".format(int(kws)), "ORGANIC KEYWORDS", GOOD))
+    geo_list = [g for g in (traffic.get("geo_distribution") or [])
+                if _num(g.get("visits")) is not None]
+    if not tiles and not geo_list:
         return
     _section_heading(doc, "Domain Authority & Organic Traffic Overview")
     doc.add_paragraph(
-        "Third-party domain authority metrics and estimated monthly organic traffic trends. "
-        "Domain Authority (DA) and Page Authority (PA) provide a comparative benchmark against industry competitors."
+        "Third-party authority and traffic metrics measured for this domain. "
+        "Metrics that were not measured are not shown."
     )
-
-    da = auth.get("domain_authority", "—")
-    pa = auth.get("page_authority", "—")
-    monthly_est = traffic.get("monthly_visits", 0)
-    kw_est = traffic.get("ranking_keywords", 0)
-
-    da_num = da if isinstance(da, (int, float)) else None
-    pa_num = pa if isinstance(pa, (int, float)) else None
-
-    _kpi_tiles(doc, [
-        (str(da), "DOMAIN AUTHORITY (DA)", _score_rgb(da_num)),
-        (str(pa), "PAGE AUTHORITY (PA)", _score_rgb(pa_num)),
-        ("{:,}".format(monthly_est), "EST. MONTHLY VISITS", BRAND_DK),
-        ("{:,}".format(kw_est), "ORGANIC KEYWORDS", GOOD),
-    ])
-    _spacer(doc, 6)
+    if tiles:
+        _kpi_tiles(doc, tiles)
+        _spacer(doc, 6)
 
     p = doc.add_paragraph()
     _runs(p, [
-        ("Source & Methodology: ", {"size": 8.5, "bold": True, "color": SLATE}),
-        (str(auth.get("source", "Algorithmic Authority Engine")) + ". ", {"size": 8.5, "color": SLATE}),
-        ("Note: DA and PA are third-party comparative metrics, not direct Google ranking factors. Traffic estimates represent search visibility modeling based on indexed footprint and domain authority.", {"size": 8.5, "italic": True, "color": MUTED})
+        ("Source: ", {"size": 8.5, "bold": True, "color": SLATE}),
+        (str(auth.get("source") or traffic.get("source") or "") + ". ", {"size": 8.5, "color": SLATE}),
+        ("Note: DA and PA are third-party comparative metrics, not direct Google ranking factors.", {"size": 8.5, "italic": True, "color": MUTED})
     ])
 
-    geo_list = traffic.get("geo_distribution") or []
     if geo_list:
         doc.add_heading("Location-Based Traffic Distribution", level=2)
-        doc.add_paragraph("Estimated organic traffic distribution by country and geographical region:")
-        t = doc.add_table(rows=1, cols=4)
+        doc.add_paragraph("Organic traffic distribution by country and geographical region:")
+        t = doc.add_table(rows=1, cols=3)
         t.style = "Table Grid"
-        for i, h in enumerate(["Country / Region", "Share", "Estimated Monthly Visits", "Search Intent Footprint"]):
+        for i, h in enumerate(["Country / Region", "Share", "Monthly Visits"]):
             _cell_text(t.rows[0].cells[i], [(h, {"size": 8.5, "bold": True})])
         _style_header_row(t)
         for g in geo_list:
             c = t.add_row().cells
             _cell_text(c[0], [(f"{g.get('country', '')} ({g.get('code', '')})", {"size": 8.5, "bold": True})])
-            _cell_text(c[1], [(f"{g.get('pct', 0)}%", {"size": 8.5})], align=WD_ALIGN_PARAGRAPH.CENTER)
-            _cell_text(c[2], [("{:,}".format(g.get("visits", 0)), {"size": 8.5})], align=WD_ALIGN_PARAGRAPH.RIGHT)
-            _cell_text(c[3], [("Commercial & Informational Search", {"size": 8, "color": SLATE})])
-        _set_widths(t, [2.4, 1.0, 1.8, 1.7])
+            _cell_text(c[1], [(f"{g.get('pct')}%" if g.get("pct") is not None else "Not measured", {"size": 8.5})], align=WD_ALIGN_PARAGRAPH.CENTER)
+            _cell_text(c[2], [("{:,}".format(int(g.get("visits"))), {"size": 8.5})], align=WD_ALIGN_PARAGRAPH.RIGHT)
+        _set_widths(t, [3.0, 1.2, 2.0])
         _spacer(doc, 8)
 
 
@@ -847,7 +854,8 @@ def _appendix_section(doc, result):
                   "missing"),
                  ("Blanket crawl block", "yes" if robots.get("blocks_all") else
                   "no"),
-                 ("Sitemap URLs", sitemap.get("count", 0)),
+                 ("Sitemap URLs", ("%s+" % sitemap.get("count", 0))
+                  if sitemap.get("capped") else sitemap.get("count", 0)),
                  ("Pages crawled", result.get("pages_crawled", 0))]:
         cells = info.add_row().cells
         cells[0].text, cells[1].text = str(k), str(v)
@@ -855,23 +863,29 @@ def _appendix_section(doc, result):
     doc.add_heading("Pages reviewed", level=2)
     facts = result.get("all_facts", [])
     if facts:
-        table = doc.add_table(rows=1, cols=7)
+        # The PA column appears only when Page Authority was really measured.
+        show_pa = any(isinstance(f.get("page_authority"), (int, float))
+                      for f in facts)
+        heads = (["URL", "Status"] + (["PA"] if show_pa else []) +
+                 ["Title", "Meta", "Words", "H1"])
+        table = doc.add_table(rows=1, cols=len(heads))
         table.style = "Table Grid"
-        for i, h in enumerate(["URL", "Status", "PA", "Title", "Meta", "Words", "H1"]):
+        for i, h in enumerate(heads):
             _cell_text(table.rows[0].cells[i], [(h, {"size": 8, "bold": True})])
         _style_header_row(table)
         for f in facts:
             cells = table.add_row().cells
             _cell_text(cells[0], [(f.get("final_url", ""), {"size": 8})])
-            for j, val in enumerate([f.get("status", ""),
-                                     f.get("page_authority", 35),
-                                     f.get("title_len", 0),
-                                     f.get("meta_desc_len", 0),
-                                     f.get("word_count", 0),
-                                     f.get("h1_count", 0)], start=1):
+            pa_v = f.get("page_authority")
+            vals = ([f.get("status", "")] +
+                    ([pa_v if pa_v is not None else "—"] if show_pa else []) +
+                    [f.get("title_len", 0), f.get("meta_desc_len", 0),
+                     f.get("word_count", 0), f.get("h1_count", 0)])
+            for j, val in enumerate(vals, start=1):
                 _cell_text(cells[j], [(str(val), {"size": 8})],
                            align=WD_ALIGN_PARAGRAPH.CENTER)
-        _set_widths(table, [2.8, 0.6, 0.6, 0.7, 0.6, 0.6, 0.6])
+        _set_widths(table, [2.8, 0.6] + ([0.6] if show_pa else []) +
+                    [0.7, 0.6, 0.6, 0.6])
 
     psi = result.get("psi") or {}
     rows = []

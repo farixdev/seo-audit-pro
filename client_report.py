@@ -149,7 +149,7 @@ def build(result, downloads=(), gbp=None, gbp_note="no_key", shots=None, per_sec
     sc = result.get("score") or {}
     score = sc.get("score") or 0
     checks = result.get("checks") or []
-    gbp_items = [c for c in gbp_checks(gbp, domain) if c["status"] != "pass"] if gbp else []
+    gbp_items = [c for c in gbp_checks(gbp, domain) if c["status"] in ("fail", "warn")] if gbp else []
     problems = sorted([c for c in checks if c.get("status") in ("fail", "warn")] + gbp_items,
                       key=lambda c: (SEV_ORDER.get(c.get("severity"), 9), c.get("status") != "fail"))
     by_group = {}
@@ -229,9 +229,11 @@ def build(result, downloads=(), gbp=None, gbp_note="no_key", shots=None, per_sec
                           "layout jumps under 0.1.</p>")
         if key == "offpage":
             auth, traffic = result.get("authority") or {}, result.get("traffic") or {}
-            body.append(f"<div class='kpis'><div class='card'><b>{E(str(auth.get('domain_authority', '—')))}</b>Domain authority (estimate)</div>"
-                        f"<div class='card'><b>{E(str(traffic.get('monthly_visits', '—')))}</b>Monthly visits (estimate)</div>"
-                        f"<div class='card'><b>{E(str(traffic.get('ranking_keywords', '—')))}</b>Ranking keywords (estimate)</div></div>"
+            def _mv(v):  # never show an unmeasured value as a number
+                return "Not measured" if v is None else ("{:,}".format(v) if isinstance(v, int) else str(v))
+            body.append(f"<div class='kpis'><div class='card'><b>{E(_mv(auth.get('domain_authority')))}</b>Domain authority</div>"
+                        f"<div class='card'><b>{E(_mv(traffic.get('monthly_visits')))}</b>Monthly visits</div>"
+                        f"<div class='card'><b>{E(_mv(traffic.get('ranking_keywords')))}</b>Ranking keywords</div></div>"
                         "<p class='note'>Exact backlink numbers (total links, referring domains, follow/nofollow, anchor text, "
                         "new/lost and potentially harmful links) come from a backlink database; we review them in the full link "
                         "audit and only flag links as harmful after checking them, not automatically.</p>")
@@ -240,17 +242,32 @@ def build(result, downloads=(), gbp=None, gbp_note="no_key", shots=None, per_sec
             https = (result.get("final_url") or "").startswith("https")
             redir = (result.get("http_redirect") or {}).get("redirects_to_https")
             mixed = [c for c in checks if "mixed" in f"{c.get('id', '')}".lower()]
+            # ok: True / False / None (None = not checked; shown neutrally).
+            rc = next((c for c in checks if c.get("id") == "sec_http_redirect"), None)
+            if rc is not None and rc.get("status") in ("na", "info"):
+                redir_row = ("HTTP → HTTPS redirect", None, "Could not be tested")
+            elif rc is not None and rc.get("status") == "pass" and "port closed" in (rc.get("detail") or ""):
+                redir_row = ("HTTP → HTTPS redirect", True, "Only the secure address is served (HTTP is closed)")
+            elif rc is None and result.get("http_redirect") is None:
+                redir_row = ("HTTP → HTTPS redirect", None, "Could not be tested")
+            else:
+                redir_ok = (rc.get("status") == "pass") if rc is not None else bool(redir)
+                redir_row = ("HTTP → HTTPS redirect", redir_ok, "Visitors are moved to the secure address" if redir_ok
+                             else "Visitors can land on the insecure address")
+            mixed_bad = any(c.get("status") in ("fail", "warn") for c in mixed)
+            mixed_ok = None if (mixed and all(c.get("status") in ("na", "info") for c in mixed)) else (not mixed_bad)
             rows = [("HTTPS (secure address)", https, "Your site uses https://" if https else "Your site is not on https://"),
                     ("SSL certificate", bool(ssl.get("valid")),
                      f"Valid, expires {ssl.get('not_after')} ({ssl.get('days_left')} days left)" if ssl.get("valid")
                      else f"Problem: {ssl.get('error') or 'not valid'}"),
-                    ("HTTP → HTTPS redirect", bool(redir), "Visitors are moved to the secure address" if redir
-                     else "Visitors can land on the insecure address"),
-                    ("Mixed content", not any(c.get("status") in ("fail", "warn") for c in mixed),
-                     "No insecure files found on secure pages" if not any(c.get("status") in ("fail", "warn") for c in mixed)
-                     else "Some files load insecurely on secure pages")]
+                    redir_row,
+                    ("Mixed content", mixed_ok,
+                     "Could not be scanned" if mixed_ok is None else
+                     ("No insecure files found on secure pages" if not mixed_bad
+                      else "Some files load insecurely on secure pages"))]
             body.append("<table><tr><th>Check</th><th>Result</th><th>Details</th></tr>" + "".join(
-                f"<tr><td>{E(a)}</td><td class='{'good' if ok else 'bad'}'>{'OK' if ok else 'PROBLEM'}</td><td>{E(d)}</td></tr>"
+                f"<tr><td>{E(a)}</td><td class='{'' if ok is None else ('good' if ok else 'bad')}'>"
+                f"{'NOT CHECKED' if ok is None else ('OK' if ok else 'PROBLEM')}</td><td>{E(d)}</td></tr>"
                 for a, ok, d in rows) + "</table>")
         if key == "local" and not gbp:
             body.append("<div class='card'><b>Google Business Profile:</b> "

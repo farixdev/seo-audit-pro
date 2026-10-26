@@ -15,6 +15,7 @@ from seo_audit_pro.theme import C, STATUS, score_color
 from seo_audit_pro.ui.pages.base import Page
 from seo_audit_pro.ui.pages.outreach import METHOD_LABEL, mark_outreach, outreach_text
 from seo_audit_pro.ui.pages.reports import pending_file, report_size
+from seo_audit_pro.ui.pages.leads import can_edit_lead, can_manage_lead
 from seo_audit_pro.ui.pages.lead_dialogs import (AssignDialog, LeadFormDialog, load_assignees, set_archived,
                                                  start_audit)
 from seo_audit_pro.widgets.charts import ScoreRing
@@ -269,6 +270,9 @@ class LeadDetailPage(Page):
         self.email_btn.setEnabled(not archived)
         self.outreach_btn.setEnabled(not archived)
         self.outreach_btn.setText("Update outreach" if lead.get("last_contact_at") else "Mark outreached")
+        # Leads a Manager added are visible to everyone; only their owner (or a Manager) changes them.
+        self.edit_btn.setVisible(can_edit_lead(lead))
+        self.more_btn.setVisible(not session.is_agent() and can_manage_lead(lead))
         self._fill_details(lead)
         self.notes_label.setText(lead.get("notes") or "No notes yet. Use Edit to add context for your team.")
         self.notes_label.setStyleSheet("" if lead.get("notes") else f"color: {C['text_3']};")

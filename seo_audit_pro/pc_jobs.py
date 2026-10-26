@@ -84,9 +84,6 @@ def _run_audit(job, folder, channel):
     shots_dir = os.path.join(folder, "client")
     extras = client_pdf.start(job["url"], shots_dir)
     result = engine.run_audit(params, progress=lambda m: channel.send({"t": "msg", "text": str(m)}))
-    channel.send({"t": "msg", "text": "Checking the Google Business Profile"})
-    extras.wait()
-    result["gbp"], result["gbp_note"] = extras.gbp, extras.note
     _write_json(os.path.join(folder, "result.json"), result)
     # Both Word reports right away, so the whole team can open them as soon as the audit is in.
     channel.send({"t": "msg", "text": "Writing the reports"})

@@ -3,8 +3,8 @@
 (backgrounds on, no browser header or footer).
 
 Made on the computer that ran the audit, right after it finishes; the
-screenshots and the Google Business Profile lookup run alongside the crawl, so
-only the print (a few seconds) is left at the end.
+screenshots are taken alongside the crawl, so only the print (a few seconds)
+is left at the end.
 """
 
 import os
@@ -47,13 +47,14 @@ class Extras:
 
 
 def start(result_or_url, folder):
-    """Begin the extras for an audit result (or a URL before the audit is done)."""
+    """Begin the extras for an audit result, or for a URL while its audit runs (the
+    engine looks up the Google Maps profile itself, so only screenshots then)."""
     os.makedirs(folder, exist_ok=True)
     if isinstance(result_or_url, dict):
         r = result_or_url
         url = r.get("final_url") or f"https://{r.get('domain') or ''}"
         return Extras(url, folder, need_gbp="gbp" not in r)
-    return Extras(result_or_url, folder)
+    return Extras(result_or_url, folder, need_gbp=False)
 
 
 def write(result, folder, pdf_path, extras=None):

@@ -193,7 +193,7 @@ def gbp_lookup(query, domain, key, timeout=20):
     for p in places:
         if bare and bare in (p.get("websiteUri") or ""):
             return p, "matched_website"
-    return places[0], "best_match"
+    return None, "not_found"   # never report another business's profile as this one's
 
 
 def gbp_checks(place, site_domain):
@@ -204,35 +204,81 @@ def gbp_checks(place, site_domain):
         out.append({"label": label, "status": "pass" if ok is True else ("warn" if ok is None else "fail"),
                     "severity": sev, "detail": detail, "fix": fix, "id": "gbp_" + label.lower().replace(" ", "_")})
 
-    rating, count = place.get("rating"), place.get("userRatingCount") or 0
-    add("Business is open on Google", place.get("businessStatus") in (None, "OPERATIONAL"),
-        f"Status: {(place.get('businessStatus') or 'operational').replace('_', ' ').lower()}.",
-        "If the business is shown as closed, correct the status in Google Business Profile.", "critical")
+    # Scraped Google Maps data only contains the fields that were actually
+    # read; any other field is UNKNOWN (not checked), so its check is 'na' —
+    # never a pass or a fail. (Places API data omits a field only when the
+    # profile really lacks it, so there a missing field is a real gap.)
+    scraped = place.get("_source") == "maps_scrape"
+
+    def unknown(key):
+        return scraped and key not in place
+
+    def na(label, fix, sev="medium"):
+        out.append({"label": label, "status": "na", "severity": sev,
+                    "detail": "Not checked — this could not be read from Google Maps.",
+                    "fix": fix, "id": "gbp_" + label.lower().replace(" ", "_")})
+
+    rating, count = place.get("rating"), place.get("userRatingCount")
+    fix = "If the business is shown as closed, correct the status in Google Business Profile."
+    if unknown("businessStatus"):
+        na("Business is open on Google", fix, "critical")
+    else:
+        add("Business is open on Google", place.get("businessStatus") in (None, "OPERATIONAL"),
+            f"Status: {(place.get('businessStatus') or 'operational').replace('_', ' ').lower()}.", fix, "critical")
     site = place.get("websiteUri") or ""
-    add("Website linked", bool(site) and (site_domain.replace("www.", "") in site),
-        f"Website on the profile: {site or 'none'}.", "Add the correct website URL to the profile.", "high")
-    add("Phone number", bool(place.get("nationalPhoneNumber")), f"Phone: {place.get('nationalPhoneNumber') or 'missing'}.",
-        "Add the main phone number (the same one shown on the website).", "high")
-    add("Opening hours", bool(place.get("regularOpeningHours")),
-        "Opening hours are set." if place.get("regularOpeningHours") else "No opening hours on the profile.",
-        "Add regular hours and special holiday hours.", "medium")
-    photos = len(place.get("photos") or [])
-    add("Photos", True if photos >= 10 else (None if photos else False),
-        f"{photos}{'+' if photos >= 10 else ''} photos found.",
-        "Upload at least 10–20 real photos (outside, inside, team, work) and add new ones monthly.", "medium")
-    add("Business description", bool(place.get("editorialSummary")),
-        "A description is shown." if place.get("editorialSummary") else "No description is shown on Google.",
-        "Write a 750-character description with the main services and the city.", "low")
-    add("Main category", bool(place.get("primaryTypeDisplayName")),
-        f"Category: {(place.get('primaryTypeDisplayName') or {}).get('text', 'not set')}.",
-        "Pick the most specific primary category and add relevant secondary categories.", "high")
-    if rating is None:
+    fix = "Add the correct website URL to the profile."
+    if unknown("websiteUri"):
+        na("Website linked", fix, "high")
+    else:
+        add("Website linked", bool(site) and (site_domain.replace("www.", "") in site),
+            f"Website on the profile: {site or 'none'}.", fix, "high")
+    fix = "Add the main phone number (the same one shown on the website)."
+    if unknown("nationalPhoneNumber"):
+        na("Phone number", fix, "high")
+    else:
+        add("Phone number", bool(place.get("nationalPhoneNumber")), f"Phone: {place.get('nationalPhoneNumber') or 'missing'}.",
+            fix, "high")
+    fix = "Add regular hours and special holiday hours."
+    if unknown("regularOpeningHours"):
+        na("Opening hours", fix, "medium")
+    else:
+        add("Opening hours", bool(place.get("regularOpeningHours")),
+            "Opening hours are set." if place.get("regularOpeningHours") else "No opening hours on the profile.",
+            fix, "medium")
+    fix = "Upload at least 10–20 real photos (outside, inside, team, work) and add new ones monthly."
+    if unknown("photos"):
+        na("Photos", fix, "medium")
+    else:
+        photos = len(place.get("photos") or [])
+        add("Photos", True if photos >= 10 else (None if photos else False),
+            f"{photos}{'+' if photos >= 10 else ''} photos found.", fix, "medium")
+    fix = "Write a 750-character description with the main services and the city."
+    if unknown("editorialSummary"):
+        na("Business description", fix, "low")
+    else:
+        add("Business description", bool(place.get("editorialSummary")),
+            "A description is shown." if place.get("editorialSummary") else "No description is shown on Google.",
+            fix, "low")
+    fix = "Pick the most specific primary category and add relevant secondary categories."
+    if unknown("primaryTypeDisplayName"):
+        na("Main category", fix, "high")
+    else:
+        add("Main category", bool(place.get("primaryTypeDisplayName")),
+            f"Category: {(place.get('primaryTypeDisplayName') or {}).get('text', 'not set')}.", fix, "high")
+    if unknown("rating"):
+        na("Rating", "Ask recent customers for reviews with a direct review link.", "high")
+    elif rating is None:
         add("Rating", False, "No rating yet.", "Ask recent customers for reviews with a direct review link.", "high")
     else:
         add("Rating", True if rating >= 4.5 else (None if rating >= 4.0 else False), f"{rating:.1f} stars.",
             "Reply to every review, fix the causes of bad ones and ask happy customers to review.", "high")
-    add("Number of reviews", True if count >= 50 else (None if count >= 10 else False), f"{count} reviews.",
-        "Ask every happy customer for a review (QR code at the counter, link in invoices and emails).", "high")
+    fix = "Ask every happy customer for a review (QR code at the counter, link in invoices and emails)."
+    if unknown("userRatingCount"):
+        na("Number of reviews", fix, "high")
+    else:
+        count = count or 0
+        add("Number of reviews", True if count >= 50 else (None if count >= 10 else False), f"{count} reviews.",
+            fix, "high")
     latest = None
     for rv in place.get("reviews") or []:
         t = rv.get("publishTime")
@@ -352,11 +398,15 @@ def build(result, downloads=(), gbp=None, gbp_note="no_key"):
                            else f"<span class='bad'>problem</span> · {E(str(ssl.get('error') or 'not valid'))}") + "</div>")
         if key == "seo":
             auth, traffic = result.get("authority") or {}, result.get("traffic") or {}
+            sm = result.get("sitemap") or {}
+            sm_count = sm.get("count", "—")
+            if sm.get("capped"):
+                sm_count = f"{sm_count}+"
             body.append("<div class='grid'>"
-                        + f"<div class='card'><b>Domain authority</b><div style='font-size:24px;font-weight:800'>{E(str(auth.get('domain_authority', '—')))}</div><span class='note'>estimate</span></div>"
-                        + f"<div class='card'><b>Monthly visits</b><div style='font-size:24px;font-weight:800'>{E(str(traffic.get('monthly_visits', '—')))}</div><span class='note'>estimate</span></div>"
-                        + f"<div class='card'><b>Ranking keywords</b><div style='font-size:24px;font-weight:800'>{E(str(traffic.get('ranking_keywords', '—')))}</div><span class='note'>estimate</span></div>"
-                        + f"<div class='card'><b>Pages in sitemap</b><div style='font-size:24px;font-weight:800'>{E(str((result.get('sitemap') or {}).get('count', '—')))}</div></div></div>")
+                        + f"<div class='card'><b>Domain authority</b><div style='font-size:24px;font-weight:800'>{E(_measured(auth.get('domain_authority')))}</div><span class='note'>{E(_measured_note(auth))}</span></div>"
+                        + f"<div class='card'><b>Monthly visits</b><div style='font-size:24px;font-weight:800'>{E(_measured(traffic.get('monthly_visits')))}</div><span class='note'>{E(_measured_note(traffic))}</span></div>"
+                        + f"<div class='card'><b>Ranking keywords</b><div style='font-size:24px;font-weight:800'>{E(_measured(traffic.get('ranking_keywords')))}</div><span class='note'>{E(_measured_note(traffic))}</span></div>"
+                        + f"<div class='card'><b>Pages in sitemap</b><div style='font-size:24px;font-weight:800'>{E(str(sm_count))}</div></div></div>")
         if problems:
             groups = {}
             for c in problems:
@@ -384,9 +434,25 @@ def build(result, downloads=(), gbp=None, gbp_note="no_key"):
                  "Fix the Critical and High items first.</p>"
                  + (f"<table><tr><th>#</th><th>Priority</th><th>Problem</th><th>First step</th></tr>{rows}</table>" if plan
                     else "<div class='empty'>Nothing to fix.</div>")
-                 + f"<p class='note'>Generated {datetime.now():%d %b %Y %H:%M} by SEO Audit Tool · Estimates (authority, traffic) are model "
-                   "estimates, not exact figures.</p></section></div></body></html>")
+                 + f"<p class='note'>Generated {datetime.now():%d %b %Y %H:%M} by SEO Audit Tool · Authority and traffic figures are shown "
+                   "only when measured by a data provider.</p></section></div></body></html>")
     return "".join(parts)
+
+
+def _measured(v):
+    """A real measured value, or the honest 'Not measured' when it is None."""
+    if v is None or v == "":
+        return "Not measured"
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return "{:,}".format(int(v)) if float(v).is_integer() else str(v)
+    return str(v)
+
+
+def _measured_note(d):
+    src = (d or {}).get("source")
+    if not src or src == "not_measured":
+        return "no data source"
+    return str(src)
 
 
 def _gbp_section(place, note, domain):
@@ -399,7 +465,7 @@ def _gbp_section(place, note, domain):
                 + ("" if note == "matched_website" else "<br><span class='note'>Matched by name: check that this is the right business.</span>")
                 + "</div>")
         checks = gbp_checks(place, domain)
-        problems = [c for c in checks if c["status"] != "pass"]
+        problems = [c for c in checks if c["status"] in ("fail", "warn")]
         good = [c for c in checks if c["status"] == "pass"]
         cards = "".join(_issue_card(c) for c in problems) or "<div class='empty'>The profile looks complete.</div>"
         passed = ("<details class='passed'><summary>" + f"{len(good)} profile checks passed</summary><ul>"
@@ -530,7 +596,7 @@ def build_client(result, downloads=(), gbp=None, gbp_note="no_key", per_area=4):
     mob = (psi.get("scores") or {}).get("performance") if psi.get("ok") else None
     problems = [c for c in checks if c.get("status") in ("fail", "warn")]
     urgent = [c for c in problems if c.get("severity") in ("critical", "high")]
-    gbp_issues = [c for c in gbp_checks(gbp, domain) if c["status"] != "pass"] if gbp else []
+    gbp_issues = [c for c in gbp_checks(gbp, domain) if c["status"] in ("fail", "warn")] if gbp else []
     dl = "".join(f'<a class="btn" href="{E(f)}" download>⬇ {E(lbl)}</a>' for lbl, f in downloads)
     speed_line = (f"Your home page takes about <b>{_ms(lcp)}</b> to show its main content on a phone "
                   f"(Google's target is under 2.5 s). Mobile speed score: <b>{mob}/100</b>."

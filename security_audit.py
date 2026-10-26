@@ -115,29 +115,52 @@ def check_tls_support(hostname, timeout=4):
     except Exception:
         pass
 
-    # Probe TLS 1.0 (deprecated / insecure)
-    try:
-        ctx10 = ssl.create_default_context()
-        ctx10.minimum_version = ssl.TLSVersion.TLSv1
-        ctx10.maximum_version = ssl.TLSVersion.TLSv1
-        with socket.create_connection((hostname, 443), timeout=timeout) as sock:
-            with ctx10.wrap_socket(sock, server_hostname=hostname) as ssock:
-                results["supports_tls10"] = True
-                results["deprecated_protocols_accepted"] = True
-    except Exception:
-        results["supports_tls10"] = False
+    # Probe TLS 1.0 / 1.1 (deprecated / insecure). Each result is
+    #   True  = the server completed a legacy handshake,
+    #   False = the server refused it during the handshake,
+    #   None  = the probe could not run (local OpenSSL lacks the protocol,
+    #           network error, timeout) — the outcome is unknown.
+    def _probe_legacy(version):
+        try:
+            c = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            c.check_hostname = False
+            c.verify_mode = ssl.CERT_NONE
+            # Legacy protocols need legacy ciphers; modern OpenSSL hides them
+            # behind security level 0.
+            c.set_ciphers("DEFAULT:@SECLEVEL=0")
+            c.minimum_version = version
+            c.maximum_version = version
+        except Exception:
+            return None
+        try:
+            sock = socket.create_connection((hostname, 443), timeout=timeout)
+        except Exception:
+            return None
+        try:
+            with sock:
+                with c.wrap_socket(sock, server_hostname=hostname) as ssock:
+                    v = ssock.version() or ""
+                    return v in ("TLSv1", "TLSv1.1")
+        except ssl.SSLError as e:
+            msg = str(e).upper()
+            # Client-side configuration failures: the probe never reached
+            # the server's decision.
+            if any(k in msg for k in ("NO_PROTOCOLS_AVAILABLE", "NO_CIPHERS_AVAILABLE",
+                                      "NO CIPHERS AVAILABLE", "NO PROTOCOLS AVAILABLE")):
+                return None
+            return False
+        except (ConnectionResetError, ConnectionAbortedError):
+            return False  # server dropped the legacy hello = refusal
+        except Exception:
+            return None
 
-    # Probe TLS 1.1 (deprecated / insecure)
-    try:
-        ctx11 = ssl.create_default_context()
-        ctx11.minimum_version = ssl.TLSVersion.TLSv1_1
-        ctx11.maximum_version = ssl.TLSVersion.TLSv1_1
-        with socket.create_connection((hostname, 443), timeout=timeout) as sock:
-            with ctx11.wrap_socket(sock, server_hostname=hostname) as ssock:
-                results["supports_tls11"] = True
-                results["deprecated_protocols_accepted"] = True
-    except Exception:
-        results["supports_tls11"] = False
+    results["supports_tls10"] = _probe_legacy(ssl.TLSVersion.TLSv1)
+    results["supports_tls11"] = _probe_legacy(ssl.TLSVersion.TLSv1_1)
+    results["deprecated_protocols_accepted"] = bool(
+        results["supports_tls10"] or results["supports_tls11"])
+    # Only a clean refusal of both legacy versions proves they are disabled.
+    results["legacy_probe_complete"] = (results["supports_tls10"] is not None
+                                        and results["supports_tls11"] is not None)
 
     # Probe TLS 1.2
     if not results["supports_tls12"]:
@@ -242,7 +265,7 @@ def check_ssl_certificate(hostname, timeout=6):
 
 def check_hsts_header(headers):
     """Analyzes HSTS (Strict-Transport-Security) header attributes."""
-    h_val = headers.get("strict-transport-security", "")
+    h_val = _norm_headers(headers).get("strict-transport-security", "")
     if not h_val:
         return {"present": False, "max_age": None, "subdomains": False, "preload": False, "raw": ""}
     
@@ -279,6 +302,12 @@ def check_mixed_content_across_pages(all_facts):
         for tag, attr in [("img", "src"), ("script", "src"), ("link", "href"),
                           ("iframe", "src"), ("video", "src"), ("audio", "src")]:
             for el in soup.find_all(tag):
+                if tag == "link":
+                    # Only links that load a subresource; canonical/alternate
+                    # hrefs are just URLs, not mixed content.
+                    rel = " ".join(el.get("rel") or []).lower()
+                    if not re.search(r"stylesheet|icon|preload|prefetch|manifest", rel):
+                        continue
                 src = (el.get(attr) or "").strip()
                 if src.lower().startswith("http://"):
                     insecure_items.append({"page": f_url, "resource": src, "type": tag})
@@ -681,7 +710,11 @@ def cross_reference_cves(libraries):
 # F. DNS & Email Domain Trust (via DoH)
 # ===========================================================================
 def _query_doh_txt(name, timeout=4):
-    """Performs DNS TXT lookup using Cloudflare / Google DNS-over-HTTPS."""
+    """Performs DNS TXT lookup using Cloudflare / Google DNS-over-HTTPS.
+
+    Returns a list of TXT strings ([] = the name has no TXT record), or None
+    when the lookup itself failed (no resolver answered / SERVFAIL), so a
+    failed lookup is never mistaken for a missing record."""
     endpoints = [
         f"https://cloudflare-dns.com/dns-query?name={name}&type=TXT",
         f"https://dns.google/resolve?name={name}&type=TXT",
@@ -691,6 +724,10 @@ def _query_doh_txt(name, timeout=4):
             r = requests.get(url, headers={"Accept": "application/dns-json"}, timeout=timeout)
             if r.status_code == 200:
                 data = r.json()
+                # DNS RCODE: 0 NOERROR, 3 NXDOMAIN are real answers; others
+                # (e.g. 2 SERVFAIL) mean the lookup failed.
+                if data.get("Status") not in (0, 3):
+                    continue
                 records = []
                 for ans in data.get("Answer", []):
                     if ans.get("type") == 16:  # TXT
@@ -699,23 +736,28 @@ def _query_doh_txt(name, timeout=4):
                 return records
         except Exception:
             continue
-    return []
+    return None
 
 
 def check_email_security_records(domain, timeout=4):
     """Checks SPF, DMARC, and DKIM DNS records. Strictly NO domain age check."""
+    # "checked" is False when the DNS lookup failed — the record's presence is
+    # then unknown and the matching check is reported as 'na'.
     res = {
-        "spf": {"present": False, "record": None, "is_secure": False},
-        "dmarc": {"present": False, "record": None, "policy": None, "is_secure": False},
-        "dkim": {"present": False, "selector": None, "record": None},
+        "spf": {"present": False, "record": None, "is_secure": False, "checked": False},
+        "dmarc": {"present": False, "record": None, "policy": None, "is_secure": False, "checked": False},
+        "dkim": {"present": False, "selector": None, "record": None, "checked": False},
     }
-    clean_domain = domain.lower().replace("www.", "")
+    clean_domain = (domain or "").lower()
+    if clean_domain.startswith("www."):
+        clean_domain = clean_domain[4:]
     if not clean_domain:
         return res
 
     # 1. SPF Record
     txts = _query_doh_txt(clean_domain, timeout=timeout)
-    for t in txts:
+    res["spf"]["checked"] = txts is not None
+    for t in txts or []:
         if t.startswith("v=spf1"):
             res["spf"]["present"] = True
             res["spf"]["record"] = t
@@ -725,7 +767,8 @@ def check_email_security_records(domain, timeout=4):
 
     # 2. DMARC Record
     dmarc_txts = _query_doh_txt(f"_dmarc.{clean_domain}", timeout=timeout)
-    for t in dmarc_txts:
+    res["dmarc"]["checked"] = dmarc_txts is not None
+    for t in dmarc_txts or []:
         if t.startswith("v=DMARC1"):
             res["dmarc"]["present"] = True
             res["dmarc"]["record"] = t
@@ -740,8 +783,11 @@ def check_email_security_records(domain, timeout=4):
     for selector in ["google", "default", "k1", "mail", "smtp"]:
         dkim_name = f"{selector}._domainkey.{clean_domain}"
         dkim_txts = _query_doh_txt(dkim_name, timeout=timeout)
-        for t in dkim_txts:
-            if "v=DKIM1" in t or "k=rsa" in t or "p=" in t:
+        if dkim_txts is not None:
+            res["dkim"]["checked"] = True
+        for t in dkim_txts or []:
+            # An empty "p=" means the key was revoked — that is not a DKIM key.
+            if re.search(r"(^|;)\s*p=[A-Za-z0-9+/]", t):
                 res["dkim"]["present"] = True
                 res["dkim"]["selector"] = selector
                 res["dkim"]["record"] = t[:60] + "..."
@@ -925,6 +971,9 @@ def run_full_security_audit(url, home_page, all_facts, proxy=None, timeout=6):
     tls_info = check_tls_support(hostname, timeout=timeout)
     ssl_info = check_ssl_certificate(hostname, timeout=timeout)
     hsts_info = check_hsts_header(headers)
+    # all_facts must be raw page objects (with "html"); parsed facts carry no
+    # HTML, and then the HTML-based checks below are reported as 'na'.
+    html_pages_scanned = sum(1 for f in all_facts if f.get("html"))
     mixed_content = check_mixed_content_across_pages(all_facts)
 
     # B. Security Headers
@@ -963,6 +1012,7 @@ def run_full_security_audit(url, home_page, all_facts, proxy=None, timeout=6):
         "ssl": ssl_info,
         "hsts": hsts_info,
         "mixed_content": mixed_content,
+        "html_pages_scanned": html_pages_scanned,
         "sec_headers": sec_headers,
         "cookies": cookies_info,
         "version_leaks": version_leaks,
@@ -982,7 +1032,7 @@ def run_full_security_audit(url, home_page, all_facts, proxy=None, timeout=6):
 def generate_security_checks_catalog(sec_data, ctx, home):
     """
     Generates normalized check dictionaries for seo_checks.py.
-    Category: 'security'. Statuses: 'pass', 'warn', 'fail'.
+    Category: 'security'. Statuses: 'pass', 'warn', 'fail', 'info' (unscored), 'na' (not checked, unscored).
     """
     out = []
     final_url = home.get("final_url") or home.get("url") or ""
@@ -1013,17 +1063,32 @@ def generate_security_checks_catalog(sec_data, ctx, home):
     ))
 
     # 2. HTTP -> HTTPS Redirect
-    http_redir = ctx.get("http_redirect") or {}
+    http_redir = ctx.get("http_redirect")
     if is_https:
-        redir_ok = http_redir.get("redirects_to_https", True)
-        out.append(_c(
-            "sec_http_redirect", "HTTP to HTTPS Automatic Redirect",
-            "pass" if redir_ok else "fail",
-            "critical", "low",
-            "Insecure HTTP requests automatically redirect (301) to HTTPS." if redir_ok else "HTTP origin does not redirect to HTTPS, allowing unencrypted access.",
-            "" if redir_ok else "Configure a 301 permanent redirect from HTTP to HTTPS in server configuration.",
-            why="Unredirected HTTP endpoints split PageRank equity and expose user traffic to eavesdropping."
-        ))
+        if http_redir is None:
+            out.append(_c(
+                "sec_http_redirect", "HTTP to HTTPS Automatic Redirect",
+                "na", "critical", "low",
+                "The http:// version could not be tested, so the redirect was not checked.",
+                ""
+            ))
+        elif not http_redir.get("reachable"):
+            out.append(_c(
+                "sec_http_redirect", "HTTP to HTTPS Automatic Redirect",
+                "pass", "low", "low",
+                "HTTP port closed (only HTTPS served).",
+                ""
+            ))
+        else:
+            redir_ok = bool(http_redir.get("redirects_to_https"))
+            out.append(_c(
+                "sec_http_redirect", "HTTP to HTTPS Automatic Redirect",
+                "pass" if redir_ok else "fail",
+                "critical", "low",
+                "Insecure HTTP requests automatically redirect to HTTPS." if redir_ok else "HTTP origin does not redirect to HTTPS, allowing unencrypted access.",
+                "" if redir_ok else "Configure a 301 permanent redirect from HTTP to HTTPS in server configuration.",
+                why="Unredirected HTTP endpoints split PageRank equity and expose user traffic to eavesdropping."
+            ))
 
     # 3. SSL/TLS Certificate Expiry & Validity
     ssl_info = sec_data.get("ssl") or {}
@@ -1072,11 +1137,18 @@ def generate_security_checks_catalog(sec_data, ctx, home):
             "Disable TLS 1.0 and TLS 1.1 in web server/load balancer. Enforce TLS 1.2 and TLS 1.3 only.",
             why="TLS 1.0 and 1.1 have known cryptographic flaws (POODLE, BEAST) and are deprecated by all major browsers."
         ))
-    else:
+    elif tls_info.get("negotiated") and tls_info.get("legacy_probe_complete"):
         out.append(_c(
             "sec_tls_deprecated_protocols", "Modern TLS Protocol Enforcement",
             "pass", "low", "low",
-            f"Legacy TLS 1.0/1.1 disabled; modern {tls_info.get('negotiated') or 'TLS 1.2+'} enforced.",
+            f"Legacy TLS 1.0/1.1 refused by the server; negotiated {tls_info.get('negotiated')}.",
+            ""
+        ))
+    else:
+        out.append(_c(
+            "sec_tls_deprecated_protocols", "Deprecated TLS Protocols (TLS 1.0/1.1)",
+            "na", "high", "low",
+            "Legacy TLS 1.0/1.1 support could not be tested from this computer, so it was not checked.",
             ""
         ))
 
@@ -1093,11 +1165,19 @@ def generate_security_checks_catalog(sec_data, ctx, home):
                 where=[m["page"] for m in mixed[:2]],
                 why="Modern browsers block mixed-content scripts and show broken lock icons for insecure images."
             ))
+        elif not sec_data.get("html_pages_scanned"):
+            out.append(_c(
+                "sec_mixed_content", "Mixed Content Protection",
+                "na", "high", "low",
+                "Page HTML was not available to scan, so mixed content was not checked.",
+                ""
+            ))
         else:
             out.append(_c(
                 "sec_mixed_content", "Mixed Content Protection",
                 "pass", "low", "low",
-                "No insecure http:// subresources detected across crawled pages.",
+                "No insecure http:// subresources detected across %d scanned page(s)."
+                % sec_data.get("html_pages_scanned"),
                 ""
             ))
 
@@ -1328,7 +1408,7 @@ def generate_security_checks_catalog(sec_data, ctx, home):
         else:
             out.append(_c(
                 f"sec_lib_{lib_name.lower()}", f"Component Hygiene: {lib_name} {ver}",
-                "pass", "low", "low",
+                "info", "low", "low",
                 f"{lib_name} version {ver} detected with no confirmed critical CVEs.",
                 ""
             ))
@@ -1340,7 +1420,10 @@ def generate_security_checks_catalog(sec_data, ctx, home):
 
     # SPF
     spf = email.get("spf") or {}
-    if not spf.get("present"):
+    if not spf.get("present") and not spf.get("checked", True):
+        out.append(_c("sec_dns_spf", "SPF Email Authentication Record", "na", "high", "low",
+                      "DNS lookup failed, so the SPF record was not checked.", scope="site"))
+    elif not spf.get("present"):
         out.append(_c(
             "sec_dns_spf", "SPF Email Authentication Record",
             "fail", "high", "low",
@@ -1354,7 +1437,10 @@ def generate_security_checks_catalog(sec_data, ctx, home):
 
     # DMARC
     dmarc = email.get("dmarc") or {}
-    if not dmarc.get("present"):
+    if not dmarc.get("present") and not dmarc.get("checked", True):
+        out.append(_c("sec_dns_dmarc", "DMARC Phishing Protection Record", "na", "high", "low",
+                      "DNS lookup failed, so the DMARC record was not checked.", scope="site"))
+    elif not dmarc.get("present"):
         out.append(_c(
             "sec_dns_dmarc", "DMARC Phishing Protection Record",
             "fail", "high", "low",
@@ -1379,6 +1465,9 @@ def generate_security_checks_catalog(sec_data, ctx, home):
     dkim = email.get("dkim") or {}
     if dkim.get("present"):
         out.append(_c("sec_dns_dkim", "DKIM Email Signature Record", "pass", "low", "low", f"DKIM record discovered on selector '{dkim.get('selector')}'.", scope="site"))
+    elif not dkim.get("checked", True):
+        out.append(_c("sec_dns_dkim", "DKIM Email Signature Record", "na", "low", "low",
+                      "DNS lookup failed, so DKIM was not checked.", scope="site"))
 
     # =========================================================================
     # G. Authentication Surface Checks
@@ -1445,7 +1534,7 @@ def generate_security_checks_catalog(sec_data, ctx, home):
     if tech.get("cms"):
         out.append(_c(
             "sec_tech_cms", f"CMS Detection: {tech.get('cms')}",
-            "pass", "low", "low",
+            "info", "low", "low",
             f"Detected {tech.get('cms')} based on {tech.get('cms_indicator')}.",
             ""
         ))
