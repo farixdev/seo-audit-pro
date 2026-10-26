@@ -79,7 +79,14 @@ def _run_audit(job, folder, channel):
 
     params = {"url": job["url"], "max_pages": job["max_pages"], "psi_strategy": job["psi_strategy"],
               "psi_key": None, "cancel": threading.Event()}
+    # Screenshots and the Google Maps profile run while the site is crawled.
+    import client_pdf
+    shots_dir = os.path.join(folder, "client")
+    extras = client_pdf.start(job["url"], shots_dir)
     result = engine.run_audit(params, progress=lambda m: channel.send({"t": "msg", "text": str(m)}))
+    channel.send({"t": "msg", "text": "Checking the Google Business Profile"})
+    extras.wait()
+    result["gbp"], result["gbp_note"] = extras.gbp, extras.note
     _write_json(os.path.join(folder, "result.json"), result)
     # Both Word reports right away, so the whole team can open them as soon as the audit is in.
     channel.send({"t": "msg", "text": "Writing the reports"})
@@ -89,6 +96,11 @@ def _run_audit(job, folder, channel):
             _write_docx(result, kind, os.path.join(folder, f"{kind}.docx"))
         except Exception:  # noqa: BLE001 - the audit itself is fine; the report is made again when opened
             traceback.print_exc()
+    channel.send({"t": "msg", "text": "Making the client PDF"})
+    try:
+        client_pdf.write(result, shots_dir, os.path.join(folder, "client.pdf"), extras)
+    except Exception:  # noqa: BLE001 - made again when first opened
+        traceback.print_exc()
 
 
 def _write_docx(result, kind, path):

@@ -78,9 +78,9 @@ def _remove_file(stored):
 
 def register_for_app(audit_id, result, docx_files=None):
     """List the client and technical reports (DOCX and PDF) of a completed audit.
-    The server makes no file: ``docx_files`` ({kind: bytes}) are the Word reports
-    the app that ran the audit wrote, kept for the team; the others are built by
-    a desktop app when first opened."""
+    The server makes no file: ``docx_files`` ({kind: bytes}, plus ``client_pdf``)
+    are the reports the app that ran the audit wrote, kept for the team; the
+    others are built by a desktop app when first opened."""
     docx_files = docx_files or {}
     kept = []
     with db.transaction() as tx:
@@ -89,11 +89,11 @@ def register_for_app(audit_id, result, docx_files=None):
             for fmt in ("docx", "pdf"):
                 _remove_file(f"{base}.{fmt}")
                 rid = _record(tx, audit_id, kind, fmt, f"{base}.{fmt}", ready=False)
-                data = docx_files.get(kind) if fmt == "docx" else None
-                if data and data.startswith(b"PK") and len(data) <= MAX_FILE_BYTES:
+                data = docx_files.get(kind) if fmt == "docx" else docx_files.get(f"{kind}_pdf")
+                if data and data.startswith(b"PK" if fmt == "docx" else b"%PDF") and len(data) <= MAX_FILE_BYTES:
                     tx.execute("INSERT INTO report_data (report_id, data) VALUES (%s, %s)", (rid, data))
                     tx.execute("UPDATE reports SET ready = 1, size_bytes = %s WHERE id = %s", (len(data), rid))
-                    kept.append(({"id": rid, "stored_name": f"{base}.docx"}, data))
+                    kept.append(({"id": rid, "stored_name": f"{base}.{fmt}"}, data))
     for rep, data in kept:
         _write_cache(rep, data)
     return ["client:docx", "client:pdf", "technical:docx", "technical:pdf"]

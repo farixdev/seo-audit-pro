@@ -324,7 +324,6 @@ def _competitors(result):
 def screenshots(url, folder, timeout=40):
     """Desktop and phone screenshots of the live site with Edge/Chrome headless.
     Returns {"desktop": path, "mobile": path} for the ones that worked (JPEG)."""
-    import concurrent.futures
     import shutil
     import subprocess
     import tempfile
@@ -373,16 +372,23 @@ def screenshots(url, folder, timeout=40):
         ("mobile", "390,844", [f"--user-agent={phone_ua}"]),
     ]
 
-    # Run captures concurrently in background threads
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(capture_one, name, size, extra) for name, size, extra in targets]
-        for f in concurrent.futures.as_completed(futures):
-            try:
-                name, path = f.result()
-                if path:
-                    out[name] = path
-            except Exception:
-                pass
+    # Both captures at the same time (plain threads: concurrent.futures is a lazy
+    # import in this Python and fails when called from a frozen build).
+    import threading
+    found = {}
+
+    def worker(name, size, extra):
+        try:
+            found[name] = capture_one(name, size, extra)[1]
+        except Exception:  # noqa: BLE001 - a screenshot is optional
+            found[name] = None
+
+    threads = [threading.Thread(target=worker, args=t, daemon=True) for t in targets]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout + 5)
+    out.update({k: v for k, v in found.items() if v})
 
     return out
 

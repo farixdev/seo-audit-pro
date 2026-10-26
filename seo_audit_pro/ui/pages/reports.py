@@ -93,86 +93,36 @@ def save_remote(page, path, suggested, file_filter):
               on_error=lambda e: show_error(page, e, "Download failed"), owner=page)
 
 
-def build_client_report(audit_id, force=False):
-    """The Mindcob client report, built on this computer from the stored result
-    (with website screenshots). Converts HTML -> PDF with background graphics and
-    no headers/footers, saves the deliverable, and returns the PDF (or HTML) path."""
-    import gzip
-    import json
-
-    import client_report
-    import full_report
-    import mindcob_report
-
-    packed = api.request("GET", f"/api/audits/{audit_id}/result-data", timeout=120)
-    result = json.loads(gzip.decompress(packed) if packed[:2] == b"\x1f\x8b" else packed)
-    domain = result.get("domain") or "site"
-    folder = os.path.join(settings.downloads_dir(), "Client reports", f"{domain} - {str(audit_id)[:8]}")
+def client_report_path(audit_id):
+    """The client PDF for an audit, saved in "Client reports". Made once: the
+    computer that ran the audit already sends it to the team; otherwise the first
+    computer to open it builds it and shares it. Returns the saved path."""
+    folder = os.path.join(settings.downloads_dir(), "Client reports")
     os.makedirs(folder, exist_ok=True)
-
-    pdf_path = os.path.join(folder, f"{domain} - Brighton Website SEO & Growth Report.pdf")
-    html_path = os.path.join(folder, f"{domain} - Brighton Website SEO & Growth Report.html")
-
-    # If already generated and not forced, return cached deliverable immediately
-    if not force and os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 1000:
-        return pdf_path
-    if not force and os.path.isfile(html_path) and os.path.getsize(html_path) > 1000 and not full_report._browser():
-        return html_path
-
-    shots = client_report.screenshots(result.get("final_url") or f"https://{domain}", folder)
-    gbp = result.get("gbp")
-    if gbp is None and result.get("gbp_note") != "not_found":
-        try:
-            import google_maps_scraper
-            gbp, note = google_maps_scraper.scrape_google_maps(result.get("final_url") or domain, timeout=12)
-            result["gbp"] = gbp
-            result["gbp_note"] = note
-        except Exception:
-            pass
-    with open(html_path, "w", encoding="utf-8") as fh:
-        fh.write(mindcob_report.build(result, {"name": "Brighton Analytics"}, gbp=gbp, shots=shots))
-
-    if full_report.html_to_pdf(html_path, pdf_path):
-        # Store to server reports so client download / email has this exact PDF
-        try:
-            reps = api.get(f"/api/reports?audit_id={audit_id}").get("items", [])
-            for r in reps:
-                if r.get("kind") == "client" and r.get("format") == "pdf":
-                    with open(pdf_path, "rb") as fh:
-                        api.request("PUT", f"/api/reports/{r['id']}/file", data=fh.read(), timeout=60)
-                    break
-        except Exception:
-            pass
-        return pdf_path
-
-    return html_path
+    tag = str(audit_id)[:8]
+    for name in os.listdir(folder):
+        p = os.path.join(folder, name)
+        if tag in name and name.lower().endswith(".pdf") and os.path.getsize(p) > 1000:
+            return p
+    rows = api.get("/api/reports", params={"audit_id": audit_id, "kind": "client", "format": "pdf"}).get("items") or []
+    if not rows:
+        raise api.ApiError(404, "This audit has no client report yet.", "not_found")
+    row = rows[0]
+    name = f"{row.get('normalized_domain') or 'site'} - {tag} - Client SEO Report.pdf"
+    target = os.path.join(folder, name)
+    tmp = tempfile.mkdtemp(prefix="seoap_")
+    try:
+        local = api.download(f"/api/reports/{row['id']}/download", tmp, name)
+        os.replace(local, target)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return target
 
 
 def view_client_report(page, audit_id):
-    # If already generated, open immediately without regenerating
-    client_dir = os.path.join(settings.downloads_dir(), "Client reports")
-    cached_file = None
-    if os.path.isdir(client_dir):
-        suffix = f"- {str(audit_id)[:8]}"
-        for name in os.listdir(client_dir):
-            if name.endswith(suffix):
-                cand = os.path.join(client_dir, name)
-                if os.path.isdir(cand):
-                    for f in os.listdir(cand):
-                        if f.endswith(".pdf") and os.path.getsize(os.path.join(cand, f)) > 1000:
-                            cached_file = os.path.join(cand, f)
-                            break
-                        if f.endswith(".html") and not cached_file and os.path.getsize(os.path.join(cand, f)) > 1000:
-                            cached_file = os.path.join(cand, f)
-            if cached_file and cached_file.endswith(".pdf"):
-                break
-    if cached_file:
-        QDesktopServices.openUrl(QUrl.fromLocalFile(cached_file))
-        return
-
-    toast(page, "Building the client report (takes a few seconds)…", "info", 4000)
-    tasks.run(build_client_report, audit_id, on_done=lambda p: QDesktopServices.openUrl(QUrl.fromLocalFile(p)),
-              on_error=lambda e: show_error(page, e, "Could not build the client report"), owner=page)
+    toast(page, "Opening the client report…", "info", 2500)
+    tasks.run(client_report_path, audit_id, on_done=lambda p: QDesktopServices.openUrl(QUrl.fromLocalFile(p)),
+              on_error=lambda e: show_error(page, e, "Could not open the client report"), owner=page)
 
 
 def export_json(page, audit_id, domain):

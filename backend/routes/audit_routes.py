@@ -673,7 +673,8 @@ def audit_job_progress(audit_id):
 def audit_job_result(audit_id):
     """The finished engine result (gzip-compressed JSON) from the app that ran it,
     either as the whole body or as the ``result`` part of a form that also holds
-    the Word reports the app wrote (``client_docx``, ``technical_docx``)."""
+    the Word reports the app wrote (``client_docx``, ``technical_docx``) and the
+    client PDF (``client_pdf``)."""
     _apps_only()
     docx_files = {}
     if request.files:
@@ -683,6 +684,9 @@ def audit_job_result(audit_id):
             f = request.files.get(f"{kind}_docx")
             if f:
                 docx_files[kind] = f.read(reports.MAX_FILE_BYTES + 1)
+        f = request.files.get("client_pdf")  # the finished client PDF (HTML report printed on that computer)
+        if f:
+            docx_files["client_pdf"] = f.read(reports.MAX_FILE_BYTES + 1)
     else:
         raw = request.get_data(cache=False)
     try:

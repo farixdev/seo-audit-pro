@@ -67,7 +67,7 @@ a = Analysis(
         "backend.routes.org_routes", "backend.routes.outreach_routes", "backend.routes.workspace_routes",
         "audit", "crawler", "security_audit", "seo_checks", "scoring", "pagespeed", "authority_traffic",
         "structured_data", "history_manager", "report_docx", "report_html", "charts", "llm", "prefs",
-        "full_report", "client_report", "mindcob_report", "google_maps_scraper",
+        "full_report", "client_report", "mindcob_report", "google_maps_scraper", "client_pdf",
         "flask_sock", "simple_websocket", "openpyxl", "matplotlib.backends.backend_agg",
     ],
     hookspath=[],

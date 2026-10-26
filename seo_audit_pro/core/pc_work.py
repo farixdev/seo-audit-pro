@@ -283,6 +283,10 @@ class AuditRunner:
             if os.path.isfile(made):
                 with open(made, "rb") as fh:
                     files[f"{kind}_docx"] = (f"{kind}.docx", fh.read(), "application/octet-stream")
+        made = os.path.join(job.folder, "client.pdf")
+        if os.path.isfile(made):
+            with open(made, "rb") as fh:
+                files["client_pdf"] = ("client.pdf", fh.read(), "application/pdf")
         try:
             api.request("POST", f"/api/audit-jobs/{job.id}/result", files=files, timeout=180)
         except ApiError as e:
@@ -304,6 +308,9 @@ class AuditRunner:
                 made = os.path.join(job.folder, f"{kind}.docx")
                 if os.path.isfile(made):
                     shutil.copyfile(made, os.path.join(cache, f"{job.id}-{kind}.docx"))
+            made = os.path.join(job.folder, "client.pdf")
+            if os.path.isfile(made):
+                shutil.copyfile(made, os.path.join(cache, f"{job.id}-client.pdf"))
         except OSError:
             pass
 
@@ -351,10 +358,9 @@ def report_file(audit_id, kind, fmt):
         import full_report
         if full_report._browser():
             with _REPORT_LOCK:
-                if os.path.isfile(path):
-                    return path
-                _build_client_html_pdf(audit_id, path, cache)
-                return path
+                if not os.path.isfile(path):
+                    _build_client_pdf(audit_id, path, cache)
+            return path
     if fmt == "pdf" and not pdf_supported():
         raise ApiError(409, "PDF reports need Microsoft Word or LibreOffice on this computer. "
                             "Download the Word (DOCX) report instead.", "pdf_unavailable")
@@ -374,26 +380,10 @@ def report_file(audit_id, kind, fmt):
     return path
 
 
-def _build_client_html_pdf(audit_id, pdf_path, cache):
-    import gzip
-    import client_report
-    import full_report
-    import mindcob_report
-    from seo_audit_pro.core import settings
-
-    # Check if already generated in user's Client reports folder
-    client_dir = os.path.join(settings.downloads_dir(), "Client reports")
-    if os.path.isdir(client_dir):
-        suffix = f"- {str(audit_id)[:8]}"
-        for name in os.listdir(client_dir):
-            if name.endswith(suffix):
-                cand = os.path.join(client_dir, name)
-                if os.path.isdir(cand):
-                    for f in os.listdir(cand):
-                        if f.endswith(".pdf") and os.path.getsize(os.path.join(cand, f)) > 1000:
-                            shutil.copyfile(os.path.join(cand, f), pdf_path)
-                            return
-
+def _build_client_pdf(audit_id, pdf_path, cache):
+    """Client PDF for an audit run on another computer (or before this feature):
+    screenshots and the Maps lookup run together, then the HTML is printed."""
+    import client_pdf
     result_path = os.path.join(cache, f"{audit_id}.json.gz")
     if not os.path.isfile(result_path):
         data = api.get(f"/api/audits/{audit_id}/result-data", timeout=120)
@@ -402,26 +392,10 @@ def _build_client_html_pdf(audit_id, pdf_path, cache):
         os.replace(result_path + ".part", result_path)
     with gzip.open(result_path, "rt", encoding="utf-8") as fh:
         result = json.load(fh)
-    domain = result.get("domain") or "site"
     folder = os.path.join(cache, f"client_{audit_id}")
-    os.makedirs(folder, exist_ok=True)
-    shots = client_report.screenshots(result.get("final_url") or f"https://{domain}", folder)
-    html_path = os.path.join(folder, f"{domain} - Brighton Website SEO & Growth Report.html")
-    gbp = result.get("gbp")
-    if gbp is None and result.get("gbp_note") != "not_found":
-        try:
-            import google_maps_scraper
-            gbp, note = google_maps_scraper.scrape_google_maps(result.get("final_url") or domain, timeout=12)
-            result["gbp"] = gbp
-            result["gbp_note"] = note
-        except Exception:
-            pass
-    with open(html_path, "w", encoding="utf-8") as fh:
-        fh.write(mindcob_report.build(result, {"name": "Brighton Analytics"}, gbp=gbp, shots=shots))
-    part_pdf = pdf_path + ".part.pdf"
-    if not full_report.html_to_pdf(html_path, part_pdf):
-        raise ApiError(500, "The client PDF could not be created on this computer. Download the Word (DOCX) report instead.", "pdf_failed")
-    os.replace(part_pdf, pdf_path)
+    if not client_pdf.write(result, folder, pdf_path):
+        raise ApiError(500, "The client PDF could not be created on this computer. Download the Word (DOCX) "
+                            "report instead.", "pdf_failed")
 
 
 def _build_docx(audit_id, kind, docx, cache):

@@ -189,7 +189,7 @@ def main():
     if instance.forward():
         return  # already running: the other window was brought to the front
     from seo_audit_pro import local_server
-    app.aboutToQuit.connect(local_server.instance().stop)
+    app.aboutToQuit.connect(local_server.instance().on_app_quit)
     startup = Startup(app)
     instance.on_activate = lambda: _raise(startup.window)
     startup.run()

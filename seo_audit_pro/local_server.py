@@ -6,7 +6,9 @@ The server is a second, windowless process of the same program
 (``SEOAuditPro.exe --serve``), so audits never slow down the window. It keeps
 everything in one data folder (database, reports, uploads, logs and its own
 secret keys, all created on first start) and exits as soon as the app that
-started it closes — even if the app crashes.
+started it closes — even if the app crashes. When it is shared on the local
+network it keeps running after the window closes, so the rest of the team can
+go on auditing and syncing; the next start of the app takes it over again.
 
 The app still talks to it over HTTP exactly like a remote server, so the
 desktop never touches the database directly.
@@ -76,6 +78,7 @@ class LocalServer:
 
     def __init__(self):
         self.proc = None
+        self.pid = None        # a shared server left running by an earlier start of the app
         self.port = None
         self.shared = False
         self._lock = threading.Lock()
@@ -85,7 +88,9 @@ class LocalServer:
         return f"http://127.0.0.1:{self.port}" if self.port else None
 
     def running(self):
-        return self.proc is not None and self.proc.poll() is None
+        if self.proc is not None:
+            return self.proc.poll() is None
+        return bool(self.pid) and _alive(self.pid)
 
     def _command(self):
         if getattr(sys, "frozen", False):
@@ -99,18 +104,23 @@ class LocalServer:
     def start(self, share=False, preferred_port=None, timeout=120):
         """Start (or restart) the server and wait until it answers. Returns its URL."""
         with self._lock:
-            self._stop_locked()
             host = "0.0.0.0" if share else "127.0.0.1"
+            if share and self._adopt(host):
+                return self.url
+            self._stop_locked()
+            self._stop_left_running()
             self.port = pick_port(preferred_port, host)
             self.shared = share
             data = data_dir()
             log_path = os.path.join(data, "logs", "server-start.log")
             log = open(log_path, "ab")
+            # A shared server outlives the window (the team keeps working); a private one ends with it.
             cmd = self._command() + ["--port", str(self.port), "--host", host, "--data", data,
-                                     "--parent", str(os.getpid())]
+                                     "--parent", "0" if share else str(os.getpid())]
+            flags = _SPAWN_FLAGS | (_DETACHED if share else 0)
             try:
                 self.proc = subprocess.Popen(cmd, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-                                             creationflags=_SPAWN_FLAGS, close_fds=True)
+                                             creationflags=flags, close_fds=True)
             except OSError as e:
                 raise StartError(f"The audit server could not be started: {e}")
             finally:
@@ -135,9 +145,39 @@ class LocalServer:
         self._stop_locked()
         raise StartError(f"The audit server did not start within {timeout} seconds. Details are in {log_path}.")
 
+    def _adopt(self, host):
+        """Use the shared server an earlier start of the app left running."""
+        info = _server_info()
+        if not info or info.get("host") != host or info.get("build") != _build_stamp() or not _alive(info.get("pid")):
+            return False  # not there, not shared, or left by an older version of the app
+        import requests
+        try:
+            if requests.get(f"http://127.0.0.1:{info['port']}/api/health", timeout=3).status_code != 200:
+                return False
+        except requests.RequestException:
+            return False
+        self.proc, self.pid, self.port, self.shared = None, info["pid"], info["port"], True
+        return True
+
+    def _stop_left_running(self):
+        info = _server_info()
+        pid = self.pid or (info or {}).get("pid")
+        self.pid = None
+        if pid and pid != os.getpid() and _alive(pid) and (info or {}).get("host") == "0.0.0.0":
+            try:
+                os.kill(pid, 15)
+            except OSError:
+                pass
+
     def stop(self):
         with self._lock:
             self._stop_locked()
+            self._stop_left_running()
+
+    def on_app_quit(self):
+        """The window is closing: a shared server keeps serving the team."""
+        if not self.shared:
+            self.stop()
 
     def _stop_locked(self):
         proc, self.proc = self.proc, None
@@ -148,6 +188,46 @@ class LocalServer:
             proc.wait(5)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+_DETACHED = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+
+def _build_stamp():
+    """Changes whenever the app is updated (so an old server is replaced)."""
+    try:
+        return str(int(os.path.getmtime(sys.executable if getattr(sys, "frozen", False) else __file__)))
+    except OSError:
+        return ""
+
+
+def _server_info():
+    try:
+        with open(os.path.join(data_dir(), "server.json"), encoding="utf-8") as fh:
+            info = json.load(fh)
+        return info if info.get("pid") and info.get("port") else None
+    except (OSError, ValueError):
+        return None
+
+
+def _alive(pid):
+    if not pid:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel32.CloseHandle(handle)
+        return code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except OSError:
+        return False
 
 
 def _tail(path, lines=12):
@@ -209,7 +289,7 @@ def serve(argv=None):
     import web_app
     logging.getLogger("werkzeug").setLevel(logging.WARNING)  # no line per request in the log
     with open(os.path.join(data, "server.json"), "w", encoding="utf-8") as fh:
-        json.dump({"pid": os.getpid(), "port": args.port, "host": args.host}, fh)
+        json.dump({"pid": os.getpid(), "port": args.port, "host": args.host, "build": _build_stamp()}, fh)
     web_app.start_server(port=args.port, host=args.host)
 
 
