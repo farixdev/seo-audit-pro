@@ -143,10 +143,27 @@ def get_driver(headless: bool = False, user_agent: str = ""):
     if major:
         kwargs["version_main"] = major
 
+    if not binary and not uc.find_chrome_executable():
+        raise RuntimeError("Google Chrome is not installed on this computer, and Map Harvest needs it. "
+                           "Install it from google.com/chrome, then try again.")
     try:
         driver = uc.Chrome(**kwargs)
     except Exception as e:
         err_str = str(e)
+        low = err_str.lower()
+        if sys.platform != "darwin":
+            if "binary location" in low or "cannot find chrome" in low or "chrome not found" in low:
+                raise RuntimeError("Google Chrome could not be found. Install it from google.com/chrome, "
+                                   "then try again.") from e
+            if any(w in low for w in ("urlopen", "getaddrinfo", "timed out", "connection", "http error", "ssl")):
+                raise RuntimeError("The Chrome driver could not be downloaded (no internet, or a firewall blocked "
+                                   "it). Check the connection and try again.") from e
+            if "session not created" in low or "version" in low:
+                raise RuntimeError("Chrome and its driver do not match. Update Google Chrome (Menu > Help > About "
+                                   "Google Chrome), restart it, then try again.") from e
+            if isinstance(e, PermissionError) or "access is denied" in low:
+                raise RuntimeError("Windows blocked the Chrome driver (often antivirus). Allow Rankly in the "
+                                   "antivirus, then try again.") from e
         if sys.platform == "darwin":
             if "Permission denied" in err_str or "chromedriver" in err_str.lower() or isinstance(e, OSError):
                 raise RuntimeError(

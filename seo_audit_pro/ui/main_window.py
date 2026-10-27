@@ -96,10 +96,56 @@ class MainWindow(QMainWindow):
         if self.quick is None:
             from seo_audit_pro.ui.quick_portal import QuickPortal
             self.quick = QuickPortal()
-            self.quick.leave.connect(lambda: self.show_auth("welcome" if settings.mode() is None else "signin"))
+            self.quick.leave.connect(self._leave_quick)
             self.stack.addWidget(self.quick)
+        settings.set_start_in("quick")   # open here next time too
         self._switch(self.quick)
         self.quick.start()
+
+    def _leave_quick(self):
+        """"Sign in to a workspace": stop opening in Scrape & Audit and start the
+        workspace connection the normal way (server on this computer, or the
+        team server), then sign in — or go straight in with a saved session."""
+        settings.set_start_in("")
+        mode = settings.mode()
+        if mode is None:
+            self.show_auth("welcome")
+            return
+        self.show_auth("signin", "Connecting…", "info")
+        if mode == settings.LOCAL:
+            from seo_audit_pro.core import local
+
+            def ready(status):
+                if status.get("needs_setup"):
+                    self.show_auth("setup")
+                else:
+                    self._restore_or_sign_in()
+
+            local.start(ready, lambda err: self.show_auth("welcome", err.message), owner=self)
+        else:
+            self._restore_or_sign_in()
+
+    def _restore_or_sign_in(self):
+        """Use the saved "Keep me signed in" session when there is one."""
+        stored = session.stored_refresh()
+        if not (stored and stored.get("refresh_token")):
+            self.show_auth("signin")
+            return
+        session.refresh_token = stored["refresh_token"]
+        session.remember = True
+
+        def done(ok):
+            if not ok:
+                session.end()
+                self.show_auth("signin", "Your saved session has expired. Please sign in again.", "info")
+            elif (session.user or {}).get("must_change_password"):
+                self.show_auth("change")
+            else:
+                session.set_user(session.user)
+                self.enter_workspace()
+
+        tasks.run(api.refresh_session, on_done=done,
+                  on_error=lambda e: self.show_auth("signin", f"Server unavailable — {e.message}"), owner=self)
 
     def enter_workspace(self):
         self._switch(self.workspace)

@@ -70,7 +70,9 @@ class Startup:
         if missing:
             logging.getLogger("seo_audit_pro").warning("Missing assets: %s", missing)
         mode = settings.mode()
-        if mode is None:  # first run: choose "This computer" or a team server
+        if settings.start_in() == "quick":  # last time: Scrape & Audit without an account
+            self.finish("quick")
+        elif mode is None:  # first run: choose "This computer" or a team server
             self.finish("welcome")
         elif mode == settings.LOCAL:
             self.start_local()
@@ -148,6 +150,9 @@ class Startup:
                     self.window.stack.setCurrentWidget(self.window.workspace)
                     self.window.fade_in()
                     self.window.workspace.start()
+                elif target == "quick":
+                    self.window.enter_quick()
+                    self.window.fade_in()
                 else:
                     self.window.show_auth(target, notice, kind)
                     self.window.fade_in()
@@ -307,3 +312,55 @@ def selftest(argv):
     app.exec()
     report.close()
     os._exit(1)
+
+
+def diagnose(argv):
+    """``Rankly.exe --diagnose [file]``: check what this computer needs (saved
+    sign-in, folders, browser for PDFs/screenshots, internet) and write a short
+    report (default: rankly-diagnose.txt on the Desktop)."""
+    args = [a for a in argv if not a.startswith("--")]
+    out = args[0] if args else os.path.join(os.path.expanduser("~"), "Desktop", "rankly-diagnose.txt")
+    lines = []
+
+    def check(name, fn):
+        try:
+            result = fn()
+            lines.append(f"OK    {name}: {result}")
+        except Exception as e:  # noqa: BLE001 - every check reports its own failure
+            lines.append(f"FAIL  {name}: {type(e).__name__}: {e}")
+
+    def keyring_check():
+        import keyring
+        keyring.set_password("Rankly diagnose", "test", "ok")
+        value = keyring.get_password("Rankly diagnose", "test")
+        keyring.delete_password("Rankly diagnose", "test")
+        if value != "ok":
+            raise RuntimeError("stored value could not be read back")
+        return f"saved sign-in works ({type(keyring.get_keyring()).__name__})"
+
+    def folder_check():
+        from seo_audit_pro.core import settings
+        return settings.downloads_dir()
+
+    def browser_check():
+        import full_report
+        exe = full_report._browser()
+        if not exe:
+            raise RuntimeError("no Edge or Chrome found: client PDFs and screenshots cannot be made")
+        return exe
+
+    def internet_check():
+        import requests
+        return f"status {requests.head('https://www.google.com', timeout=10).status_code}"
+
+    from seo_audit_pro import APP_NAME, APP_VERSION
+    lines.append(f"{APP_NAME} {APP_VERSION} · Python {sys.version.split()[0]} · {sys.platform}")
+    check("Saved sign-in (Windows Credential Manager)", keyring_check)
+    check("Reports folder writable", folder_check)
+    check("Browser for PDFs and screenshots", browser_check)
+    check("Internet", internet_check)
+    check("Audit engine loads", lambda: (__import__("audit"), "ok")[1])
+    check("Word reports load", lambda: (__import__("report_docx"), "ok")[1])
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    os._exit(0 if all(not ln.startswith("FAIL") for ln in lines) else 1)

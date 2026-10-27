@@ -41,6 +41,7 @@ class ResultsScreen(QWidget):
     stop_signal = pyqtSignal()
     home_signal = pyqtSignal()
     audit_signal = pyqtSignal(list)   # quick portal: [{"site": url, "business": name}]
+    leads_scraped = pyqtSignal(list, str, str)   # quick portal: rows, niche (search), area -> My Leads
 
     TOAST_MS = 6000
 
@@ -586,6 +587,8 @@ class ResultsScreen(QWidget):
     def _on_domain_finished(self, domain, area, count, max_results, hit_limit):
         if not self.worker:
             return
+        if self.quick_mode and self.results:
+            self.leads_scraped.emit(list(self.results), str(domain or ""), str(area or ""))
         self._notify_task_export(domain, area, count, hit_limit, rows=list(self.results))
         self.results = []
         self.table.setRowCount(0)
@@ -597,6 +600,9 @@ class ResultsScreen(QWidget):
 
     def on_done(self):
         n = len(self.results)
+        if self.quick_mode and self.results:
+            d, a = self._current_task()
+            self.leads_scraped.emit(list(self.results), str(d or ""), str(a or ""))
         if self._stopped_by_user:
             if n > 0:
                 d, a = self._current_task()

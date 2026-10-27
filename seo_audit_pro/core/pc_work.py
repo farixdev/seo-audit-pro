@@ -500,10 +500,13 @@ def forget_reports(audit_id):
         from seo_audit_pro.core import settings
         client_dir = os.path.join(settings.downloads_dir(), "Client reports")
         if os.path.isdir(client_dir):
-            suffix = f"- {str(audit_id)[:8]}"
+            tag = f"[{audit_id}]"   # saved by "View client report" (see reports.client_report_path)
             for name in os.listdir(client_dir):
-                if name.endswith(suffix):
-                    shutil.rmtree(os.path.join(client_dir, name), ignore_errors=True)
+                if tag in name:
+                    try:
+                        os.remove(os.path.join(client_dir, name))
+                    except OSError:
+                        pass
     except Exception:
         pass
 

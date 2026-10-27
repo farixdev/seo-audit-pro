@@ -39,8 +39,12 @@ class _Task(QRunnable):
             return
         except Exception as e:  # noqa: BLE001
             log.error("Background task failed: %s\n%s", e, traceback.format_exc())
-            self._emit(self.signals.failed, ApiError(-1, "Something went wrong. We couldn't complete this operation.",
-                                                     "client_error"))
+            # Say what actually went wrong (file locked, disk full, bad file, ...), not a generic line.
+            from seo_audit_pro.errors import explain
+            message, code = explain(e)
+            if code == "unexpected":
+                message = f"This could not be completed ({type(e).__name__}: {str(e)[:160]}). Details are in the app log."
+            self._emit(self.signals.failed, ApiError(-1, message, code))
             return
         self._emit(self.signals.done, result)
 

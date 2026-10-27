@@ -218,6 +218,20 @@ def download(path, dest_dir=None, filename=None, params=None):
     return target
 
 
+def save_as(path, target, params=None):
+    """Download ``path`` to exactly ``target`` (the file the person chose in a
+    Save dialog, replacing it if they confirmed that). Returns ``target``."""
+    import shutil
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="seoap_")
+    try:
+        local = download(path, tmp, os.path.basename(target), params=params)
+        os.replace(local, target)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return target
+
+
 def health(timeout=5):
     try:
         resp = _http().get(_url("/api/health"), timeout=timeout)

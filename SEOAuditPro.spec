@@ -68,7 +68,7 @@ a = Analysis(
         "audit", "crawler", "security_audit", "seo_checks", "scoring", "pagespeed", "authority_traffic",
         "structured_data", "history_manager", "report_docx", "report_html", "charts", "llm", "prefs",
         "full_report", "client_report", "mindcob_report", "google_maps_scraper", "client_pdf",
-        "seo_audit_pro.quick_audit", "seo_audit_pro.ui.quick_portal",
+        "seo_audit_pro.quick_audit", "seo_audit_pro.ui.quick_portal", "seo_audit_pro.solo_db", "seo_audit_pro.errors",
         "flask_sock", "simple_websocket", "openpyxl", "matplotlib.backends.backend_agg",
     ],
     hookspath=[],

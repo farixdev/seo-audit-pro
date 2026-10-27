@@ -793,7 +793,7 @@ def start_import(batch_id):
 
 
 @bp.delete("/api/lead-batches/<batch_id>")
-@require(MANAGER, TEAM_LEAD)
+@require(MANAGER, TEAM_LEAD, AGENT)   # the person who previewed a file may discard it (checked below)
 def discard_import(batch_id):
     batch = _load_batch(batch_id)
     if batch["status"] != "pending":

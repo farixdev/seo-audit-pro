@@ -295,8 +295,7 @@ class ImportsView(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Save rejected rows", default, "CSV (*.csv)")
         if not path:
             return
-        tasks.run(api.download, f"/api/lead-batches/{row['id']}/rejects.csv", os.path.dirname(path),
-                  os.path.basename(path), on_done=lambda p: toast(self, f"Saved {os.path.basename(p)}", "success"),
+        tasks.run(api.save_as, f"/api/lead-batches/{row['id']}/rejects.csv", path, on_done=lambda p: toast(self, f"Saved {os.path.basename(p)}", "success"),
                   on_error=lambda e: show_error(self, e), owner=self)
 
     def show_rejects(self, row):
@@ -760,8 +759,7 @@ class LeadsPage(Page):
         if not path:
             return
         toast(self, "Exporting the current selection…", "info")
-        tasks.run(api.download, "/api/leads/export", os.path.dirname(path), os.path.basename(path),
-                  params=self._filter_params(),
+        tasks.run(api.save_as, "/api/leads/export", path, params=self._filter_params(),
                   on_done=lambda p: toast(self, f"Exported to {os.path.basename(p)}", "success"),
                   on_error=lambda e: show_error(self, e), owner=self)
 

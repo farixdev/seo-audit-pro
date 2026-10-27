@@ -37,7 +37,7 @@ class DashboardPage(Page):
         if role != "AGENT":
             self.metrics.add("unassigned", "Unassigned")
         self.metrics.add("audits_7d", "Audits completed · 7 days")
-        self.metrics.add("running", "Audits running")
+        self.metrics.add("running", "Audits in progress")   # running + waiting in the queue
         self.metrics.add("avg", "Average score · 30 days")
         self.metrics.add("emails", "Outreached · 30 days")
         cl.addWidget(self.metrics)

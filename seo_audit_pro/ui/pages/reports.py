@@ -99,7 +99,7 @@ def client_report_path(audit_id):
     computer to open it builds it and shares it. Returns the saved path."""
     folder = os.path.join(settings.downloads_dir(), "Client reports")
     os.makedirs(folder, exist_ok=True)
-    tag = str(audit_id)[:8]
+    tag = f"[{audit_id}]"   # the full audit id: never another client's file
     for name in os.listdir(folder):
         p = os.path.join(folder, name)
         if tag in name and name.lower().endswith(".pdf") and os.path.getsize(p) > 1000:
@@ -108,7 +108,7 @@ def client_report_path(audit_id):
     if not rows:
         raise api.ApiError(404, "This audit has no client report yet.", "not_found")
     row = rows[0]
-    name = f"{row.get('normalized_domain') or 'site'} - {tag} - Client SEO Report.pdf"
+    name = f"{row.get('normalized_domain') or 'site'} - Client SEO Report {tag}.pdf"
     target = os.path.join(folder, name)
     tmp = tempfile.mkdtemp(prefix="seoap_")
     try:

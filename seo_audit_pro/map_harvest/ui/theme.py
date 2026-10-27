@@ -20,12 +20,12 @@ QLineEdit, QTextEdit {
     padding: 8px 12px;
     color: #18181B;
     font-size: 13px;
-    selection-background-color: #EEF2FE;
+    selection-background-color: #ECECEC;
     selection-color: #18181B;
 }
 
 QLineEdit:focus, QTextEdit:focus {
-    border: 1px solid #2563EB;
+    border: 1px solid #2A2A2A;
     outline: none;
 }
 
@@ -81,7 +81,7 @@ QPushButton#danger:hover {
 }
 
 QPushButton#lead_bank_btn {
-    background-color: #2563EB;
+    background-color: #2A2A2A;
     color: #FFFFFF;
     border: none;
     border-radius: 8px;
@@ -92,7 +92,7 @@ QPushButton#lead_bank_btn {
 }
 
 QPushButton#lead_bank_btn:hover {
-    background-color: #1D4ED8;
+    background-color: #3D3D3D;
 }
 
 QPushButton#lead_bank_btn:disabled {
@@ -115,12 +115,12 @@ QCheckBox::indicator {
 }
 
 QCheckBox::indicator:checked {
-    background-color: #2563EB;
-    border-color: #2563EB;
+    background-color: #2A2A2A;
+    border-color: #2A2A2A;
 }
 
 QCheckBox::indicator:hover {
-    border-color: #2563EB;
+    border-color: #2A2A2A;
 }
 
 QTableWidget {
@@ -139,7 +139,7 @@ QTableWidget::item {
 }
 
 QTableWidget::item:selected {
-    background-color: #EEF2FE;
+    background-color: #ECECEC;
     color: #18181B;
 }
 
@@ -211,7 +211,7 @@ QProgressBar {
 }
 
 QProgressBar::chunk {
-    background-color: #2563EB;
+    background-color: #2A2A2A;
     border-radius: 2px;
 }
 
@@ -318,7 +318,7 @@ QSlider::groove:horizontal {
 }
 
 QSlider::handle:horizontal {
-    background: #2563EB;
+    background: #2A2A2A;
     width: 14px;
     height: 14px;
     margin: -5px 0;
@@ -326,11 +326,11 @@ QSlider::handle:horizontal {
 }
 
 QSlider::handle:horizontal:hover {
-    background: #1D4ED8;
+    background: #3D3D3D;
 }
 
 QSlider::sub-page:horizontal {
-    background: #2563EB;
+    background: #2A2A2A;
     border-radius: 2px;
 }
 
@@ -363,7 +363,7 @@ QListWidget#saved_list::item {
 }
 
 QListWidget#saved_list::item:selected {
-    background-color: #EEF2FE;
+    background-color: #ECECEC;
     color: #18181B;
 }
 
@@ -420,11 +420,11 @@ QComboBox {
     color: #18181B;
 }
 
-QComboBox:hover { border-color: #2563EB; }
+QComboBox:hover { border-color: #2A2A2A; }
 QComboBox QAbstractItemView {
     background-color: #FFFFFF;
     color: #18181B;
-    selection-background-color: #EEF2FE;
+    selection-background-color: #ECECEC;
     selection-color: #18181B;
     border: 1px solid #E4E4E7;
     outline: none;

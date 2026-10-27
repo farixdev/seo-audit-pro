@@ -2,8 +2,8 @@
 """
 Design tokens and the application stylesheet.
 
-Neutral graphite / off-white palette. Colour is reserved for status, severity
-and the single primary action on a screen.
+Palette: Charcoal Grey (#2A2A2A) and Moonlit Silver (#C0C0C0) with the greys
+between them. Colour is reserved for status, severity and scores.
 """
 
 # ---------------------------------------------------------------------------
@@ -16,25 +16,25 @@ MONO_FAMILY = "Cascadia Mono"
 SPACE = {1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 6: 24, 8: 32, 10: 40, 12: 48}
 
 C = {
-    "canvas": "#F7F7F8",
+    "canvas": "#F6F6F6",
     "surface": "#FFFFFF",
     "surface_alt": "#FAFAFA",
-    "sidebar": "#F1F1F3",
-    "sidebar_hover": "#E7E7EA",
+    "sidebar": "#EFEFEF",
+    "sidebar_hover": "#E3E3E3",
     "sidebar_active": "#FFFFFF",
-    "border": "#E4E4E7",
-    "border_strong": "#D4D4D8",
-    "divider": "#EDEDF0",
-    "text": "#18181B",
+    "border": "#E0E0E0",
+    "border_strong": "#C0C0C0",
+    "divider": "#EBEBEB",
+    "text": "#2A2A2A",
     "text_2": "#52525B",
     "text_3": "#71717A",
     "muted": "#A1A1AA",
-    "ink": "#18181B",
-    "ink_hover": "#2E2E33",
-    "accent": "#2F5BEA",
-    "accent_soft": "#EEF2FE",
-    "focus": "#2F5BEA",
-    "selection": "#EEF2FE",
+    "ink": "#2A2A2A",
+    "ink_hover": "#3D3D3D",
+    "accent": "#2A2A2A",
+    "accent_soft": "#ECECEC",
+    "focus": "#7A7A7A",
+    "selection": "#E6E6E6",
     "success": "#067647", "success_bg": "#ECFDF3",
     "warning": "#B54708", "warning_bg": "#FFFAEB",
     "danger": "#B42318", "danger_bg": "#FEF3F2",
@@ -139,7 +139,7 @@ QPushButton[variant="danger"] {{ background: {c['surface']}; border-color: #FDA2
 QPushButton[variant="danger"]:hover {{ background: {c['danger_bg']}; }}
 QPushButton[variant="ghost"] {{ background: transparent; border-color: transparent; color: {c['text_2']}; }}
 QPushButton[variant="ghost"]:hover {{ background: #EFEFF1; color: {c['text']}; }}
-QPushButton[variant="link"] {{ background: transparent; border: none; color: {c['accent']}; padding: 0; min-height: 20px; font-weight: 600; }}
+QPushButton[variant="link"] {{ background: transparent; border: none; color: {c['accent']}; padding: 0; min-height: 20px; font-weight: 600; text-decoration: underline; }}
 QPushButton[variant="link"]:hover {{ text-decoration: underline; }}
 QPushButton[size="lg"] {{ min-height: 40px; font-size: 14px; }}
 QPushButton[size="sm"] {{ min-height: 26px; padding: 0 8px; font-size: 12px; }}

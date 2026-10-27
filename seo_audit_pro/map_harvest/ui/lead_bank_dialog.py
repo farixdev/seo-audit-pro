@@ -134,13 +134,22 @@ class AddToLeadBankDialog(Dialog):
                 "agent_id": agent_id,
             }, idempotency_key=api.new_idempotency_key())
 
-            # 3. Commit rows in gzip chunk
-            compressed = gzip.compress(json.dumps(formatted_rows, ensure_ascii=False).encode("utf-8"), compresslevel=5)
-            api.request("POST", f"/api/lead-batches/{batch_id}/rows?first=1", data=compressed,
-                        headers={"Content-Type": "application/octet-stream"})
-
-            # 4. Finish batch
-            res = api.post(f"/api/lead-batches/{batch_id}/finish")
+            # 3. Send the rows (gzip, at most 2,000 per request: the server's chunk limit),
+            # then finish. A failure marks the batch failed so it is never left queued.
+            try:
+                for first in range(0, len(formatted_rows), 2000):
+                    chunk = formatted_rows[first:first + 2000]
+                    packed = gzip.compress(json.dumps(chunk, ensure_ascii=False).encode("utf-8"), compresslevel=5)
+                    api.request("POST", f"/api/lead-batches/{batch_id}/rows", params={"first": first + 1},
+                                data=packed, timeout=120)
+                res = api.post(f"/api/lead-batches/{batch_id}/finish")
+            except Exception as e:  # noqa: BLE001 - report it on the batch, then show it here
+                try:
+                    api.post(f"/api/lead-batches/{batch_id}/failed",
+                             {"error": getattr(e, "message", str(e))[:500] or "The import stopped."})
+                except Exception:  # noqa: BLE001
+                    pass
+                raise
             return res.get("batch") or preview["batch"]
 
         def on_done(batch):

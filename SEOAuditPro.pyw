@@ -12,6 +12,9 @@ if __name__ == "__main__":
     if "--job" in sys.argv[1:]:
         from seo_audit_pro.pc_jobs import main as job
         job(sys.argv[1:])
+    elif "--diagnose" in sys.argv[1:]:   # check this computer, write a short report
+        from seo_audit_pro.app import diagnose
+        diagnose(sys.argv[1:])
     elif "--selftest" in sys.argv[1:]:   # run one Scrape & Audit audit in the hidden window, log the result
         from seo_audit_pro.app import selftest
         selftest(sys.argv[1:])

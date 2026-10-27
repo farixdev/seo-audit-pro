@@ -23,20 +23,24 @@ def _store():
 
 def mode():
     """"local" (this computer runs the server), "remote" (a team server), or
-    None before the first-run choice. Running from source defaults to remote."""
+    None before the first-run choice. The person's choice is remembered and
+    always respected (it is only changed when they pick another one)."""
     value = _store().value("mode")
-    if value == REMOTE:
-        saved_url = _store().value("api_url", "")
-        if "onrender.com" in saved_url and not TEAM_SERVER_URL:
-            _store().remove("mode")
-            _store().remove("api_url")
-            return LOCAL
-        return REMOTE
-    if value == LOCAL:
-        return LOCAL
+    if value in (LOCAL, REMOTE):
+        return value
     if TEAM_SERVER_URL:  # this build connects to the team server
         return REMOTE
-    return None  # First run on any computer: show the choice!
+    return None  # first run on this computer: show the choice
+
+
+def start_in():
+    """Where the app opens: "quick" when the person last used Scrape & Audit
+    without an account, else "" (the workspace / sign-in)."""
+    return _store().value("start_in", "") or ""
+
+
+def set_start_in(value):
+    _store().setValue("start_in", value or "")
 
 
 def set_mode(value):
@@ -51,8 +55,6 @@ def api_url():
     if mode() == LOCAL:
         return (_RUNTIME["local_url"] or "http://127.0.0.1:5057").rstrip("/")
     url = _store().value("api_url", DEFAULT_API_URL) or DEFAULT_API_URL
-    if "onrender.com" in url and not TEAM_SERVER_URL:
-        return "http://127.0.0.1:5057"
     return url.rstrip("/")
 
 

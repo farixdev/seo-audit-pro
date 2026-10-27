@@ -69,7 +69,7 @@ class _Panel(QWidget):
         head = vbox(spacing=0)
         head.addWidget(logo_label(44), 0, Qt.AlignmentFlag.AlignHCenter)
         head.addSpacing(18)
-        name = label("SEO AUDIT PRO")
+        name = label(APP_NAME.upper())
         name.setStyleSheet("font-size: 13px; font-weight: 700; letter-spacing: 2px; color: #52525B;")
         name.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         head.addWidget(name)
