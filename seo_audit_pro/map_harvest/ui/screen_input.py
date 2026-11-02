@@ -172,8 +172,18 @@ class InputScreen(QWidget):
         left.addWidget(self.max_results_slider)
         left.addSpacing(20)
 
-        # Export folder
-        left.addWidget(self._section_label("Export Folder"))
+        # Direct Lead Bank flow (Export Folder removed)
+        left.addWidget(self._section_label("Destination"))
+        left.addSpacing(6)
+        dest_lbl = QLabel("✔ All scraped leads (Website & No-Website) flow directly into your Lead Bank automatically.")
+        dest_lbl.setObjectName("hint")
+        dest_lbl.setWordWrap(True)
+        left.addWidget(dest_lbl)
+        self.export_browse_btn = QPushButton("…")
+        self.export_browse_btn.hide()
+        self.export_dir_input = QLineEdit()
+        self.export_dir_input.hide()
+        pass  # Export Folder section removed — leads flow directly to Lead Bank
         left.addSpacing(8)
         export_row = QHBoxLayout()
         export_row.setSpacing(10)
@@ -188,7 +198,8 @@ class InputScreen(QWidget):
         self.export_dir_input.setFixedHeight(40)
         export_row.addWidget(self.export_browse_btn)
         export_row.addWidget(self.export_dir_input, stretch=1)
-        left.addLayout(export_row)
+        self.export_browse_btn.hide()
+        self.export_dir_input.hide()
         left.addSpacing(20)
 
         # Recent searches
@@ -677,7 +688,7 @@ class InputScreen(QWidget):
             self._goto_scrape_tab()
             self.shake(self.area_input)
             return None
-        if not export_dir or not os.path.isdir(export_dir):
+        if False and (not export_dir or not os.path.isdir(export_dir)):
             self._goto_scrape_tab()
             self.shake(self.export_dir_input)
             return None

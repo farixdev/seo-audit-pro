@@ -621,6 +621,48 @@ def restore_leads():
     return jsonify({"updated": _set_archived(body(), False)})
 
 
+def _delete_lead_ids(me, ids, by_filter=False, flt=None):
+    deleted = 0
+    for chunk in _chunks(ids, 500):
+        ph = ",".join(["%s"] * len(chunk))
+        with db.transaction() as tx:
+            tx.execute(f"UPDATE leads SET last_audit_id = NULL WHERE id IN ({ph})", chunk)
+            tx.execute(f"DELETE FROM call_logs WHERE lead_id IN ({ph})", chunk)
+            tx.execute(f"DELETE FROM lead_outreach WHERE lead_id IN ({ph})", chunk)
+            tx.execute(f"DELETE FROM lead_assignments WHERE lead_id IN ({ph})", chunk)
+            tx.execute(f"DELETE FROM email_attachments WHERE email_id IN (SELECT id FROM emails WHERE lead_id IN ({ph}))", chunk)
+            tx.execute(f"DELETE FROM email_attachments WHERE report_id IN (SELECT id FROM reports WHERE audit_id IN (SELECT id FROM audits WHERE lead_id IN ({ph})))", chunk)
+            tx.execute(f"DELETE FROM emails WHERE lead_id IN ({ph})", chunk)
+            tx.execute(f"DELETE FROM report_data WHERE report_id IN (SELECT id FROM reports WHERE audit_id IN (SELECT id FROM audits WHERE lead_id IN ({ph})))", chunk)
+            tx.execute(f"DELETE FROM reports WHERE audit_id IN (SELECT id FROM audits WHERE lead_id IN ({ph}))", chunk)
+            tx.execute(f"DELETE FROM audit_results WHERE audit_id IN (SELECT id FROM audits WHERE lead_id IN ({ph}))", chunk)
+            tx.execute(f"DELETE FROM audit_issue_states WHERE audit_id IN (SELECT id FROM audits WHERE lead_id IN ({ph}))", chunk)
+            tx.execute(f"DELETE FROM audits WHERE lead_id IN ({ph})", chunk)
+            tx.execute(f"DELETE FROM leads WHERE id IN ({ph})", chunk)
+            deleted += tx.rowcount
+    events.audit(me, "LEADS_DELETED", "lead", ids[0] if len(ids) == 1 else None,
+                 {"deleted": deleted, "by_filter": by_filter, "filter": flt})
+    cache.bump()
+    return deleted
+
+
+@bp.delete("/api/leads/<lead_id>")
+@require()
+def delete_single_lead(lead_id):
+    lead = load_lead(g.user, lead_id)
+    deleted = _delete_lead_ids(g.user, [lead["id"]])
+    return jsonify({"deleted": deleted, "id": lead["id"]})
+
+
+@bp.post("/api/leads/delete")
+@require()
+def delete_leads_bulk():
+    data = body()
+    ids, by_filter = _target_ids(g.user, data)
+    deleted = _delete_lead_ids(g.user, ids, by_filter=by_filter, flt=data.get("filter") if by_filter else None)
+    return jsonify({"deleted": deleted})
+
+
 @bp.get("/api/leads/export")
 @require(MANAGER, TEAM_LEAD)
 def export_leads():

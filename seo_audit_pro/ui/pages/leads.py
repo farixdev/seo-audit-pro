@@ -29,7 +29,7 @@ from seo_audit_pro.core.realtime import get_hub
 from seo_audit_pro.core.session import session
 from seo_audit_pro.theme import C
 from seo_audit_pro.ui.pages.base import Page
-from seo_audit_pro.ui.pages.lead_dialogs import AssignDialog, LeadFormDialog, load_assignees, set_archived, start_audit
+from seo_audit_pro.ui.pages.lead_dialogs import AssignDialog, LeadFormDialog, delete_leads, load_assignees, set_archived, start_audit
 from seo_audit_pro.widgets.common import Badge, MetricStrip, Segmented, StatefulArea, button, hbox, label, vbox
 from seo_audit_pro.widgets.feedback import Drawer, SearchBox, combo, show_error, toast
 from seo_audit_pro.widgets.table import Column, DataTable
@@ -476,7 +476,7 @@ class LeadsPage(Page):
         bl.addStretch(1)
         self.bulk_buttons = {}
         for key, text in (("audit", "Audit 1: Technical SEO Audit (C1)"), ("service_audit", "Audit 2: Website Service Audit (C3)"),
-                          ("pitch", "C3: Compare & Score Pitches"), ("archive", "Archive"), ("restore", "Restore")):
+                          ("pitch", "C3: Compare & Score Pitches"), ("archive", "Archive"), ("restore", "Restore"), ("delete", "Delete")):
             b = button(text, "ghost", size="sm")
             b.setStyleSheet("QPushButton { color: #FFFFFF; } QPushButton:hover { background: #3F3F46; color: #FFFFFF; }"
                             "QPushButton:disabled { color: #71717A; }")
@@ -819,6 +819,11 @@ class LeadsPage(Page):
     def bulk_restore(self):
         self._archive(False)
 
+    def bulk_delete(self):
+        sel = self._selection_arg()
+        delete_leads(self, lambda: (self.clear_selection(), self.load()),
+                     leads=None if sel else self.table.selected_rows(), selection=sel)
+
     def _archive(self, archived):
         sel = self._selection_arg()
         set_archived(self, archived, lambda: (self.clear_selection(), self.load()),
@@ -853,6 +858,9 @@ class LeadsPage(Page):
             else:
                 m.addAction(icons.icon("restore", C["text_2"]), "Restore",
                             lambda: set_archived(self, False, self.load, leads=[row]))
+        m.addSeparator()
+        m.addAction(icons.icon("trash", C["danger"]), "Delete lead…",
+                    lambda: delete_leads(self, self.load, leads=[row]))
         m.exec(pos)
 
     def on_realtime(self, ev):

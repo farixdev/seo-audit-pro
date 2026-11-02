@@ -105,6 +105,7 @@ class ResultsScreen(QWidget):
         self.export_btn.setFixedHeight(30)
         self.export_btn.setToolTip("Save the current results to a CSV file")
         self.export_btn.clicked.connect(self._on_export_clicked)
+        self.export_btn.hide()
 
         self.action_btn = QPushButton("Stop")
         self.action_btn.setObjectName("danger")
@@ -307,7 +308,9 @@ class ResultsScreen(QWidget):
         self.area_label.setText(
             f"{', '.join(self._domains)} · {', '.join(self._areas)}"
         )
-        self.export_path_label.setText(
+        self.export_path_label.setText("Direct Sync: All scraped leads (Website & No-Website) automatically flow into Lead Bank.")
+        if False:
+            self.export_path_label.setText(
             f"Saving exports to {self._export_dir}" if self._export_dir else ""
         )
         self._hide_toast()
@@ -557,6 +560,81 @@ class ResultsScreen(QWidget):
         return out
 
     def _notify_task_export(self, domain, area, count, hit_limit, rows=None):
+        message = self._export_summary(domain, area, count, hit_limit)
+        rows = self.results if rows is None else rows
+        unsynced = [r for r in (rows or []) if not r.get("_synced_to_bank")]
+        if count > 0 and unsynced:
+            for r in unsynced:
+                r["_synced_to_bank"] = True
+            self._auto_push_to_lead_bank(unsynced, domain, area, message)
+        else:
+            self._show_toast(message, None)
+        return
+
+    def _auto_push_to_lead_bank(self, rows, domain, area, summary_msg=""):
+        import gzip, json
+        from seo_audit_pro.core import api, tasks
+        niche = str(domain or (self._domains[0] if self._domains else "General")).strip() or "General"
+        city = str(area or (self._areas[0] if self._areas else "Local")).strip() or "Local"
+
+        def _work():
+            headers = ["company", "website", "phone", "email", "address", "category",
+                       "rating", "review_count", "maps_url", "city"]
+            formatted_rows = []
+            for r in rows:
+                formatted_rows.append({
+                    "company": str(r.get("name") or "").strip(),
+                    "website": str(r.get("website") or "").strip(),
+                    "phone": str(r.get("phone") or "").strip(),
+                    "email": str(r.get("email") or "").strip(),
+                    "address": str(r.get("address") or "").strip(),
+                    "category": str(r.get("category") or niche).strip(),
+                    "rating": str(r.get("rating") or "").strip(),
+                    "review_count": str(r.get("review_count") or "").strip(),
+                    "maps_url": str(r.get("maps_link") or "").strip(),
+                    "city": str(r.get("area") or city).strip(),
+                })
+            preview = api.post("/api/lead-imports/local", {
+                "file_name": f"MapHarvest - {niche} in {city}.csv",
+                "headers": headers,
+                "total_rows": len(formatted_rows),
+                "file_size": max(1024, len(formatted_rows) * 120),
+                "sample": formatted_rows[:200],
+                "niche": niche,
+                "area": city,
+            })
+            batch_id = preview["batch"]["id"]
+            map_copy = dict(preview.get("mapping") or {})
+            map_copy["__allow_no_website__"] = True
+            api.post(f"/api/lead-batches/{batch_id}/start", {
+                "niche": niche,
+                "area": city,
+                "mapping": map_copy,
+            }, idempotency_key=api.new_idempotency_key())
+            for first in range(0, len(formatted_rows), 2000):
+                chunk = formatted_rows[first:first + 2000]
+                packed = gzip.compress(json.dumps(chunk, ensure_ascii=False).encode("utf-8"), compresslevel=5)
+                api.request("POST", f"/api/lead-batches/{batch_id}/rows", params={"first": first + 1},
+                            data=packed, timeout=120)
+            res = api.post(f"/api/lead-batches/{batch_id}/finish")
+            return res.get("batch") or preview["batch"]
+
+        def _done(batch):
+            imported = batch.get("imported", len(rows))
+            dups = batch.get("duplicates", 0)
+            msg = f"{summary_msg}\n✔ Automatically added {imported:,} lead(s) directly to Lead Bank!"
+            if dups:
+                msg += f" ({dups:,} duplicates skipped)"
+            self.export_path_label.setText(f"✔ Synced {imported:,} lead(s) from '{niche} in {city}' directly into Lead Bank.")
+            self._show_toast(msg, None)
+
+        def _fail(err):
+            err_txt = getattr(err, "message", str(err))
+            self._show_toast(f"{summary_msg} (Lead Bank auto-sync error: {err_txt})", None)
+
+        tasks.run(_work, on_done=_done, on_error=_fail, owner=self)
+
+    def _old_notify_task_export(self, domain, area, count, hit_limit, rows=None):
         message = self._export_summary(domain, area, count, hit_limit)
         filepath = None
         rows = self.results if rows is None else rows

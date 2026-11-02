@@ -305,6 +305,23 @@ def set_archived(page, archived, on_done, leads=None, selection=None):
               on_error=lambda e: show_error(page, e), owner=page)
 
 
+def delete_leads(page, on_done, leads=None, selection=None):
+    """Permanently delete selected leads, or every lead matching a filter."""
+    count = selection["count"] if selection else len(leads or [])
+    if not count:
+        return
+    names = leads[0]["company"] if leads and count == 1 else f"{count:,} leads"
+    if not confirm(page, f"Permanently delete {names}?",
+                   "This will permanently remove the lead(s) and all associated audits, reports, call logs, and emails. This action cannot be undone.",
+                   "Delete permanently", danger=True):
+        return
+    payload = ({"filter": selection["filter"], "expected_count": selection["count"]} if selection
+               else {"lead_ids": [lead["id"] for lead in leads]})
+    tasks.run(api.post, "/api/leads/delete", payload, timeout=180,
+              on_done=lambda r: (toast(page, f"Deleted {r.get('deleted', count):,} lead(s).", "success"), on_done()),
+              on_error=lambda e: show_error(page, e), owner=page)
+
+
 
 CALL_STATUSES = [
     ("Not Called Yet", "not_called"),

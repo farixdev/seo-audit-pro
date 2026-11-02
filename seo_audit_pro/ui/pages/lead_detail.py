@@ -16,7 +16,7 @@ from seo_audit_pro.ui.pages.base import Page
 from seo_audit_pro.ui.pages.outreach import METHOD_LABEL, mark_outreach, outreach_text
 from seo_audit_pro.ui.pages.reports import pending_file, report_size
 from seo_audit_pro.ui.pages.leads import can_edit_lead, can_manage_lead
-from seo_audit_pro.ui.pages.lead_dialogs import (AssignDialog, LeadFormDialog, load_assignees, set_archived,
+from seo_audit_pro.ui.pages.lead_dialogs import (AssignDialog, LeadFormDialog, delete_leads, load_assignees, set_archived,
                                                  start_audit)
 from seo_audit_pro.widgets.charts import ScoreRing
 from seo_audit_pro.widgets.common import Badge, Card, StatefulArea, button, hbox, icon_button, label, vbox
@@ -126,10 +126,12 @@ class LeadDetailPage(Page):
         self.outreach_btn = button("Mark outreached", icon_name="check")
         self.outreach_btn.clicked.connect(self._mark_outreach)
         self.edit_btn = button("Edit", icon_name="edit")
+        self.delete_btn = button("Delete", "danger", icon_name="trash")
+        self.delete_btn.clicked.connect(lambda: delete_leads(self, lambda: self.ws.navigate("leads"), leads=[self.lead]) if self.lead else None)
         self.edit_btn.clicked.connect(self._edit)
         self.more_btn = icon_button("more", "More actions", 18)
         self.more_btn.clicked.connect(self._more_menu)
-        for b in (self.edit_btn, self.call_btn, self.service_btn, self.outreach_btn, self.email_btn, self.audit_btn):
+        for b in (self.delete_btn, self.edit_btn, self.call_btn, self.service_btn, self.outreach_btn, self.email_btn, self.audit_btn):
             head.addWidget(b, 0, Qt.AlignmentFlag.AlignTop)
         head.addWidget(self.more_btn, 0, Qt.AlignmentFlag.AlignTop)
         self.more_btn.setVisible(not session.is_agent())
@@ -579,6 +581,9 @@ class LeadDetailPage(Page):
         else:
             m.addAction(icons.icon("restore", C["text_2"]), "Restore",
                         lambda: set_archived(self, False, self.reload, leads=[self.lead]))
+        m.addSeparator()
+        m.addAction(icons.icon("trash", C["danger"]), "Delete lead…",
+                    lambda: delete_leads(self, lambda: self.ws.navigate("leads"), leads=[self.lead]))
         m.exec(self.more_btn.mapToGlobal(self.more_btn.rect().bottomLeft()))
 
     def _report_menu(self, row, pos):
