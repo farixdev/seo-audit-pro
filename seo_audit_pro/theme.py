@@ -85,6 +85,10 @@ STATUS = {
 }
 
 ROLE_LABEL = {"MANAGER": "Manager", "TEAM_LEAD": "Team Lead", "AGENT": "Agent"}
+STATUS_LABEL = {k: v[2] for k, v in STATUS.items()}
+STATUS_LABEL.setdefault("replied", "Replied")
+STATUS_LABEL.setdefault("not_called", "Not called")
+STATUS_LABEL.setdefault("called", "Called")
 
 
 def score_color(score):

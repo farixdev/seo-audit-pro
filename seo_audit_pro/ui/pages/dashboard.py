@@ -1,205 +1,175 @@
 # -*- coding: utf-8 -*-
-"""Dashboard: 3-Campaign Overview, Audit 1 (Technical SEO) & Audit 2 (Website Services & AI Pitch), Pipeline, and Activity."""
+"""Solo offline dashboard: 3-Campaign overview, pipeline, audit activity, Audit 1 (SEO) & Audit 2 (Services), recent work."""
 
-from datetime import datetime, timedelta, timezone
 import json
 
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QGridLayout, QWidget
 
 from seo_audit_pro.core import api, fmt
-from seo_audit_pro.theme import C, STATUS_LABEL
+from seo_audit_pro.theme import C, STATUS, score_color
 from seo_audit_pro.ui.pages.base import Page
-from seo_audit_pro.widgets.charts import BarChart, PipelineBars
-from seo_audit_pro.widgets.common import Card, ContentArea, MetricStrip, button, hbox, label, score_badge, status_badge, vbox
-from seo_audit_pro.widgets.table import DataTable
+from seo_audit_pro.widgets.charts import BarList, DailyBars
+from seo_audit_pro.widgets.common import Card, MetricStrip, StatefulArea, button, hbox, label, vbox
+from seo_audit_pro.widgets.table import Column, DataTable
 
-_ACTION_TEXT = {
-    "LEAD_CREATED": "New lead added to Lead Bank",
-    "LEAD_IMPORTED": "Leads imported to Lead Bank",
-    "LEAD_ASSIGNED": "Lead updated",
-    "LEAD_BULK_ASSIGNED": "Leads updated in bulk",
-    "LEAD_STATUS_CHANGED": "Lead pipeline status updated",
-    "LEAD_OUTREACH": "Outreach logged (email / call)",
-    "AUDIT_QUEUED": "Audit 1 (Technical SEO) queued",
-    "AUDIT_COMPLETED": "Audit 1 (Technical SEO) completed",
-    "AUDIT_FAILED": "Audit 1 (Technical SEO) failed",
-    "AUDIT_BULK": "Bulk Technical SEO Audits started",
-    "SERVICE_AUDIT_COMPLETED": "Audit 2 (Website Services & AI Pitch) completed",
-    "EMAIL_QUEUED": "Outreach email queued",
-    "EMAIL_SENT": "Outreach email delivered",
-    "EMAIL_SENT_DIRECT": "Direct outreach email delivered",
-    "EMAIL_FAILED": "Outreach email failed",
-    "BULK_EMAIL": "Bulk outreach campaign queued",
-}
+PIPELINE_ORDER = ["new", "assigned", "audited", "contacted", "qualified", "won", "lost"]
 
 
 class DashboardPage(Page):
     title = "Dashboard"
-    nav_key = "dashboard"
 
     def __init__(self, ws):
         super().__init__(ws, scroll=True)
-        head = self.header(
-            "Dashboard",
-            "Live overview across Campaign 1 (SEO Audits), Campaign 2 (No-Website Call & Pitch), and Campaign 3 (Website Service Audits & AI Pitch).",
-        )
-        b1 = button("Map Harvest", "secondary", icon_name="map_pin")
-        b1.clicked.connect(lambda: self.ws.navigate("map_harvest"))
-        b2 = button("Lead Bank", "secondary", icon_name="leads")
-        b2.clicked.connect(lambda: self.ws.navigate("leads"))
-        b3 = button("Run Audits (C1 & C3)", "secondary", icon_name="audit")
-        b3.clicked.connect(lambda: self.ws.navigate("audits"))
-        b4 = button("Email Outreach", "primary", icon_name="mail")
-        b4.clicked.connect(lambda: self.ws.navigate("outreach"))
-        head.add_action(b1)
-        head.add_action(b2)
-        head.add_action(b3)
-        head.add_action(b4)
+        subtitle = "Local Offline Workspace · 3-Campaign Outreach & Dual Auditing Engine"
+        h = self.header("Dashboard", subtitle)
+        add = h.add_action(button("Add lead", icon_name="plus"))
+        add.clicked.connect(lambda: self.ws.navigate("leads", create=True))
+        b_harv = h.add_action(button("Map Harvest", icon_name="map_pin"))
+        b_harv.clicked.connect(lambda: self.ws.navigate("map_harvest"))
+        b_aud = h.add_action(button("Run Audits", icon_name="audit"))
+        b_aud.clicked.connect(lambda: self.ws.navigate("audits"))
+        b_out = h.add_action(button("Email Outreach", "primary", icon_name="mail"))
+        b_out.clicked.connect(lambda: self.ws.navigate("outreach"))
+        refresh = h.add_action(button("", icon_name="refresh", tooltip="Refresh"))
+        refresh.setFixedWidth(34)
+        refresh.clicked.connect(self.load)
 
-        self.area = ContentArea()
-        self.body.addWidget(self.area, 1)
-        content = self.area.body
+        content = QWidget()
+        cl = vbox(content, spacing=20)
 
-        # Row 1: 4 Campaign KPIs (never overflows horizontally)
+        # Row 1: 4 Campaign Metrics (never overflows horizontally)
         self.metrics_top = MetricStrip()
-        self.m_leads = self.metrics_top.add("Total Leads in Bank")
-        self.m_seo = self.metrics_top.add("Audit 1: SEO Audited (C1)")
-        self.m_srv = self.metrics_top.add("Audit 2: Service Audited (C3)")
-        self.m_nosite = self.metrics_top.add("Campaign 2: No-Website Leads")
-        content.addWidget(self.metrics_top)
+        self.metrics_top.add("leads", "Total Leads in Bank")
+        self.metrics_top.add("seo_audited", "Audit 1: SEO Audited (C1)")
+        self.metrics_top.add("service_audited", "Audit 2: Service Audited (C3)")
+        self.metrics_top.add("no_website", "Campaign 2: No-Website Leads")
+        cl.addWidget(self.metrics_top)
 
-        # Row 2: 4 Execution & Outreach KPIs
+        # Row 2: 4 Execution & Activity Metrics
         self.metrics_bottom = MetricStrip()
-        self.m_audits = self.metrics_bottom.add("SEO Audits (Last 7d)")
-        self.m_running = self.metrics_bottom.add("Audits in Queue / Running")
-        self.m_score = self.metrics_bottom.add("Avg SEO Score (30d)")
-        self.m_outreach = self.metrics_bottom.add("Outreach Sent (30d)")
-        content.addWidget(self.metrics_bottom)
+        self.metrics_bottom.add("audits_7d", "SEO Audits (Last 7d)")
+        self.metrics_bottom.add("running", "Audits in Queue / Running")
+        self.metrics_bottom.add("avg", "Avg SEO Score (30d)")
+        self.metrics_bottom.add("emails", "Outreached (30d)")
+        cl.addWidget(self.metrics_bottom)
 
-        # Charts row: Pipeline + 14-day Audit Activity
-        mid = hbox(spacing=16)
-        pipe_card = Card()
-        pipe_card.body.addWidget(label("Lead Pipeline Status", "SectionTitle"))
-        pipe_card.body.addWidget(label("Distribution of active leads across your outreach funnel.", "Meta"))
-        self.pipeline = PipelineBars()
-        pipe_card.body.addWidget(self.pipeline)
-        mid.addWidget(pipe_card, 1)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(20)
+        grid.setVerticalSpacing(20)
+        pipe = Card()
+        pipe.body.addWidget(label("Lead Pipeline", "SectionTitle"))
+        pipe.body.addWidget(label("Leads by current outreach stage", "Meta"))
+        self.pipeline = BarList(28)
+        pipe.body.addWidget(self.pipeline)
+        pipe.body.addStretch(1)
 
-        act_card = Card()
-        act_card.body.addWidget(label("Audit Activity (Last 14 Days)", "SectionTitle"))
-        act_card.body.addWidget(label("Completed technical audits per day.", "Meta"))
-        self.chart = BarChart()
-        act_card.body.addWidget(self.chart)
-        mid.addWidget(act_card, 1)
-        content.addLayout(mid)
+        act = Card()
+        act.body.addWidget(label("Audit Activity", "SectionTitle"))
+        act.body.addWidget(label("Completed technical SEO audits per day (UTC), last 14 days", "Meta"))
+        self.activity = DailyBars(14)
+        act.body.addWidget(self.activity)
+        act.body.addStretch(1)
 
-        # Two-column Audit Tables: Audit 1 (Technical SEO) & Audit 2 (Website Services & AI Pitch)
-        tables_row = hbox(spacing=16)
+        grid.addWidget(pipe, 0, 0)
+        grid.addWidget(act, 0, 1)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        cl.addLayout(grid)
 
-        rec = Card(padding=0, spacing=0)
-        rhead = hbox((20, 16, 20, 12))
-        rcol = vbox(spacing=2)
-        rcol.addWidget(label("Audit 1: Recent Technical SEO Audits (C1)", "SectionTitle"))
-        rcol.addWidget(label("Technical health, Core Web Vitals & PDF report status.", "Meta"))
-        rhead.addLayout(rcol)
-        rhead.addStretch(1)
-        all_btn = button("Open SEO Audits", "ghost", size="sm")
-        all_btn.clicked.connect(lambda: self.ws.navigate("audits"))
-        rhead.addWidget(all_btn)
-        rec.body.addLayout(rhead)
+        # Dual Audits row: Audit 1 (Technical SEO) & Audit 2 (Website Services & Pitch)
+        audits_row = hbox(spacing=20)
+
+        # Audit 1 Card
+        aud1_card = Card(padding=0, spacing=0)
+        ah1 = hbox()
+        ah1.setContentsMargins(20, 18, 20, 12)
+        ah1.addWidget(label("Audit 1: Recent Technical SEO Audits (C1)", "SectionTitle"), 1)
+        see1 = button("View all", "ghost", size="sm")
+        see1.clicked.connect(lambda: self.ws.navigate("audits"))
+        ah1.addWidget(see1)
+        aud1_card.body.addLayout(ah1)
         self.audits_table = DataTable([
-            ("company", "Company", 1.3),
-            ("normalized_domain", "Website", 1.2),
-            ("status", "Status", 110, lambda r: status_badge(r["status"], r.get("percent"))),
-            ("score", "SEO Score", 90, lambda r: score_badge(r.get("score"), r.get("grade"))),
-            ("created_at", "Date", 100, lambda r: fmt.relative(r["created_at"])),
-        ], empty_title="No SEO audits yet", empty_text="Queue a Technical SEO Audit from Lead Bank or Audits.")
-        self.audits_table.row_activated.connect(lambda r: self.ws.navigate("audit", audit_id=r["id"]))
-        rec.body.addWidget(self.audits_table)
-        tables_row.addWidget(rec, 1)
+            Column("company", "Website", "strong", stretch=True, secondary=lambda r: r.get("normalized_domain")),
+            Column("status", "Status", "status", 110),
+            Column("score", "SEO Score", "score", 120),
+            Column("created_at", "Date", "relative", 110),
+        ], paginated=False)
+        self.audits_table.view.setMinimumHeight(240)
+        self.audits_table.activated.connect(lambda r: self.ws.navigate("audit", audit_id=r["id"]))
+        aud1_card.body.addWidget(self.audits_table)
+        audits_row.addWidget(aud1_card, 1)
 
-        srv_card = Card(padding=0, spacing=0)
-        shead = hbox((20, 16, 20, 12))
-        scol = vbox(spacing=2)
-        scol.addWidget(label("Audit 2: Website Service Audits & AI Pitch (C3)", "SectionTitle"))
-        scol.addWidget(label("Services detected on lead websites & what we can provide them.", "Meta"))
-        shead.addLayout(scol)
-        shead.addStretch(1)
-        srv_btn = button("Run Service Audit", "ghost", size="sm")
-        srv_btn.clicked.connect(lambda: self.ws.navigate("audits"))
-        shead.addWidget(srv_btn)
-        srv_card.body.addLayout(shead)
+        # Audit 2 Card
+        aud2_card = Card(padding=0, spacing=0)
+        ah2 = hbox()
+        ah2.setContentsMargins(20, 18, 20, 12)
+        ah2.addWidget(label("Audit 2: Recent Website Service Audits (C3)", "SectionTitle"), 1)
+        see2 = button("Run Service Audits", "ghost", size="sm")
+        see2.clicked.connect(lambda: self.ws.navigate("audits"))
+        ah2.addWidget(see2)
+        aud2_card.body.addLayout(ah2)
         self.service_table = DataTable([
-            ("company", "Company", 1.1),
-            ("services_summary", "Their Services", 1.3),
-            ("what_we_provide", "What We Can Provide (AI Sniffer)", 1.6),
-            ("service_match_score", "Opportunity", 95, lambda r: score_badge(r.get("service_match_score"))),
-        ], empty_title="No Website Service Audits yet",
-           empty_text="Open Audits → Tab 2 (Website Service Auditor) to sniff out services and generate AI pitches.")
-        self.service_table.row_activated.connect(lambda r: self.ws.navigate("lead", lead_id=r["id"]))
-        srv_card.body.addWidget(self.service_table)
-        tables_row.addWidget(srv_card, 1)
+            Column("company", "Company", "strong", 180, secondary=lambda r: r.get("services_summary")),
+            Column("what_we_provide", "What We Can Provide (AI Sniffer)", "text", stretch=True),
+            Column("service_match_score", "Opportunity", "score", 120),
+        ], paginated=False)
+        self.service_table.view.setMinimumHeight(240)
+        self.service_table.activated.connect(lambda r: self.ws.navigate("outreach", lead_id=r["id"], campaign="service_pitch"))
+        aud2_card.body.addWidget(self.service_table)
+        audits_row.addWidget(aud2_card, 1)
 
-        content.addLayout(tables_row)
+        cl.addLayout(audits_row)
 
-        # Bottom row: Recent workspace activity
-        act = Card(padding=20, spacing=10)
-        act.body.addWidget(label("Recent Workspace Activity", "SectionTitle"))
-        self.feed = vbox(spacing=8)
-        act.body.addLayout(self.feed)
-        content.addWidget(act)
-        content.addStretch(1)
+        # Recent Activity Card
+        recent = Card(padding=0, spacing=0)
+        rh = hbox()
+        rh.setContentsMargins(20, 18, 20, 12)
+        rh.addWidget(label("Recent Workspace Activity", "SectionTitle"), 1)
+        recent.body.addLayout(rh)
+        self.recent_host = QWidget()
+        self.recent_layout = vbox(self.recent_host, (20, 0, 20, 16), 0)
+        recent.body.addWidget(self.recent_host)
+        recent.body.addStretch(1)
+        cl.addWidget(recent)
+
+        self.area = StatefulArea(content, skeleton="cards")
+        self.area.retry.connect(self.load)
+        self.body.addWidget(self.area, 1)
 
     def activate(self, **_):
-        self.refresh()
+        self.load()
 
-    def on_realtime(self, ev):
-        if ev.get("type") in ("audit_progress", "notification"):
-            if ev.get("type") == "audit_progress" and ev.get("status") not in ("completed", "failed"):
-                return
-            self.refresh()
-
-    def refresh(self):
-        if not getattr(self, "_loaded", False):
+    def load(self):
+        if not hasattr(self, "_loaded"):
             self.area.loading("Loading dashboard…")
         self.fetch("dash", api.get, "/api/dashboard", on_done=self._render, on_error=self.area.error)
 
     def _render(self, d):
         self._loaded = True
-        self.area.ready()
-        ov = d["overview"]
-        self.m_leads.set(fmt.number(ov["leads"]), "Active leads in bank")
-        self.m_seo.set(fmt.number(ov.get("seo_audited_total", 0)), "Completed SEO report")
-        self.m_srv.set(fmt.number(ov.get("service_audited_total", 0)), "Services & pitch ready")
-        self.m_nosite.set(
-            fmt.number(ov.get("no_website_total", 0)),
-            f"{fmt.number(ov.get('called_total', 0))} called so far",
-        )
-        self.m_audits.set(fmt.number(ov["audits_7d"]), "Completed in last 7d")
-        self.m_running.set(fmt.number(ov["audits_running"]), "Active in background")
-        self.m_score.set("—" if ov["avg_score_30d"] is None else f"{ov['avg_score_30d']}/100", "30-day average")
-        calls = ov.get("calls_30d") or 0
-        self.m_outreach.set(
-            fmt.number(ov["outreach_30d"]),
-            f"{calls} call{'s' if calls != 1 else ''} · last 30 days" if calls else "Emails & calls · 30d",
-        )
+        o = d["overview"]
+        m_top = self.metrics_top.metrics
+        m_top["leads"].set(fmt.number(o["leads"]))
+        m_top["seo_audited"].set(fmt.number(o.get("seo_audited_total", 0)), hint="Technical SEO report ready")
+        m_top["service_audited"].set(fmt.number(o.get("service_audited_total", 0)), hint="Services & pitch ready")
+        m_top["no_website"].set(fmt.number(o.get("no_website_total", 0)), hint=f"{o.get('called_total', 0)} called so far")
 
-        p = d.get("pipeline") or {}
-        order = [("new", "#52525B"), ("audited", "#2E90FA"), ("contacted", "#06AED4"),
-                 ("replied", "#F79009"), ("won", "#12B76A"), ("lost", "#F04438")]
-        self.pipeline.set_rows([(STATUS_LABEL[k], p.get(k, 0), col) for k, col in order])
+        m_bot = self.metrics_bottom.metrics
+        m_bot["audits_7d"].set(fmt.number(o["audits_7d"]))
+        m_bot["running"].set(fmt.number(o["audits_running"]))
+        avg = o.get("avg_score_30d")
+        m_bot["avg"].set("—" if avg is None else avg, hint="" if avg is not None else "No audits completed yet",
+                         color=score_color(avg) if avg is not None else None)
+        calls = o.get("calls_30d") or 0
+        m_bot["emails"].set(fmt.number(o.get("outreach_30d") or 0), hint=f"{calls} by phone call" if calls else "Outreach actions · 30d")
 
-        act = d.get("audit_activity") or {}
-        today = datetime.now(timezone.utc).date()
-        points = []
-        for i in range(13, -1, -1):
-            day = today - timedelta(days=i)
-            key = day.isoformat()
-            points.append((day.strftime("%d %b") if i % 3 == 0 else "", act.get(key, 0)))
-        self.chart.set_points(points)
-
+        pipe = d.get("pipeline") or {}
+        peak = max([pipe.get(k, 0) for k in PIPELINE_ORDER] + [1])
+        self.pipeline.set_rows([(STATUS[k][2], pipe.get(k, 0), peak, STATUS[k][0], "") for k in PIPELINE_ORDER], 110)
+        self.activity.set_values(d.get("audit_activity") or {})
         self.audits_table.set_rows(d.get("recent_audits") or [])
 
+        # Process service audits
         srv_rows = []
         for r in (d.get("recent_service_audits") or []):
             row = dict(r)
@@ -213,30 +183,46 @@ class DashboardPage(Page):
                         we_provide = parsed.get("what_we_can_provide") or parsed.get("recommended_services") or []
                 except Exception:
                     pass
-            row["services_summary"] = ", ".join(s_list[:4]) if s_list else "General local services"
+            row["services_summary"] = ", ".join(s_list[:3]) if s_list else "Local services"
             if we_provide:
-                row["what_we_provide"] = ", ".join(we_provide[:3])
+                row["what_we_provide"] = ", ".join(we_provide[:2])
             else:
                 notes = (row.get("service_pitch_notes") or "").strip()
-                row["what_we_provide"] = notes[:90] + ("…" if len(notes) > 90 else "") if notes else "Ready for AI Pitch"
+                row["what_we_provide"] = notes[:80] + ("…" if len(notes) > 80 else "") if notes else "Ready for pitch"
             srv_rows.append(row)
         self.service_table.set_rows(srv_rows)
 
-        while self.feed.count():
-            it = self.feed.takeAt(0)
+        self._render_recent(d.get("recent_activity") or [])
+        self.area.ready()
+
+    def _render_recent(self, rows):
+        while self.recent_layout.count():
+            it = self.recent_layout.takeAt(0)
             if it.widget():
                 it.widget().deleteLater()
-            elif it.layout():
-                while it.layout().count():
-                    sub = it.layout().takeAt(0)
-                    if sub.widget():
-                        sub.widget().deleteLater()
-        items = d.get("recent_activity") or []
-        if not items:
-            self.feed.addWidget(label("No recent activity yet.", "Muted"))
-        for a in items[:8]:
-            row = hbox(spacing=10)
-            text = _ACTION_TEXT.get(a["action"], a["action"].replace("_", " ").title())
-            row.addWidget(label(text), 1)
-            row.addWidget(label(fmt.relative(a["created_at"]), "Meta"))
-            self.feed.addLayout(row)
+        if not rows:
+            self.recent_layout.addWidget(label("No activity yet.", "Muted"))
+            return
+        for r in rows[:10]:
+            line = QFrame()
+            row = hbox(line, (0, 8, 0, 8), 10)
+            dot = QFrame()
+            dot.setFixedSize(6, 6)
+            dot.setStyleSheet(f"background: {C['border_strong']}; border-radius: 3px;")
+            row.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
+            action_name = fmt.action_label(r["action"]) if hasattr(fmt, "action_label") else r["action"].replace("_", " ").title()
+            text = label(f"<b>{_esc(action_name)}</b>")
+            text.setTextFormat(Qt.TextFormat.RichText)
+            row.addWidget(text, 1)
+            row.addWidget(label(fmt.relative(r["created_at"]), "Meta"))
+            line.setStyleSheet(f"QFrame {{ border-bottom: 1px solid {C['divider']}; }} QLabel {{ border: none; }}")
+            dot.setStyleSheet(f"background: {C['border_strong']}; border-radius: 3px; border: none;")
+            self.recent_layout.addWidget(line)
+
+    def on_realtime(self, ev):
+        if ev.get("type") == "audit_progress" and ev.get("status") in ("completed", "failed") and self.isVisible():
+            self.load()
+
+
+def _esc(text):
+    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
