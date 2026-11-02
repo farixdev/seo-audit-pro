@@ -366,6 +366,110 @@ class QueueView(QWidget):
 # ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
+class ServiceAuditsView(QWidget):
+    """Audit 2 (Campaign 3): Mass & individual website service extraction, LLM agency comparison, and scoring."""
+
+    def __init__(self, page):
+        super().__init__()
+        self.page = page
+        self.params = {"page": 1, "page_size": 50, "has_website": "yes", "sort": "service_score", "order": "desc"}
+        lay = vbox(self, spacing=12)
+        bar = hbox(spacing=8)
+        self.search = SearchBox("Search company, website or niche")
+        self.search.search.connect(lambda t: self._set(search=t))
+        bar.addWidget(self.search, 2)
+        self.flt = Segmented([("All Website Leads", ""), ("Service Audited (C3)", "yes"), ("Needs Service Audit", "no")])
+        self.flt.changed.connect(lambda v: self._set(service_audited=v))
+        bar.addWidget(self.flt)
+        bar.addStretch(1)
+        self.audit_sel_btn = button("Run Service Audit on Selected", "primary", icon_name="zap")
+        self.audit_sel_btn.clicked.connect(self.run_selected_audit)
+        bar.addWidget(self.audit_sel_btn)
+        self.pitch_sel_btn = button("Re-Score & Compare with Agency", icon_name="refresh")
+        self.pitch_sel_btn.clicked.connect(self.run_selected_pitch)
+        bar.addWidget(self.pitch_sel_btn)
+        cfg_btn = button("Agency Services Settings", "ghost", icon_name="settings")
+        cfg_btn.clicked.connect(lambda: self.page.ws.navigate("settings"))
+        bar.addWidget(cfg_btn)
+        lay.addLayout(bar)
+
+        self.table = DataTable([
+            Column("_check", "", "check", 40),
+            Column("company", "Company · Website", "strong", 220, secondary=lambda r: r.get("normalized_domain") or r.get("website")),
+            Column("niche", "Niche · Area", "text", 140, render=lambda r: r.get("niche") or "—", secondary=lambda r: r.get("area") or ""),
+            Column("service_audit_status", "Audit 2 Status", "text", 150,
+                   render=lambda r: f"Audited · {r['service_match_score']}/100" if r.get("service_match_score") is not None else ("Services Extracted" if r.get("services_audit_date") else "Not Service Audited"),
+                   secondary=lambda r: f"Audited {fmt.date(r['services_audit_date'])}" if r.get("services_audit_date") else "Pending service crawl"),
+            Column("services_list", "Extracted Website Services", "text", 260, stretch=True,
+                   render=lambda r: ", ".join(r.get("services_list") or []) if r.get("services_list") else ("General offerings" if r.get("services_audit_date") else "—"),
+                   secondary=lambda r: (r.get("service_pitch_notes") or "")[:90]),
+            Column("last_audit_score", "Audit 1: SEO Score", "text", 125,
+                   render=lambda r: f"{r['last_audit_score']}/100" if r.get("last_audit_score") is not None else "Not SEO audited"),
+            Column("_actions", "", "actions", 44),
+        ])
+        self.table.page_changed.connect(lambda p: self._set(keep_page=True, page=p))
+        self.table.page_size_changed.connect(lambda s: self._set(page_size=s))
+        self.table.activated.connect(lambda r: self.page.ws.navigate("outreach", lead_id=r["id"], campaign="service_pitch"))
+        self.table.context_requested.connect(self._menu)
+        self.area = StatefulArea(_surface(self.table))
+        self.area.retry.connect(self.load)
+        lay.addWidget(self.area, 1)
+
+    def _set(self, keep_page=False, **kv):
+        self.params.update(kv)
+        if not keep_page:
+            self.params["page"] = 1
+        self.load()
+
+    def load(self):
+        if not self.table.model.rows:
+            self.area.loading("Loading website service audits…")
+        params = {k: v for k, v in self.params.items() if v not in ("", None)}
+        self.page.fetch("service_audits", api.get, "/api/leads", params=params, on_done=self._render, on_error=self.area.error)
+
+    def _render(self, data):
+        self.table.set_page(data)
+        if not data.get("items"):
+            self.area.empty("No website leads match", "Add leads with websites in the Lead Bank or clear the filter.")
+            return
+        self.area.ready()
+
+    def _menu(self, row, pos):
+        m = QMenu(self)
+        m.addAction(icons.icon("zap", C["text_2"]), "Run Service Audit & Score (C3)", lambda: self._audit_one(row))
+        m.addAction(icons.icon("mail", C["text_2"]), "Write Service Comparison Pitch Email (C3)",
+                    lambda: self.page.ws.navigate("outreach", lead_id=row["id"], campaign="service_pitch"))
+        m.addAction(icons.icon("external", C["text_2"]), "Open Lead Details",
+                    lambda: self.page.ws.navigate("lead", lead_id=row["id"]))
+        m.exec(pos)
+
+    def _audit_one(self, row):
+        toast(self, f"Auditing services on {row.get('company')}…", "info", 3500)
+        tasks.run(api.post, f"/api/leads/{row['id']}/service-audit", {},
+                  on_done=lambda _r: (toast(self, "Service audit & match score updated!", "success"), self.load()),
+                  on_error=lambda e: show_error(self, e), owner=self)
+
+    def run_selected_audit(self):
+        ids = self.table.selected_ids() or [r["id"] for r in self.table.model.rows[:25]]
+        if not ids:
+            toast(self, "No leads available to audit.", "warning")
+            return
+        toast(self, f"Auditing website services & scoring {len(ids)} lead(s)…", "info", 5000)
+        tasks.run(api.post, "/api/leads/mass-service-audit", {"lead_ids": ids},
+                  on_done=lambda res: (toast(self, f"Audited & scored {res.get('total', len(ids))} website(s)!", "success"), self.table.clear_selection(), self.load()),
+                  on_error=lambda e: show_error(self, e), owner=self)
+
+    def run_selected_pitch(self):
+        ids = self.table.selected_ids() or [r["id"] for r in self.table.model.rows[:25]]
+        if not ids:
+            toast(self, "No leads available to score.", "warning")
+            return
+        toast(self, f"Comparing {len(ids)} lead(s) against your Agency Services…", "info", 5000)
+        tasks.run(api.post, "/api/leads/mass-service-pitch", {"lead_ids": ids},
+                  on_done=lambda res: (toast(self, f"Updated match scores & pitches for {res.get('total', len(ids))} lead(s)!", "success"), self.table.clear_selection(), self.load()),
+                  on_error=lambda e: show_error(self, e), owner=self)
+
+
 class AuditsPage(Page):
     title = "Audits"
     nav_key = "audits"
@@ -374,10 +478,10 @@ class AuditsPage(Page):
         super().__init__(ws, spacing=16)
         self.params = {"page": 1, "page_size": 25}
         self.batch = None
-        h = self.header("Audits", "Each audit is a real crawl by the audit engine. Progress and results update live.")
-        start = h.add_action(button("Start audit", "primary", icon_name="play"))
+        h = self.header("Audits (SEO & Website Services)", "Audit 1 crawls technical SEO, speed & security (PDF report). Audit 2 extracts website services and scores them against your agency offerings via LLM.")
+        start = h.add_action(button("Audit 1: Start SEO Audit", "primary", icon_name="play"))
         start.clicked.connect(self.start)
-        self.tabs = Segmented([("All audits", "all"), ("Queue", "queue")])
+        self.tabs = Segmented([("Audit 1: SEO Technical Audits (C1)", "all"), ("SEO Audit Queue", "queue"), ("Audit 2: Website Service Audits (C3)", "services")])
         self.tabs.changed.connect(self._switch)
         self.body.addWidget(self.tabs, 0, Qt.AlignmentFlag.AlignLeft)
         self.views = QStackedWidget()
@@ -427,6 +531,8 @@ class AuditsPage(Page):
         self.views.addWidget(all_view)
         self.queue = QueueView(self)
         self.views.addWidget(self.queue)
+        self.service_view = ServiceAuditsView(self)
+        self.views.addWidget(self.service_view)
         self._announced = set()
         self._update_live()
 
@@ -442,8 +548,10 @@ class AuditsPage(Page):
         self._switch(self.tabs.value())
 
     def _switch(self, view):
-        self.views.setCurrentIndex(1 if view == "queue" else 0)
-        if view == "queue":
+        self.views.setCurrentIndex(2 if view == "services" else (1 if view == "queue" else 0))
+        if view == "services":
+            self.service_view.load()
+        elif view == "queue":
             self.queue.load()
         else:
             self.load()

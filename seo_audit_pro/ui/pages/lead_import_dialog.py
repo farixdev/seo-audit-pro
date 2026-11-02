@@ -13,7 +13,7 @@ reporting them. The file itself never leaves this computer.
 import os
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QHeaderView, QLineEdit, QTableWidget,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QHeaderView, QLineEdit, QTableWidget,
                                QToolButton, QWidget)
 
 from seo_audit_pro import icons
@@ -54,8 +54,8 @@ class ImportFilesDialog(Dialog):
 
     def __init__(self, parent, options):
         super().__init__(parent, "Import lead files",
-                         "Add one or many scraped files (CSV or Excel), one niche in one area per file. Rows without a "
-                         "website and leads already in the bank are removed automatically and listed per file.", 980)
+                         "Add one or many scraped files (CSV or Excel), one niche in one area per file. Leads with "
+                         "websites go to Campaigns 1 & 3; leads without websites go to Campaign 2 (Phone & Website Pitch).", 980)
         self.setAcceptDrops(True)
         self.rows = []
         self.started = []
@@ -93,6 +93,9 @@ class ImportFilesDialog(Dialog):
         self.picker = AssigneePicker(options, session.user.get("team_id") if session.is_team_lead() else None)
         al.addWidget(self.picker)
         self.body.addWidget(assign)
+        self.allow_no_site_cb = QCheckBox("Include leads without a website (Campaign 2: Phone & Website Pitch)")
+        self.allow_no_site_cb.setChecked(True)
+        self.body.addWidget(self.allow_no_site_cb)
         self.add_buttons("Import")
         self.primary.clicked.connect(self.submit)
         self._refresh()
@@ -189,11 +192,13 @@ class ImportFilesDialog(Dialog):
                 row.niche.setText(b.get("niche") or "")
                 row.area.setText(b.get("area") or "")
                 row.site.clear()
-                row.site.addItem("Choose column…", None)
+                row.site.addItem("(No website column / Optional)", "__none__")
                 for h in res["headers"]:
                     row.site.addItem(h, h)
                 if res["mapping"].get("website"):
                     row.site.setCurrentIndex(row.site.findData(res["mapping"]["website"]))
+                else:
+                    row.site.setCurrentIndex(0)
                 for w in (row.niche, row.area, row.site):
                     w.setEnabled(True)
                 detected = [k.replace("_", " ") for k, v in res["mapping"].items() if v and k != "website"]
@@ -254,8 +259,12 @@ class ImportFilesDialog(Dialog):
         for row in todo:
             row.state = "importing"
             row.status.setText("Starting…")
-            mapping = dict(row.preview["mapping"], website=row.site.currentData())
+            site_col = row.site.currentData()
+            mapping = dict(row.preview["mapping"], website=None if site_col == "__none__" else site_col)
+            if self.allow_no_site_cb.isChecked():
+                mapping["__allow_no_website__"] = True
             payload = {"niche": row.niche.text().strip(), "area": row.area.text().strip(), "mapping": mapping,
+                       "allow_no_website": self.allow_no_site_cb.isChecked(),
                        "team_id": team_id, "agent_id": agent_id}
             if not hasattr(row, "idem"):
                 row.idem = api.new_idempotency_key()

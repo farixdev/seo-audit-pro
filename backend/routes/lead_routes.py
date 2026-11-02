@@ -27,7 +27,7 @@ STATUSES = ("new", "assigned", "audited", "contacted", "qualified", "won", "lost
 _SORTS = {"company": "l.company", "status": "l.status", "score": "l.last_audit_score", "created": "l.created_at",
           "last_contact": "l.last_contact_at", "last_audit": "l.last_audit_at", "team": "t.name", "agent": "u.name",
           "website": "l.normalized_domain", "niche": "l.niche_key", "area": "l.area_key", "rating": "l.rating",
-          "reviews": "l.review_count"}
+          "reviews": "l.review_count", "service_score": "l.service_match_score"}
 _LEAD_SELECT = """SELECT l.*, t.name AS team_name, u.name AS agent_name, b.file_name AS batch_name
                   FROM leads l LEFT JOIN teams t ON t.id = l.assigned_team_id
                   LEFT JOIN users u ON u.id = l.assigned_agent_id
@@ -36,7 +36,7 @@ _FROM = """FROM leads l LEFT JOIN teams t ON t.id = l.assigned_team_id
            LEFT JOIN users u ON u.id = l.assigned_agent_id"""
 BULK_LIMIT = 200_000
 FILTER_KEYS = ("search", "status", "team_id", "agent_id", "assigned", "audited", "outreach", "niche", "area",
-               "batch_id", "has_email", "has_website", "call_status")
+               "batch_id", "has_email", "has_website", "call_status", "service_audited")
 
 
 def lead_out(row):
@@ -57,6 +57,16 @@ def lead_out(row):
     out["call_status"] = row.get("call_status") or "not_called"
     out["call_count"] = int(row.get("call_count") or 0)
     out["call_notes"] = row.get("call_notes") or ""
+    s_list = []
+    if row.get("services_extracted"):
+        try:
+            parsed = json.loads(row["services_extracted"])
+            s_list = parsed.get("services") or [] if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+        except Exception:
+            pass
+    out["services_list"] = s_list
+    out["seo_audit_status"] = "no_website" if not out["has_website"] else ("audited" if row.get("last_audit_id") else "not_audited")
+    out["service_audit_status"] = "no_website" if not out["has_website"] else ("pitched" if row.get("service_match_score") is not None else ("audited" if row.get("services_audit_date") else "not_audited"))
     try:
         out["extra"] = json.loads(row["extra"]) if row.get("extra") else {}
     except (TypeError, ValueError):
@@ -125,6 +135,10 @@ def lead_filter(me, args):
     if arg("call_status"):
         where.append("l.call_status = %s")
         params.append(arg("call_status"))
+    if arg("service_audited") == "yes":
+        where.append("l.services_audit_date IS NOT NULL")
+    elif arg("service_audited") == "no":
+        where.append("(l.services_audit_date IS NULL AND l.website IS NOT NULL AND l.website <> '' AND l.normalized_domain NOT LIKE 'no_site_%')")
     q = arg("search").lower()
     if q:
         term = f"%{db.like_escape(q)}%"
@@ -271,9 +285,13 @@ def leads_summary():
         row = db.query_one(f"""SELECT COUNT(*) AS total,
                                       SUM(CASE WHEN l.assigned_agent_id IS NULL THEN 1 ELSE 0 END) AS unassigned,
                                       SUM(CASE WHEN l.last_audit_id IS NOT NULL THEN 1 ELSE 0 END) AS audited,
+                                      SUM(CASE WHEN l.last_audit_id IS NOT NULL THEN 1 ELSE 0 END) AS seo_audited,
+                                      SUM(CASE WHEN l.services_audit_date IS NOT NULL THEN 1 ELSE 0 END) AS service_audited,
+                                      SUM(CASE WHEN l.website IS NULL OR l.website = '' OR l.normalized_domain LIKE 'no_site_%' THEN 1 ELSE 0 END) AS no_website,
+                                      SUM(CASE WHEN COALESCE(l.call_count, 0) > 0 OR (l.call_status IS NOT NULL AND l.call_status <> 'not_called') THEN 1 ELSE 0 END) AS called,
                                       SUM(CASE WHEN l.last_contact_at IS NOT NULL THEN 1 ELSE 0 END) AS outreached
                                {_FROM} WHERE {clause}""", params)
-        return {k: int(row[k] or 0) for k in ("total", "unassigned", "audited", "outreached")}
+        return {k: int(row[k] or 0) for k in ("total", "unassigned", "audited", "seo_audited", "service_audited", "no_website", "called", "outreached")}
     return jsonify(cache.get_or_set(("summary", _filter_key(me, request.args)), compute, ttl=120))
 
 
@@ -938,6 +956,9 @@ def log_lead_call(lead_id):
                       WHERE id = %s""",
                    (status, notes, now, now, now, lead["id"]))
         events.audit(g.user, "LEAD_CALLED", "lead", lead["id"], {"status": status, "notes": notes}, tx=tx)
+        if lead.get("status") in ("new", "assigned", "audited") and status != "not_called":
+            tx.execute("UPDATE leads SET status = 'contacted' WHERE id = %s", (lead["id"],))
+    cache.bump()
 
     updated = db.query_one(_LEAD_SELECT + " WHERE l.id = %s", (lead["id"],))
     return jsonify({"lead": lead_out(updated), "ok": True})
@@ -967,8 +988,10 @@ def audit_lead_services(lead_id):
     s_data = service_audit.extract_website_services(web)
     now = now_iso()
     with db.transaction() as tx:
-        tx.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s, updated_at = %s WHERE id = %s",
-                   (json.dumps(s_data, ensure_ascii=False), now, now, lead["id"]))
+        pitch = service_audit.compare_and_generate_pitch(lead, s_data, sender_name=g.user["name"])
+        tx.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s, service_match_score = %s, service_pitch_notes = %s, updated_at = %s WHERE id = %s",
+                   (json.dumps(s_data, ensure_ascii=False), now, pitch["score"], pitch["pitch_notes"], now, lead["id"]))
+    cache.bump()
     updated = db.query_one(_LEAD_SELECT + " WHERE l.id = %s", (lead["id"],))
     return jsonify({"lead": lead_out(updated), "service_audit": s_data})
 
@@ -977,9 +1000,9 @@ def audit_lead_services(lead_id):
 @require()
 def mass_service_audit():
     data = body()
-    lead_ids = data.get("lead_ids") or []
+    lead_ids = data.get("lead_ids") or ([r["id"] for r in db.query(f"SELECT l.id {_FROM} WHERE {lead_filter(g.user, data['filter'])[0]} LIMIT 50", lead_filter(g.user, data["filter"])[1])] if isinstance(data.get("filter"), dict) else [])
     if not lead_ids or not isinstance(lead_ids, list):
-        raise ApiError(422, "Provide an array of lead_ids to audit.")
+        raise ApiError(422, "Select one or more leads to audit.")
     from backend import service_audit
     results_list = []
     now = now_iso()
@@ -990,9 +1013,12 @@ def mass_service_audit():
                 s_data = service_audit.extract_website_services(row["website"])
                 db.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s, updated_at = %s WHERE id = %s",
                            (json.dumps(s_data, ensure_ascii=False), now, now, lid))
-                results_list.append({"id": lid, "ok": True, "services_count": len(s_data.get("services", []))})
+                pitch = service_audit.compare_and_generate_pitch(row, s_data, sender_name=g.user["name"])
+                db.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s, service_match_score = %s, service_pitch_notes = %s, updated_at = %s WHERE id = %s", (json.dumps(s_data, ensure_ascii=False), now, pitch["score"], pitch["pitch_notes"], now, lid))
+                results_list.append({"id": lid, "ok": True, "services_count": len(s_data.get("services", [])), "score": pitch["score"]})
             except Exception as e:
                 results_list.append({"id": lid, "ok": False, "error": str(e)})
+    cache.bump()
     return jsonify({"results": results_list, "total": len(results_list)})
 
 
@@ -1000,7 +1026,7 @@ def mass_service_audit():
 @require()
 def mass_service_pitch():
     data = body()
-    lead_ids = data.get("lead_ids") or []
+    lead_ids = data.get("lead_ids") or ([r["id"] for r in db.query(f"SELECT l.id {_FROM} WHERE {lead_filter(g.user, data['filter'])[0]} LIMIT 50", lead_filter(g.user, data["filter"])[1])] if isinstance(data.get("filter"), dict) else [])
     if not lead_ids or not isinstance(lead_ids, list):
         raise ApiError(422, "Provide an array of lead_ids.")
     from backend import service_audit
@@ -1020,4 +1046,5 @@ def mass_service_pitch():
                 results_list.append({"id": lid, "ok": True, "score": pitch["score"], "grade": pitch["grade"]})
         except Exception as e:
             results_list.append({"id": lid, "ok": False, "error": str(e)})
+    cache.bump()
     return jsonify({"results": results_list, "total": len(results_list)})

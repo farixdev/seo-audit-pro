@@ -21,8 +21,8 @@ class DashboardPage(Page):
     def __init__(self, ws):
         super().__init__(ws, scroll=True)
         role = session.role
-        subtitle = {"MANAGER": "Agency-wide overview", "TEAM_LEAD": f"Team {session.user.get('team_name') or ''}".strip(),
-                    "AGENT": "Your leads, audits and outreach"}.get(role, "")
+        subtitle = "Local Offline Workspace · 3-Campaign Outreach & Dual Auditing Engine"
+        _unused_sub = ""
         h = self.header("Overview", subtitle)
         add = h.add_action(button("Add lead", icon_name="plus"))
         add.clicked.connect(lambda: self.ws.navigate("leads", create=True))
@@ -34,8 +34,9 @@ class DashboardPage(Page):
         cl = vbox(content, spacing=20)
         self.metrics = MetricStrip()
         self.metrics.add("leads", "Active leads")
-        if role != "AGENT":
-            self.metrics.add("unassigned", "Unassigned")
+        self.metrics.add("seo_audited", "Audit 1: SEO Audited (C1)")
+        self.metrics.add("service_audited", "Audit 2: Service Audited (C3)")
+        self.metrics.add("no_website", "C2: No-Website Leads")
         self.metrics.add("audits_7d", "Audits completed · 7 days")
         self.metrics.add("running", "Audits in progress")   # running + waiting in the queue
         self.metrics.add("avg", "Average score · 30 days")
@@ -133,8 +134,12 @@ class DashboardPage(Page):
         o = d["overview"]
         m = self.metrics.metrics
         m["leads"].set(fmt.number(o["leads"]))
-        if "unassigned" in m:
-            m["unassigned"].set(fmt.number(o["unassigned"]), color=C["warning"] if o["unassigned"] else None)
+        if "seo_audited" in m:
+            m["seo_audited"].set(fmt.number(o.get("seo_audited_total", 0)))
+        if "service_audited" in m:
+            m["service_audited"].set(fmt.number(o.get("service_audited_total", 0)))
+        if "no_website" in m:
+            m["no_website"].set(fmt.number(o.get("no_website_total", 0)), hint=f"{o.get('called_total', 0)} called")
         m["audits_7d"].set(fmt.number(o["audits_7d"]))
         m["running"].set(fmt.number(o["audits_running"]))
         avg = o.get("avg_score_30d")

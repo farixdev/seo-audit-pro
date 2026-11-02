@@ -328,23 +328,34 @@ class ComposePanel(QWidget):
         if dlg.exec() and dlg.chosen:
             self.load_lead(dlg.chosen["id"])
 
-    def set_lead(self, lead):
+    def set_lead(self, lead, campaign=None):
         changed = not self.lead or self.lead["id"] != lead["id"]
         self.lead = lead
         self.lead_label.setText(f"<b>{_esc(lead.get('company'))}</b>"
                                 f"<span style='color:{C['text_3']};'>&nbsp;&nbsp;{_esc(lead.get('normalized_domain'))}</span>")
         self.open_lead_btn.setVisible(True)
         self.pick_btn.setText("Change…")
-        self.status_label.setText(outreach_text(lead))
+        seo_txt = f"Audit 1 (SEO): {lead['last_audit_score']}/100" if lead.get("last_audit_score") is not None else ("Audit 1 (SEO): Audited" if lead.get("last_audit_id") else "Audit 1 (SEO): Not audited")
+        svc_txt = f"Audit 2 (Services): {lead['service_match_score']}/100 ({len(lead.get('services_list') or [])} services)" if lead.get("service_match_score") is not None else ("Audit 2 (Services): Extracted" if lead.get("services_audit_date") else "Audit 2 (Services): Not audited")
+        call_txt = f"C2 Calls: {lead.get('call_count') or 0}x ({(lead.get('call_status') or 'not_called').replace('_', ' ')})"
+        self.status_label.setText(f"{seo_txt}  ·  {svc_txt}  ·  {call_txt}  ·  {outreach_text(lead)}")
         if changed:
             self.to.setText(lead.get("email") or "")
             self.subject.clear()
             self.body_edit.clear()
             self.notice.clear()
+        if campaign in ("seo_audit", "website_pitch", "service_pitch"):
+            self.campaign_picker.set_value(campaign)
+            self.attach_pdf_cb.setChecked(campaign == "seo_audit")
+            self.generate()
+        elif changed:
+            auto_camp = "website_pitch" if not lead.get("has_website", bool(lead.get("website"))) else ("service_pitch" if lead.get("services_audit_date") and not lead.get("last_audit_id") else "seo_audit")
+            self.campaign_picker.set_value(auto_camp)
+            self.attach_pdf_cb.setChecked(auto_camp == "seo_audit")
         self._update_state()
 
-    def load_lead(self, lead_id):
-        tasks.run(api.get, f"/api/leads/{lead_id}", on_done=lambda r: self.set_lead(r["lead"]),
+    def load_lead(self, lead_id, campaign=None):
+        tasks.run(api.get, f"/api/leads/{lead_id}", on_done=lambda r: self.set_lead(r["lead"], campaign=campaign),
                   on_error=lambda e: show_error(self, e, "Lead"), owner=self)
 
     def has_text(self):
@@ -390,7 +401,8 @@ class ComposePanel(QWidget):
         to_email = self.to.text().strip()
         sub = self.subject.text().strip()
         body = self.body_edit.toPlainText().strip()
-        rep_id = self.report_id if (hasattr(self, "attach_pdf_cb") and self.attach_pdf_cb.isChecked()) else None
+        want_pdf = bool(hasattr(self, "attach_pdf_cb") and self.attach_pdf_cb.isChecked())
+        rep_id = self.report_id if want_pdf else None
 
         self.send_direct_btn.busy(True, "Sending…")
         def on_done(res):
@@ -402,7 +414,21 @@ class ComposePanel(QWidget):
             self.send_direct_btn.busy(False)
             show_error(self, err, "Email sending failed")
 
-        tasks.run(api.post, "/api/outreach/send-direct", {
+        def _do_send():
+            att_path = None
+            if want_pdf and self.lead.get("last_audit_id"):
+                try:
+                    from seo_audit_pro.ui.pages.reports import client_report_path
+                    att_path = client_report_path(self.lead["last_audit_id"])
+                except Exception:
+                    pass
+            return api.post("/api/outreach/send-direct", {
+                "lead_id": self.lead["id"], "to_email": to_email, "subject": sub, "body": body,
+                "report_id": rep_id, "attach_pdf": want_pdf, "attachment_path": att_path
+            })
+        tasks.run(_do_send, on_done=on_done, on_error=on_fail, owner=self)
+        if False:
+            tasks.run(api.post, "/api/outreach/send-direct", {
             "lead_id": self.lead["id"],
             "to_email": to_email,
             "subject": sub,
@@ -422,6 +448,7 @@ class ComposePanel(QWidget):
 
         def done(d):
             self.generate_btn.busy(False)
+            self.report_id = d.get("report_id")
             self.subject.setText(d["subject"])
             self.body_edit.setPlainText(d["body"])
             if not self.to.text().strip() and d.get("to_email"):
@@ -554,7 +581,7 @@ class OutreachPage(Page):
         self.compose.recorded.connect(lambda _l: self.log.load())
         self.tabs.currentChanged.connect(lambda _i: self.tabs.currentWidget() is self.log and self.log.load())
 
-    def activate(self, lead_id=None, **_):
+    def activate(self, lead_id=None, campaign=None, **_):
         if lead_id:
             self.tabs.setCurrentWidget(self.compose)
             if self.compose.lead is None or self.compose.lead["id"] != lead_id:
@@ -562,7 +589,9 @@ class OutreachPage(Page):
                         self, "Write a new email?", "The email you were writing will be cleared.", "Write new email",
                         danger=True):
                     return
-                self.compose.load_lead(lead_id)
+                self.compose.load_lead(lead_id, campaign=campaign)
+            elif campaign:
+                self.compose.set_lead(self.compose.lead, campaign=campaign)
         elif self.tabs.currentWidget() is self.log:
             self.log.load()
 

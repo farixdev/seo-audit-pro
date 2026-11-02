@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """/api/outreach/* — SMTP settings (Manager), drafts, sending, bulk outreach."""
 
+import json
+import os
 import re
 
 from flask import Blueprint, g, jsonify, request
 
-from backend import config, db, events, mailer, reports, security, uploads
+from backend import cache, config, db, events, mailer, reports, security, uploads
 from backend.auth import AGENT, MANAGER, TEAM_LEAD, can_access_lead, idempotent, lead_scope, load_lead, require
 from backend.errors import ApiError, conflict, not_found
 from backend.util import EMAIL_RE, body, email_value, iso_ago, now_iso, page_args, paged, text
@@ -188,6 +190,13 @@ def send_direct_route():
     # Optional report attachment
     attachments = []
     report_id = data.get("report_id")
+    att_path = data.get("attachment_path")
+    if att_path and isinstance(att_path, str) and os.path.isfile(att_path):
+        attachments.append((f"SEO-Audit-Report-{lead.get('normalized_domain') or 'Site'}.pdf", "application/pdf", att_path))
+    elif not report_id and data.get("attach_pdf") and lead.get("last_audit_id"):
+        row_rep = db.query_one("SELECT id FROM reports WHERE audit_id = %s AND kind = 'client' AND format = 'pdf'", (lead["last_audit_id"],))
+        if row_rep:
+            report_id = row_rep["id"]
     if report_id:
         rep = reports.ensure_file(db.query_one("SELECT * FROM reports WHERE id = %s", (report_id,)))
         if rep:
@@ -209,6 +218,9 @@ def send_direct_route():
         tx.execute("UPDATE leads SET last_contact_at = %s, outreach_method = 'email', outreach_contact = %s, updated_at = %s WHERE id = %s",
                    (now, to_email, now, lead["id"]))
         events.audit(me, "EMAIL_SENT_DIRECT", "email", eid, {"lead_id": lead["id"], "to": to_email}, tx=tx)
+        if lead.get("status") in ("new", "assigned", "audited"):
+            tx.execute("UPDATE leads SET status = 'contacted' WHERE id = %s", (lead["id"],))
+    cache.bump()
 
     return jsonify({"ok": True, "message": f"Email delivered to {to_email} successfully!", "email_id": eid})
 

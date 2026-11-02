@@ -115,13 +115,13 @@ class LeadDetailPage(Page):
         sub.addStretch(1)
         left.addLayout(sub)
         head.addLayout(left, 1)
-        self.audit_btn = button("Start audit", "primary", icon_name="audit")
+        self.audit_btn = button("Audit 1: Start SEO Audit (C1)", "primary", icon_name="audit")
         self.audit_btn.clicked.connect(self._audit_action)
         self.email_btn = button("Write email", icon_name="mail")
         self.email_btn.clicked.connect(lambda: self.ws.navigate("outreach", lead_id=self.lead_id))
-        self.call_btn = button("Call & Pitch", icon_name="check")
+        self.call_btn = button("Campaign 2: Call & Pitch", icon_name="check")
         self.call_btn.clicked.connect(self._log_call)
-        self.service_btn = button("Audit Services (C3)", icon_name="zap")
+        self.service_btn = button("Audit 2: Audit Services (C3)", icon_name="zap")
         self.service_btn.clicked.connect(self._audit_services)
         self.outreach_btn = button("Mark outreached", icon_name="check")
         self.outreach_btn.clicked.connect(self._mark_outreach)
@@ -167,6 +167,10 @@ class LeadDetailPage(Page):
         lay = vbox(w, (0, 16, 0, 0), 16)
         self.latest_card = Card(padding=20, spacing=12)
         lay.addWidget(self.latest_card)
+        self.service_card = Card(padding=20, spacing=12)
+        lay.addWidget(self.service_card)
+        self.call_card = Card(padding=20, spacing=12)
+        lay.addWidget(self.call_card)
         notes = Card(padding=20, spacing=8)
         notes.body.addWidget(label("Notes", "SectionTitle"))
         self.notes_label = label("", wrap=True, selectable=True)
@@ -265,10 +269,10 @@ class LeadDetailPage(Page):
         fg, bg, text = STATUS.get(lead["status"], (C["text_2"], C["neutral_bg"], lead["status"].title()))
         self.status_badge.setText(text)
         self.status_badge.set_colors(fg, bg)
-        self.domain_btn.setText(lead["normalized_domain"])
+        self.domain_btn.setText(lead.get("normalized_domain") or "No website (Campaign 2 — Phone Pitch)")
         self.sub_meta.setText(" · ".join(x for x in (lead.get("niche"), lead.get("area"), lead.get("country")) if x))
         running = lead.get("running_audit_id")
-        self.audit_btn.setText("View running audit" if running else "Start audit")
+        self.audit_btn.setText("View running SEO audit" if running else "Audit 1: Start SEO Audit (C1)")
         self.audit_btn.setEnabled(not archived or bool(running))
         self.audit_btn.setToolTip("Restore this lead to audit it" if archived and not running else "")
         self.email_btn.setEnabled(not archived)
@@ -278,6 +282,7 @@ class LeadDetailPage(Page):
         self.edit_btn.setVisible(can_edit_lead(lead))
         self.more_btn.setVisible(not session.is_agent() and can_manage_lead(lead))
         self._fill_details(lead)
+        self._render_campaigns(lead)
         self.notes_label.setText(lead.get("notes") or "No notes yet. Use Edit to add context for your team.")
         self.notes_label.setStyleSheet("" if lead.get("notes") else f"color: {C['text_3']};")
         self.area.ready()
@@ -308,7 +313,10 @@ class LeadDetailPage(Page):
                 ("Assigned team", lead.get("team_name") or "Unassigned"),
                 ("Assigned agent", lead.get("agent_name") or "Unassigned"),
                 ("Source", lead.get("batch_name") or lead.get("source")), ("Created", fmt.date(lead.get("created_at"))),
-                ("Last audit", audit_val), ("Outreach", outreach_text(lead))]
+                ("Audit 1 (SEO)", audit_val),
+                ("Audit 2 (Services)", f"{lead['service_match_score']}/100 match ({len(lead.get('services_list') or [])} services)" if lead.get("service_match_score") is not None else ("Services extracted" if lead.get("services_audit_date") else ("No website" if not lead.get("has_website", True) else "Not service audited"))),
+                ("C2 Call Status", (lead.get("call_status") or "not_called").replace("_", " ").title() + (f" · {lead['call_count']} call(s)" if lead.get("call_count") else "")),
+                ("Outreach", outreach_text(lead))]
         rows = [(k, v) for k, v in rows if v not in (None, "") or k in ("Contact", "Email", "Phone", "Niche", "Area")]
         if lead.get("maps_url"):
             link = button("Open in Google Maps", "link")
@@ -358,6 +366,64 @@ class LeadDetailPage(Page):
         self.fetch(channel, api.get, path, params=params, on_done=done, on_error=area.error)
 
     # -- overview ------------------------------------------------------------
+    def _render_campaigns(self, lead):
+        clear_layout(self.service_card.body)
+        sb = self.service_card.body
+        s_head = hbox(spacing=8)
+        s_head.addWidget(label("Audit 2: Website Service Audit & Agency Comparison (Campaign 3)", "SectionTitle"), 1)
+        has_site = lead.get("has_website", bool(lead.get("website")))
+        if not has_site:
+            s_head.addWidget(Badge("No Website (Campaign 2 Lead)", C["warning"], C["warning_bg"]))
+            sb.addLayout(s_head)
+            sb.addWidget(label("This lead does not have a website. Use Campaign 2 below to call and pitch building a website.", "Muted", wrap=True))
+        else:
+            sc = lead.get("service_match_score")
+            if sc is not None:
+                s_head.addWidget(Badge(f"Service Audited · Match Score {sc}/100", C["success"], C["success_bg"]))
+            elif lead.get("services_audit_date"):
+                s_head.addWidget(Badge("Services Extracted", C["info"], C["info_bg"]))
+            else:
+                s_head.addWidget(Badge("Not Service Audited", C["text_2"], C["neutral_bg"]))
+            sb.addLayout(s_head)
+            svcs = lead.get("services_list") or []
+            if svcs:
+                sb.addWidget(label("Extracted Website Services: " + ", ".join(svcs), wrap=True, selectable=True))
+            elif lead.get("services_audit_date"):
+                sb.addWidget(label("Audited on " + fmt.date(lead.get("services_audit_date")) + " · General business offerings detected.", "Muted", wrap=True))
+            else:
+                sb.addWidget(label("Run Audit 2 to crawl this website's services, compare them against your Agency Offerings with LLM, and generate a custom service pitch.", "Muted", wrap=True))
+            if lead.get("service_pitch_notes"):
+                sb.addWidget(label(f"Pitch Opportunity: {lead['service_pitch_notes']}", "Meta", wrap=True, selectable=True))
+            s_act = hbox(spacing=8)
+            run_s_btn = button("Re-run Service Audit (C3)" if lead.get("services_audit_date") else "Run Service Audit (C3)", icon_name="zap", size="sm")
+            run_s_btn.clicked.connect(self._audit_services)
+            s_act.addWidget(run_s_btn)
+            c3_email_btn = button("Write Service Comparison Email (C3)", "primary", icon_name="mail", size="sm")
+            c3_email_btn.clicked.connect(lambda: self.ws.navigate("outreach", lead_id=self.lead_id, campaign="service_pitch"))
+            s_act.addWidget(c3_email_btn)
+            s_act.addStretch(1)
+            sb.addLayout(s_act)
+
+        clear_layout(self.call_card.body)
+        cb = self.call_card.body
+        c_head = hbox(spacing=8)
+        c_head.addWidget(label("Campaign 2: Phone Call & Website Pitch Management", "SectionTitle"), 1)
+        c_status = (lead.get("call_status") or "not_called").replace("_", " ").title()
+        c_head.addWidget(Badge(f"{c_status} · {lead.get('call_count') or 0} call(s)", C["info"] if lead.get("call_count") else C["text_2"], C["info_bg"] if lead.get("call_count") else C["neutral_bg"]))
+        cb.addLayout(c_head)
+        cb.addWidget(label(f"Phone: {lead.get('phone') or 'No phone number recorded'}  ·  Last called: {fmt.relative(lead['last_called_at']) if lead.get('last_called_at') else 'Never'}", "Meta"))
+        if lead.get("call_notes"):
+            cb.addWidget(label(f"Call Notes: {lead['call_notes']}", wrap=True, selectable=True))
+        c_act = hbox(spacing=8)
+        call_log_btn = button("Log Phone Call & View Script (C2)", icon_name="check", size="sm")
+        call_log_btn.clicked.connect(self._log_call)
+        c_act.addWidget(call_log_btn)
+        c2_email_btn = button("Write No-Website Pitch Email (C2)", icon_name="mail", size="sm")
+        c2_email_btn.clicked.connect(lambda: self.ws.navigate("outreach", lead_id=self.lead_id, campaign="website_pitch"))
+        c_act.addWidget(c2_email_btn)
+        c_act.addStretch(1)
+        cb.addLayout(c_act)
+
     def _overview_error(self, err):
         clear_layout(self.latest_card.body)
         self.latest_card.body.addWidget(label("Latest audit", "SectionTitle"))
@@ -368,7 +434,7 @@ class LeadDetailPage(Page):
         body = self.latest_card.body
         clear_layout(body)
         head = hbox(spacing=8)
-        head.addWidget(label("Latest audit", "SectionTitle"), 1)
+        head.addWidget(label("Audit 1: Technical SEO Audit (Campaign 1)", "SectionTitle"), 1)
         body.addLayout(head)
         running = next((a for a in items if a["status"] in ("queued", "running")), None)
         latest = next((a for a in items if a["status"] == "completed"), None)
@@ -406,6 +472,9 @@ class LeadDetailPage(Page):
         open_btn = button("Open audit", icon_name="external", size="sm")
         open_btn.clicked.connect(lambda: self.ws.navigate("audit", audit_id=latest["id"]))
         actions.addWidget(open_btn)
+        c1_email_btn = button("Send SEO Report Email (C1)", "primary", icon_name="mail", size="sm")
+        c1_email_btn.clicked.connect(lambda: self.ws.navigate("outreach", lead_id=self.lead_id, campaign="seo_audit"))
+        actions.addWidget(c1_email_btn)
         actions.addStretch(1)
         col.addLayout(actions)
         row.addLayout(col, 1)
@@ -458,7 +527,7 @@ class LeadDetailPage(Page):
         dlg = CallLogDialog(self, self.lead)
         if dlg.exec():
             self.lead = getattr(dlg, "result_lead", self.lead)
-            self._fill_lead(self.lead)
+            self.reload()
             toast(self, "Call log and pitch saved.", "success")
 
     def _audit_services(self):
@@ -470,7 +539,7 @@ class LeadDetailPage(Page):
         toast(self, "Auditing website services & detecting opportunities…", "info", 4000)
         def on_done(res):
             self.lead = res.get("lead") or self.lead
-            self._fill_lead(self.lead)
+            self.reload()
             toast(self, "Services audited! Opening outreach pitch…", "success")
             self.ws.navigate("outreach", lead_id=self.lead["id"], campaign="service_pitch")
         tasks.run(api.post, f"/api/leads/{self.lead['id']}/service-audit", {},

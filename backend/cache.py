@@ -25,6 +25,9 @@ def bump():
         _STORE.clear()
 
 
+clear = bump
+
+
 def get_or_set(key, compute, ttl=60):
     from backend import config
     if config.SHARED_HOSTING:  # several processes: another one may have changed the data

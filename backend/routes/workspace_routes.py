@@ -123,9 +123,15 @@ def dashboard():
                               WHERE al.entity_type = 'lead' AND al.entity_id IN (SELECT l.id FROM leads l WHERE {scope})
                               ORDER BY al.created_at DESC LIMIT 12""", sp)
 
+    seo_audited_total = db.scalar(f"SELECT COUNT(*) FROM leads l WHERE {scope} AND l.last_audit_id IS NOT NULL AND l.status <> 'archived'", sp) or 0
+    service_audited_total = db.scalar(f"SELECT COUNT(*) FROM leads l WHERE {scope} AND l.services_audit_date IS NOT NULL AND l.status <> 'archived'", sp) or 0
+    no_website_total = db.scalar(f"SELECT COUNT(*) FROM leads l WHERE {scope} AND (l.website IS NULL OR l.website = '' OR l.normalized_domain LIKE 'no_site_%') AND l.status <> 'archived'", sp) or 0
+    called_total = db.scalar(f"SELECT COUNT(*) FROM leads l WHERE {scope} AND COALESCE(l.call_count, 0) > 0 AND l.status <> 'archived'", sp) or 0
     return jsonify({
         "role": me["role"],
         "overview": {"leads": total_leads, "unassigned": unassigned, "audits_7d": audits_week,
+                     "seo_audited_total": seo_audited_total, "service_audited_total": service_audited_total,
+                     "no_website_total": no_website_total, "called_total": called_total,
                      "audits_running": running, "avg_score_30d": round(avg_score) if avg_score is not None else None,
                      "outreach_30d": outreach_month, "calls_30d": calls_month},
         "pipeline": pipeline,

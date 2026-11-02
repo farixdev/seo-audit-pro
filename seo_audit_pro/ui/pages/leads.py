@@ -38,11 +38,11 @@ STATUS_FILTER = [("Any status", ""), ("New", "new"), ("Assigned", "assigned"), (
                  ("Contacted", "contacted"), ("Qualified", "qualified"), ("Won", "won"), ("Lost", "lost"),
                  ("Archived", "archived")]
 QUICK_VIEWS = {"": {}, "everyone": {}, "unassigned": {"assigned": "unassigned"}, "not_audited": {"audited": "no"},
-               "audited": {"audited": "yes"}, "no_website": {"has_website": "no"}, "services_audited": {"has_website": "yes"},
+               "audited": {"audited": "yes"}, "no_website": {"has_website": "no"}, "services_audited": {"service_audited": "yes"}, "needs_service_audit": {"service_audited": "no", "has_website": "yes"},
                "contacted": {"outreach": "yes"}, "not_contacted": {"outreach": "no"}}
 REASONS = {"no_website": "No website", "invalid_website": "Website not usable",
            "duplicate_in_file": "Duplicate within file", "duplicate_existing": "Already in lead bank"}
-FILTER_KEYS = ("search", "status", "team_id", "agent_id", "assigned", "audited", "outreach", "niche", "area", "batch_id")
+FILTER_KEYS = ("search", "status", "team_id", "agent_id", "assigned", "audited", "outreach", "niche", "area", "batch_id", "has_website", "call_status", "service_audited")
 
 
 def _surface(widget):
@@ -420,8 +420,8 @@ class LeadsPage(Page):
             self.agent.currentIndexChanged.connect(lambda _i: self._set(agent_id=self.agent.currentData()))
             bar.addWidget(self.agent)
         ml.addLayout(bar)
-        views = [("All Leads", ""), ("SEO Audited (C1)", "audited"), ("No Website / Calls (C2)", "no_website"),
-                 ("Services (C3)", "services_audited"), ("Contacted", "contacted"), ("Not audited", "not_audited")]
+        views = [("All Leads", ""), ("Audit 1: SEO Audited (C1)", "audited"), ("Needs SEO Audit (C1)", "not_audited"), ("No Website / Phone (C2)", "no_website"),
+                 ("Audit 2: Service Audited (C3)", "services_audited"), ("Needs Service Audit (C3)", "needs_service_audit"), ("Contacted", "contacted")]
         if not self.manage:
             # "Mine" is the agent's own leads; "All visible" adds the leads a Manager shared with everyone.
             views = [("Mine", ""), ("All visible", "everyone")] + [v for v in views[2:]]
@@ -433,7 +433,7 @@ class LeadsPage(Page):
         self.summary.setObjectName("Surface")
         sl = hbox(self.summary, (16, 10, 12, 10), 22)
         self.sum_labels = {}
-        for key, text in (("total", "leads"), ("unassigned", "unassigned"), ("audited", "audited"),
+        for key, text in (("total", "total leads"), ("seo_audited", "Audit 1: SEO audited"), ("service_audited", "Audit 2: Service audited"), ("no_website", "C2: no website"), ("called", "C2: called"),
                           ("outreached", "contacted")):
             if key == "unassigned" and not self.manage:
                 continue  # an agent's leads are always assigned to them
@@ -450,6 +450,16 @@ class LeadsPage(Page):
         self.clear_scope = button("Clear filters", "ghost", size="sm")
         self.clear_scope.clicked.connect(self.reset_filters)
         sl.addWidget(self.clear_scope)
+        guide = QFrame()
+        guide.setStyleSheet(f"QFrame {{ background: {C['surface']}; border: 1px solid {C['border']}; border-radius: 8px; }}")
+        gl = hbox(guide, (14, 8, 14, 8), 16)
+        gl.addWidget(Badge("Audit 1: SEO Technical Audit (C1)", C["info"], C["info_bg"]))
+        gl.addWidget(label("Crawls technical SEO, speed & security → PDF report + score", "Meta"))
+        gl.addWidget(Badge("Campaign 2: No-Website Phone Pitch (C2)", C["warning"], C["warning_bg"]))
+        gl.addWidget(label("Phone call log & script for businesses with no website", "Meta"))
+        gl.addWidget(Badge("Audit 2: Website Service Audit (C3)", C["success"], C["success_bg"]))
+        gl.addWidget(label("Extracts site services → LLM compares with your agency → Match score & pitch", "Meta"), 1)
+        ml.addWidget(guide)
         ml.addWidget(self.summary)
 
         self.bulk = QFrame()
@@ -465,8 +475,8 @@ class LeadsPage(Page):
         bl.addWidget(self.select_all_btn)
         bl.addStretch(1)
         self.bulk_buttons = {}
-        for key, text in (("audit", "Audit SEO (C1)"), ("service_audit", "Audit Services (C3)"),
-                          ("pitch", "Generate Pitches"), ("archive", "Archive"), ("restore", "Restore")):
+        for key, text in (("audit", "Audit 1: Technical SEO Audit (C1)"), ("service_audit", "Audit 2: Website Service Audit (C3)"),
+                          ("pitch", "C3: Compare & Score Pitches"), ("archive", "Archive"), ("restore", "Restore")):
             b = button(text, "ghost", size="sm")
             b.setStyleSheet("QPushButton { color: #FFFFFF; } QPushButton:hover { background: #3F3F46; color: #FFFFFF; }"
                             "QPushButton:disabled { color: #71717A; }")
@@ -483,19 +493,19 @@ class LeadsPage(Page):
         cols = [Column("_check", "", "check", 40)]
         cols += [
             Column("company", "Company · Website", "strong", 260, sort="company", stretch=True,
-                   secondary=lambda r: r.get("normalized_domain") or r.get("website") or "No website"),
+                   secondary=lambda r: r.get("normalized_domain") or r.get("website") or "No website (Campaign 2 — Phone Pitch)"),
             Column("niche", "Niche · Area", "text", 160, sort="niche", render=lambda r: r.get("niche") or "No niche",
                    secondary=lambda r: r.get("area") or "No area"),
             Column("rating", "Google", "text", 110, sort="rating", optional=True,
                    render=lambda r: f"{r['rating']:.1f} rating" if r.get("rating") is not None else "—",
                    secondary=lambda r: f"{r['review_count']:,} reviews" if r.get("review_count") is not None else ""),
             Column("status", "Status", "status", 100, sort="status"),
-            Column("call_status", "Call Status (C2)", "text", 130, optional=True,
-                   render=lambda r: (r.get("call_status") or "not_called").replace("_", " ").title(),
+            Column("call_status", "Campaign 2: Phone Call", "text", 145,
+                   render=lambda r: (r.get("call_status") or "not_called").replace("_", " ").title() + (f" ({r['call_count']}x)" if r.get("call_count") else ""),
                    secondary=lambda r: r.get("phone") or "No phone"),
-            Column("last_audit_score", "SEO score (C1)", "score", 110, sort="score"),
-            Column("service_match_score", "C3 Pitch", "text", 100, optional=True,
-                   render=lambda r: f"{r['service_match_score']}/100" if r.get("service_match_score") is not None else "—"),
+            Column("last_audit_score", "Audit 1: SEO Audit (C1)", "text", 155, sort="score", render=lambda r: "No website (C2)" if not r.get("has_website", bool(r.get("website"))) else (f"SEO Audited · {r['last_audit_score']}/100" if r.get("last_audit_score") is not None else ("SEO Audited" if r.get("last_audit_id") else "Not SEO Audited")), secondary=lambda r: f"PDF Ready · {fmt.date(r['last_audit_at'])}" if r.get("last_audit_at") else ("Technical SEO & Speed" if r.get("has_website", bool(r.get("website"))) else "")),
+            Column("service_match_score", "Audit 2: Service Audit (C3)", "text", 175, sort="service_score",
+                   render=lambda r: "No website (C2)" if not r.get("has_website", bool(r.get("website"))) else (f"Service Audited · {r['service_match_score']}/100" if r.get("service_match_score") is not None else ("Services Extracted" if r.get("services_audit_date") else "Not Service Audited")), secondary=lambda r: (", ".join((r.get("services_list") or [])[:3]) if r.get("services_list") else ("Offerings & LLM Match" if r.get("has_website", bool(r.get("website"))) else ""))),
             Column("last_contact_at", "Outreach", "text", 120, sort="last_contact", optional=True,
                    render=lambda r: "Contacted" if r.get("last_contact_at") else "Not contacted",
                    secondary=lambda r: fmt.relative(r["last_contact_at"]) if r.get("last_contact_at") else ""),
@@ -582,7 +592,7 @@ class LeadsPage(Page):
         self.load()
 
     def _quick(self, value):
-        for k in ("assigned", "audited", "outreach"):
+        for k in ("assigned", "audited", "outreach", "has_website", "call_status", "service_audited"):
             self.params[k] = ""
         kv = dict(QUICK_VIEWS.get(value, {}))
         if not self.manage and value != "everyone":
@@ -819,16 +829,17 @@ class LeadsPage(Page):
         m.addAction(icons.icon("external", C["text_2"]), "Open", lambda: self.ws.navigate("lead", lead_id=row["id"]))
         if row["status"] != "archived":
             if row.get("last_audit_id"):
-                m.addAction(icons.icon("report", C["text_2"]), "View latest audit",
+                m.addAction(icons.icon("report", C["text_2"]), "Audit 1: View latest SEO audit (C1)",
                             lambda: self.ws.navigate("audit", audit_id=row["last_audit_id"]))
-            m.addAction(icons.icon("audit", C["text_2"]), "Run audit again" if row.get("last_audit_id") else "Start audit",
+            if row.get("website"):
+                m.addAction(icons.icon("audit", C["text_2"]), "Audit 1: Re-run SEO Technical Audit (C1)" if row.get("last_audit_id") else "Audit 1: Start SEO Technical Audit (C1)",
                         lambda: start_audit(self, row, lambda _a: self.load()))
             m.addAction(icons.icon("mail", C["text_2"]), "Write email",
                         lambda: self.ws.navigate("outreach", lead_id=row["id"]))
-            m.addAction(icons.icon("check", C["text_2"]), "Log Call & Pitch (C2)",
+            m.addAction(icons.icon("check", C["text_2"]), "Campaign 2: Log Phone Call & Website Pitch",
                         lambda: self._log_call(row))
             if row.get("website"):
-                m.addAction(icons.icon("zap", C["text_2"]), "Audit Services & Pitch (C3)",
+                m.addAction(icons.icon("zap", C["text_2"]), "Audit 2: Run Website Service Audit & Pitch (C3)",
                             lambda: self._audit_services(row))
             m.addAction(icons.icon("check", C["text_2"]),
                         "Update outreach…" if row.get("last_contact_at") else "Mark outreached…",
@@ -881,7 +892,8 @@ class LeadsPage(Page):
             toast(self, f"Completed service audits for {res.get('total', len(ids))} leads!", "success")
             self.clear_selection()
             self.load()
-        tasks.run(api.post, "/api/leads/mass-service-audit", {"lead_ids": ids},
+        payload = {"filter": self._filter_params()} if self.all_matching else {"lead_ids": ids}
+        tasks.run(api.post, "/api/leads/mass-service-audit", payload,
                   on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
 
     def bulk_pitch(self):
@@ -893,5 +905,6 @@ class LeadsPage(Page):
             toast(self, f"Generated service pitches for {res.get('total', len(ids))} leads!", "success")
             self.clear_selection()
             self.load()
-        tasks.run(api.post, "/api/leads/mass-service-pitch", {"lead_ids": ids},
+        payload = {"filter": self._filter_params()} if self.all_matching else {"lead_ids": ids}
+        tasks.run(api.post, "/api/leads/mass-service-pitch", payload,
                   on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)

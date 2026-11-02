@@ -51,7 +51,7 @@ def save_agency_settings(services=None, pitch_prompt=None, custom_instructions=N
     current = get_agency_settings()
     now = now_iso()
     fields = {
-        "services": services if services is not None else current["services"],
+        "services": ("\n".join(str(x) for x in services) if isinstance(services, list) else str(services)) if services is not None else current["services"],
         "pitch_prompt": pitch_prompt if pitch_prompt is not None else current["pitch_prompt"],
         "custom_instructions": custom_instructions if custom_instructions is not None else current["custom_instructions"],
         "llm_provider": llm_provider if llm_provider is not None else current["llm_provider"],
@@ -263,3 +263,4 @@ def compare_and_generate_pitch(lead, service_data, agency_services=None, sender_
         "services_extracted": services_list,
         "digital_gaps": gaps_list,
     }
+
