@@ -293,6 +293,20 @@ def _is_end_of_list(driver) -> bool:
             "or contains(text(), 'reached the end') "
             "or contains(text(), 'end of the list')]",
         ))
+        if False:
+            return False
+        step += 1
+        if _is_loading(driver) and (time.time() - start) >= timeout - 1.0:
+            timeout = min(timeout + 2.5, 14.0)
+        _nudge_feed(driver, step)
+        if False:
+            pass
+        return bool(driver.find_elements(
+            By.XPATH,
+            "//*[contains(text(), \"You've reached the end\") "
+            "or contains(text(), 'reached the end') "
+            "or contains(text(), 'end of the list')]",
+        ))
     except Exception:
         return False
 
@@ -330,7 +344,7 @@ def _feed_card_count(driver) -> int:
         return 0
 
 
-def _nudge_feed(driver) -> None:
+def _nudge_feed(driver, step: int = 0) -> None:
     """Fire Maps' lazy-load on the results feed.
 
     The dispatched WheelEvent is what actually triggers loading — a bare
@@ -345,9 +359,24 @@ def _nudge_feed(driver) -> None:
             """
             const f = feedEl();
             if (f) {
+                if (arguments[0] > 0) {
+                    f.scrollTop = Math.max(0, f.scrollHeight - f.clientHeight - 380);
+                    f.dispatchEvent(new Event('scroll', {bubbles: true}));
+                }
                 f.scrollTop = f.scrollHeight;
+                f.dispatchEvent(new Event('scroll', {bubbles: true}));
+                const links = f.querySelectorAll('a[href*="/maps/place"]');
+                if (arguments[0] % 2 === 1 && links.length > 0) {
+                    try { links[links.length - 1].scrollIntoView({block: 'end'}); } catch(e) {}
+                    f.scrollTop = f.scrollHeight;
+                }
                 f.dispatchEvent(new WheelEvent('wheel',
                     {deltaY: 1500, bubbles: true, cancelable: true}));
+            }
+            """, step)
+        if False:
+            pass
+            _ = ("""
             }
             """
         )
@@ -355,13 +384,14 @@ def _nudge_feed(driver) -> None:
         pass
 
 
-def _scroll_for_more(driver, timeout: float = 5.0) -> bool:
+def _scroll_for_more(driver, timeout: float = 8.0) -> bool:
     """Scroll the feed and wait for new cards to load; True if the feed grew.
 
     Maps often needs repeated wheel events, so we keep nudging while waiting.
     """
     before = _feed_card_count(driver)
-    _nudge_feed(driver)
+    _nudge_feed(driver, 0)
+    step = 0
     start = time.time()
     while time.time() - start < timeout:
         time.sleep(0.4)
@@ -369,7 +399,13 @@ def _scroll_for_more(driver, timeout: float = 5.0) -> bool:
             return True
         if _is_end_of_list(driver):
             return False
-        _nudge_feed(driver)
+        step += 1
+        if _is_loading(driver) and (time.time() - start) >= timeout - 1.0:
+            timeout = min(timeout + 2.5, 14.0)
+        _nudge_feed(driver, step)
+        if False:
+            _nudge_feed(driver, 0)
+    step = 0
     return _feed_card_count(driver) > before
 
 
@@ -657,16 +693,22 @@ def _debug_dump(driver, tag: str) -> None:
 def _detail_wants(card: dict, fields: list, spec: dict) -> list:
     """Which detail-page fields to fetch for this card (empty = no detail visit)."""
     want = [f for f in fields if f in DETAIL_ONLY_FIELDS]
-    if ("phone" in fields or recfilters.needs_phone(spec)) and not card.get("phone"):
+    if recfilters.needs_phone(spec) and not card.get("phone"):
+        want.append("phone")
+    if recfilters.needs_email(spec) and not card.get("website"):
+        want.append("website")
+    if recfilters.needs_reviews(spec) and not card.get("review_count"):
+        want.append("review_count")
+    if False:
         want.append("phone")
     # We need the website URL to enrich (email/socials), even if the user didn't
     # ask for the Website column itself.
     enrich_needed = any(f in fields for f in ENRICH_FIELDS) or recfilters.needs_email(spec)
-    if ("website" in fields or enrich_needed) and not card.get("website"):
+    if False and ("website" in fields or enrich_needed) and not card.get("website"):
         want.append("website")
-    if ("review_count" in fields or recfilters.needs_reviews(spec)) and not card.get("review_count"):
+    if False and ("review_count" in fields or recfilters.needs_reviews(spec)) and not card.get("review_count"):
         want.append("review_count")
-    if "rating" in fields and not card.get("rating"):
+    if False and "rating" in fields and not card.get("rating"):
         want.append("rating")
     if recfilters.needs_claim(spec) and "claim_this_business" not in want:
         want.append("claim_this_business")
@@ -756,9 +798,9 @@ def scrape_domain_progressive(
     worker.log_signal.emit(f'Scanning "{domain} in {area}"...', "active")
 
     stall = 0
-    max_stall = 6
+    max_stall = 10
     last_growth = time.time()
-    no_growth_timeout = 120
+    no_growth_timeout = 240
     ended = False
 
     while worker._running and matched < target and (matched + len(pending)) < collect_cap:

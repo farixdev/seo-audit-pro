@@ -3,7 +3,7 @@
 audits, what is running and what is waiting) with live progress."""
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtWidgets import QFrame, QLineEdit, QListWidget, QListWidgetItem, QMenu, QSpinBox, QStackedWidget, QWidget
+from PySide6.QtWidgets import QCheckBox, QFrame, QLineEdit, QListWidget, QListWidgetItem, QMenu, QSpinBox, QStackedWidget, QWidget
 
 from seo_audit_pro import icons
 from seo_audit_pro.core import api, fmt, tasks
@@ -64,6 +64,11 @@ class LeadPickerDialog(Dialog):
         self.lead = None
         self.leads = []
         self.direct_url = ""
+        self.bulk_filter = None
+        self.bulk_label = ""
+        self.total_matching = 0
+        self.direct_url = ""
+        self.setMinimumWidth(640)
 
         # Direct Website URL input
         u_box = vbox(spacing=4)
@@ -77,7 +82,30 @@ class LeadPickerDialog(Dialog):
         self.body.addLayout(u_box)
 
         # Divider / label
-        self.body.addWidget(label("— Or choose from Lead Bank —", "Meta"))
+        self.body.addWidget(label("— Or choose / bulk-queue from Lead Bank (by Niche, Area/City, or Country) —", "Meta"))
+
+        frow = hbox(spacing=8)
+        self.niche_combo = combo([("All Niches", "")])
+        self.area_combo = combo([("All Areas / Cities", "")])
+        self.country_combo = combo([("All Countries", "")])
+        for cb in (self.niche_combo, self.area_combo, self.country_combo):
+            cb.currentIndexChanged.connect(lambda _i: self.load(self.search.edit.text() if hasattr(self.search, "edit") else ""))
+            frow.addWidget(cb, 1)
+        self.body.addLayout(frow)
+
+        frow2 = hbox(spacing=8)
+        self.unaudited_cb = QCheckBox("Only leads not yet SEO audited")
+        self.unaudited_cb.toggled.connect(lambda _c: self.load(self.search.edit.text() if hasattr(self.search, "edit") else ""))
+        frow2.addWidget(self.unaudited_cb)
+        frow2.addStretch(1)
+        sel_all_btn = button("Select All Shown", "ghost", size="sm")
+        sel_all_btn.clicked.connect(self._select_all_shown)
+        frow2.addWidget(sel_all_btn)
+        self.queue_all_btn = button("Queue All Matching (0)", "secondary", size="sm", icon_name="zap")
+        self.queue_all_btn.clicked.connect(self._choose_all_matching)
+        self.queue_all_btn.setEnabled(False)
+        frow2.addWidget(self.queue_all_btn)
+        self.body.addLayout(frow2)
 
         self.search = SearchBox("Search company or domain")
         self.search.search.connect(self.load)
@@ -107,6 +135,7 @@ class LeadPickerDialog(Dialog):
         self.primary.setEnabled(False)
         self.primary.clicked.connect(self.choose)
         self._gen = 0
+        self._load_facets()
         self.load("")
 
     def _url_changed(self, text):
@@ -130,8 +159,49 @@ class LeadPickerDialog(Dialog):
             self.direct_url = ""
             if self.url_edit.text():
                 self.url_edit.blockSignals(True)
-                self.url_edit.clear()
+                self.url_edit.setText("")
                 self.url_edit.blockSignals(False)
+            pass
+            self.primary.setEnabled(True)
+            self.primary.setText(f"Queue {n} audits" if n > 1 else "Start audit")
+        elif not self.direct_url:
+            if self.total_matching > 0:
+                self.primary.setEnabled(True)
+                self.primary.setText(f"Queue All {self.total_matching:,} Matching Leads" if self.total_matching > 1 else "Start audit")
+            else:
+                self.primary.setEnabled(False)
+
+    def _old_selection_changed(self):
+        """
+        selected = []
+        n = 0
+            pass
+        selected = [it.data(Qt.ItemDataRole.UserRole) for it in self.list.selectedItems() if it.data(Qt.ItemDataRole.UserRole)]
+        self.leads = selected
+        self.lead = selected[0] if len(selected) == 1 else None
+        n = len(selected)
+        if n > 0:
+            self.direct_url = ""
+            if self.url_edit.text():
+            pass
+            self.url_edit.blockSignals(True)
+            pass
+            pass
+            self.primary.setEnabled(True)
+            self.primary.setText(f"Queue {n} audits" if n > 1 else "Start audit")
+            return
+            pass
+        self.setMinimumWidth(640)
+        self.bulk_filter = None
+        self.bulk_label = ""
+        self.total_matching = 0
+        self.direct_url = ""
+        self.setMinimumWidth(640)
+        self.setMinimumWidth(640)
+            pass
+            self.url_edit.blockSignals(True)
+            pass
+            pass
             self.primary.setEnabled(True)
             if n > 1:
                 self.primary.setText(f"Queue {n} audits")
@@ -140,11 +210,79 @@ class LeadPickerDialog(Dialog):
         elif not self.direct_url:
             self.primary.setEnabled(False)
 
+        """
+
+    def _load_facets(self):
+        def _done(data):
+            self.niche_combo.blockSignals(True)
+            self.area_combo.blockSignals(True)
+            self.country_combo.blockSignals(True)
+            self.niche_combo.clear()
+            self.niche_combo.addItem("All Niches", "")
+            for n in data.get("niches") or []:
+                if n.get("key") and n.get("key") != "__none__":
+                    self.niche_combo.addItem(f"{n['label']} ({n['count']})", n["key"])
+            self.area_combo.clear()
+            self.area_combo.addItem("All Areas / Cities", "")
+            for a in data.get("areas") or []:
+                if a.get("key") and a.get("key") != "__none__":
+                    self.area_combo.addItem(f"{a['label']} ({a['count']})", a["key"])
+            self.country_combo.clear()
+            self.country_combo.addItem("All Countries", "")
+            for c in data.get("countries") or []:
+                if c.get("key") and c.get("key") != "__none__":
+                    self.country_combo.addItem(f"{c['label']} ({c['count']})", c["key"])
+            self.niche_combo.blockSignals(False)
+            self.area_combo.blockSignals(False)
+            self.country_combo.blockSignals(False)
+        tasks.run(api.get, "/api/leads/facets", on_done=_done, on_error=lambda _e: None, owner=self)
+
+    def _current_filter(self):
+        flt = {"has_website": "yes"}
+        parts = []
+        if self.niche_combo.currentData():
+            flt["niche"] = self.niche_combo.currentData()
+            parts.append(self.niche_combo.currentText().split(" (")[0])
+        if self.area_combo.currentData():
+            flt["area"] = self.area_combo.currentData()
+            parts.append(self.area_combo.currentText().split(" (")[0])
+        if self.country_combo.currentData():
+            flt["country"] = self.country_combo.currentData()
+            parts.append(self.country_combo.currentText().split(" (")[0])
+        if self.unaudited_cb.isChecked():
+            flt["audited"] = "no"
+        q = (self.search.edit.text() if hasattr(self.search, "edit") else "").strip()
+        if q:
+            flt["search"] = q
+            parts.append(f'"{q}"')
+        lbl = " · ".join(parts) if parts else f"All {self.total_matching:,} Website Leads"
+        return flt, lbl
+
+    def _select_all_shown(self):
+        self.list.selectAll()
+
+    def _choose_all_matching(self):
+        if self.total_matching <= 0:
+            return
+        self.direct_url = ""
+        self.leads = []
+        self.lead = None
+        self.bulk_filter, self.bulk_label = self._current_filter()
+        self.accept()
+
     def load(self, text):
         self._gen += 1
         gen = self._gen
         self.status.setText("Searching…")
-        params = {"page_size": 20, "sort": "company", "order": "asc"}
+        params = {"page_size": 100, "sort": "company", "order": "asc", "has_website": "yes"}
+        if self.niche_combo.currentData():
+            params["niche"] = self.niche_combo.currentData()
+        if self.area_combo.currentData():
+            params["area"] = self.area_combo.currentData()
+        if self.country_combo.currentData():
+            params["country"] = self.country_combo.currentData()
+        if self.unaudited_cb.isChecked():
+            params["audited"] = "no"
         if text:
             params["search"] = text
 
@@ -155,11 +293,18 @@ class LeadPickerDialog(Dialog):
             items = data.get("items") or []
             for lead in items:
                 audited = f"last score {lead['last_audit_score']}" if lead.get("last_audit_score") is not None else "not audited"
-                it = QListWidgetItem(f"{lead['company']}\n{lead['normalized_domain']} · {audited}")
+                loc_info = " · ".join(x for x in (lead.get("niche"), lead.get("area"), lead.get("country")) if x)
+                it = QListWidgetItem(f"{lead['company']}\n{lead['normalized_domain']} · {loc_info + ' · ' if loc_info else ''}{audited}")
                 it.setData(Qt.ItemDataRole.UserRole, lead)
                 it.setSizeHint(QSize(0, 48))
                 self.list.addItem(it)
             total = data.get("total", 0)
+            self.total_matching = total
+            self.queue_all_btn.setText(f"Queue All Matching ({total:,})")
+            self.queue_all_btn.setEnabled(total > 0)
+            if total > 0 and not self.list.selectedItems() and not self.direct_url:
+                self.primary.setEnabled(True)
+                self.primary.setText(f"Queue All {total:,} Matching Leads" if total > 1 else "Start audit")
             self.status.setText("No matching leads." if not items else
                                 (f"Showing {len(items)} of {total} leads — refine the search to narrow it down."
                                  if total > len(items) else f"{total} lead(s)"))
@@ -185,6 +330,16 @@ class LeadPickerDialog(Dialog):
             if cur and cur.data(Qt.ItemDataRole.UserRole):
                 selected = [cur.data(Qt.ItemDataRole.UserRole)]
         if selected:
+            self.leads = selected
+            self.lead = selected[0]
+            self.bulk_filter = None
+            self.accept()
+            return
+        if self.total_matching > 0:
+            self._choose_all_matching()
+            return
+        elif False:
+            pass
             self.leads = selected
             self.lead = selected[0]
             self.accept()
@@ -605,6 +760,28 @@ class AuditsPage(Page):
         if dlg.exec():
             max_pages = dlg.pages_spin.value()
             if getattr(dlg, "direct_url", ""):
+                start_direct_audit(self, dlg.direct_url, max_pages=max_pages)
+            elif getattr(dlg, "bulk_filter", None):
+                payload = {"filter": dlg.bulk_filter, "label": dlg.bulk_label, "max_pages": max_pages, "include_recent": True}
+                def _queued(res):
+                    toast(self, f"Queued bulk SEO audit ({dlg.bulk_label})! Follow progress in SEO Audit Queue.", "success")
+                    self.tabs.set_value("queue")
+                    self._switch("queue")
+                tasks.run(api.post, "/api/audits/bulk", payload, idempotency_key=api.new_idempotency_key(),
+                          on_done=_queued, on_error=lambda e: show_error(self, e), owner=self)
+            elif dlg.leads:
+                if len(dlg.leads) == 1:
+                    start_audit(self, dlg.leads[0], max_pages=max_pages)
+                else:
+                    ids = [l["id"] for l in dlg.leads]
+                    payload = {"lead_ids": ids, "label": f"{len(ids)} selected leads", "max_pages": max_pages, "include_recent": True}
+                    def _queued_ids(res):
+                        toast(self, f"Queued {len(ids)} SEO audits! Follow progress in SEO Audit Queue.", "success")
+                        self.tabs.set_value("queue")
+                        self._switch("queue")
+                    tasks.run(api.post, "/api/audits/bulk", payload, idempotency_key=api.new_idempotency_key(),
+                              on_done=_queued_ids, on_error=lambda e: show_error(self, e), owner=self)
+            elif False:
                 start_direct_audit(self, dlg.direct_url, max_pages=max_pages)
             elif dlg.leads:
                 if len(dlg.leads) == 1:

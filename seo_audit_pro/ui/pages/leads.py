@@ -289,6 +289,9 @@ class ImportsView(QWidget):
         if row.get("rejected"):
             m.addAction(icons.icon("list", C["text_2"]), "Rejected rows…", lambda: self.show_rejects(row))
             m.addAction(icons.icon("download", C["text_2"]), "Download rejected rows (CSV)", lambda: self.download(row))
+        m.addSeparator()
+        m.addAction(icons.icon("trash", C["danger"]), "Delete lead…",
+                    lambda: delete_leads(self, self.load, leads=[row]))
         m.exec(pos)
 
     def download(self, row):
@@ -380,6 +383,8 @@ class LeadsPage(Page):
             exp.clicked.connect(self.export)
             imp = self.head.add_action(button("Import files", "primary", icon_name="upload"))
             imp.clicked.connect(self.import_files)
+        dedup_btn = self.head.add_action(button("Clean Duplicates", icon_name="refresh"))
+        dedup_btn.clicked.connect(self.clean_duplicates)
         add = self.head.add_action(button("Add lead", icon_name="plus"))
         add.clicked.connect(self.create)
 
@@ -824,6 +829,12 @@ class LeadsPage(Page):
         delete_leads(self, lambda: (self.clear_selection(), self.load()),
                      leads=None if sel else self.table.selected_rows(), selection=sel)
 
+    def bulk_delete(self):
+        sel = self._selection_arg()
+        delete_leads(self, lambda: (self.clear_selection(), self.load()),
+                     leads=None if sel else self.table.selected_rows(), selection=sel)
+        self._archive(False)
+
     def _archive(self, archived):
         sel = self._selection_arg()
         set_archived(self, archived, lambda: (self.clear_selection(), self.load()),
@@ -888,8 +899,15 @@ class LeadsPage(Page):
         def on_done(res):
             toast(self, "Services audited! Opening outreach pitch…", "success")
             self.ws.navigate("outreach", lead_id=row["id"], campaign="service_pitch")
-        tasks.run(api.post, f"/api/leads/{row['id']}/service-audit", {}, timeout=90,
-                  on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
+        tasks.run(api.post, f"/api/leads/{row['id']}/service-audit", {}, timeout=90, on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
+
+
+    def clean_duplicates(self):
+        def _done(res):
+            n = int(res.get("deleted") or 0)
+            toast(self, f"Removed {n:,} duplicate lead(s)." if n else "No duplicate leads found.", "success")
+            self.load()
+        tasks.run(api.post, "/api/leads/deduplicate", {}, on_done=_done, on_error=lambda e: show_error(self, e), owner=self)
 
     def bulk_service_audit(self):
         ids = self.table.selected_ids()
@@ -901,8 +919,15 @@ class LeadsPage(Page):
             self.clear_selection()
             self.load()
         payload = {"filter": self._filter_params()} if self.all_matching else {"lead_ids": ids}
-        tasks.run(api.post, "/api/leads/mass-service-audit", payload, timeout=180,
-                  on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
+        tasks.run(api.post, "/api/leads/mass-service-audit", payload, timeout=180, on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
+
+
+    def clean_duplicates(self):
+        def _done(res):
+            n = int(res.get("deleted") or 0)
+            toast(self, f"Removed {n:,} duplicate lead(s)." if n else "No duplicate leads found.", "success")
+            self.load()
+        tasks.run(api.post, "/api/leads/deduplicate", {}, on_done=_done, on_error=lambda e: show_error(self, e), owner=self)
 
     def bulk_pitch(self):
         ids = self.table.selected_ids()
@@ -914,5 +939,12 @@ class LeadsPage(Page):
             self.clear_selection()
             self.load()
         payload = {"filter": self._filter_params()} if self.all_matching else {"lead_ids": ids}
-        tasks.run(api.post, "/api/leads/mass-service-pitch", payload, timeout=180,
-                  on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
+        tasks.run(api.post, "/api/leads/mass-service-pitch", payload, timeout=180, on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
+
+
+    def clean_duplicates(self):
+        def _done(res):
+            n = int(res.get("deleted") or 0)
+            toast(self, f"Removed {n:,} duplicate lead(s)." if n else "No duplicate leads found.", "success")
+            self.load()
+        tasks.run(api.post, "/api/leads/deduplicate", {}, on_done=_done, on_error=lambda e: show_error(self, e), owner=self)

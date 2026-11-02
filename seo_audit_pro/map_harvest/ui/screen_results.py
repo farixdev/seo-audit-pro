@@ -302,7 +302,7 @@ class ResultsScreen(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.setMaximum(max(self._max_results, 1))
         self.count_label.setText("0")
-        self.count_sub.setText(f"of {self._max_results}")
+        self.count_sub.setText(f"of {self._max_results}" if self._max_results > 0 else "collected (all results)")
         self.row_count_label.setText("")
         self.status_label.setText("Starting…")
         self.area_label.setText(
@@ -393,7 +393,8 @@ class ResultsScreen(QWidget):
     def update_progress(self, collected: int):
         self.count_label.setText(str(collected))
         self.progress_bar.setMaximum(max(self._max_results, 1))
-        self.progress_bar.setValue(min(collected, self._max_results))
+        self.progress_bar.setMaximum(max(self._max_results, 1) if self._max_results > 0 else max(collected + 25, 100))
+        self.progress_bar.setValue(min(collected, self._max_results) if self._max_results > 0 else collected)
 
     # ── table ────────────────────────────────────────────────────────────────
     def add_table_row(self, data: dict):
@@ -698,7 +699,7 @@ class ResultsScreen(QWidget):
             else:
                 self.status_label.setText("Done — all searches scraped")
 
-        self.count_sub.setText(f"of {self._max_results}")
+        self.count_sub.setText(f"of {self._max_results}" if self._max_results > 0 else "collected (all results)")
         self._update_row_count()
         self._set_idle_mode()
         self._stopped_by_user = False
@@ -730,7 +731,7 @@ class ResultsScreen(QWidget):
                 dlg.exec()
 
             from seo_audit_pro.core.session import session
-            if session.is_manager() or session.is_team_lead():   # agents add leads to themselves
+            if False and (session.is_manager() or session.is_team_lead()):   # agents add leads to themselves
                 tasks.run(api.get, "/api/assignees", on_done=open_dialog, on_error=lambda _e: open_dialog({}))
             else:
                 open_dialog({})

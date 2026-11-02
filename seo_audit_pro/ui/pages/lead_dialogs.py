@@ -96,7 +96,7 @@ class LeadFormDialog(Dialog):
             if lead.get("status") != "archived":
                 self.body.addWidget(Field("Status", self.status))
         self.picker = None
-        if not self.lead and options and not session.is_agent():
+        if False and not self.lead and options and not session.is_agent():
             self.picker = AssigneePicker(options, session.user.get("team_id") if session.is_team_lead() else None)
             self.body.addWidget(self.picker)
         self.add_buttons("Save changes" if self.lead else "Add lead")

@@ -38,7 +38,7 @@ class InputScreen(QWidget):
     # Fields that require fetching each business website.
     ENRICH_FIELDS = {"email", "facebook", "instagram", "linkedin", "twitter", "youtube"}
     # Off by default because they're the slow paths.
-    DEFAULT_OFF_FIELDS = DETAIL_FIELDS | ENRICH_FIELDS
+    DEFAULT_OFF_FIELDS = DETAIL_FIELDS | (ENRICH_FIELDS - {"email"})
 
     def __init__(self):
         super().__init__()
@@ -157,6 +157,11 @@ class InputScreen(QWidget):
         limit_header.addStretch()
         self.max_results_label = QLabel("50")
         self.max_results_label.setObjectName("muted")
+        self.all_results_cb = QCheckBox("Scrape all results (no limit)")
+        self.all_results_cb.setChecked(True)
+        self.all_results_cb.toggled.connect(self._on_all_results_toggled)
+        limit_header.addWidget(self.all_results_cb)
+        limit_header.addSpacing(10)
         limit_header.addWidget(self.max_results_label)
         left.addLayout(limit_header)
         left.addSpacing(10)
@@ -164,8 +169,8 @@ class InputScreen(QWidget):
         self.max_results_slider = QSlider(Qt.Horizontal)
         self.max_results_slider.setObjectName("limit_slider")
         self.max_results_slider.setMinimum(5)
-        self.max_results_slider.setMaximum(100)
-        self.max_results_slider.setValue(50)
+        self.max_results_slider.setMaximum(500)
+        self.max_results_slider.setValue(500)
         self.max_results_slider.setTickPosition(QSlider.TicksBelow)
         self.max_results_slider.setTickInterval(25)
         self.max_results_slider.valueChanged.connect(self._on_max_slider_changed)
@@ -501,7 +506,12 @@ class InputScreen(QWidget):
 
     # ── Settings glue ────────────────────────────────────────────────────────
     def _apply_settings_to_ui(self):
-        cap = int(self.settings.get("max_limit_cap", 100))
+        cap = max(int(self.settings.get("max_limit_cap", 500)), 500)
+        scrape_all = bool(self.settings.get("scrape_all", True))
+        self.all_results_cb.blockSignals(True)
+        self.all_results_cb.setChecked(scrape_all)
+        self.all_results_cb.blockSignals(False)
+        self.max_results_slider.setEnabled(not scrape_all)
         default_max = int(self.settings.get("default_max_results", 50))
         self.limit_cap_spin.blockSignals(True)
         self.limit_cap_spin.setValue(cap)
@@ -532,8 +542,14 @@ class InputScreen(QWidget):
         self._update_slider_cap(cap)
         self._persist_settings()
 
+    def _on_all_results_toggled(self, checked: bool):
+        self.max_results_slider.setEnabled(not checked)
+        self.max_results_label.setText("All" if checked else str(self.max_results_slider.value()))
+        self.settings["scrape_all"] = checked
+        self._persist_settings()
+
     def _on_max_slider_changed(self, value: int):
-        self.max_results_label.setText(str(value))
+        self.max_results_label.setText("All" if self.all_results_cb.isChecked() else str(value))
         self.settings["default_max_results"] = value
 
     def _persist_settings(self):
@@ -541,6 +557,7 @@ class InputScreen(QWidget):
         self.settings["user_agent"] = self.user_agent_input.text().strip()
         self.settings["max_limit_cap"] = self.limit_cap_spin.value()
         self.settings["default_max_results"] = self.max_results_slider.value()
+        self.settings["scrape_all"] = self.all_results_cb.isChecked()
         self.settings["export_dir"] = self.export_dir_input.text().strip()
         save_settings(self.settings)
 
@@ -672,7 +689,7 @@ class InputScreen(QWidget):
         return self.headless_cb.isChecked()
 
     def max_results(self) -> int:
-        return self.max_results_slider.value()
+        return 0 if self.all_results_cb.isChecked() else self.max_results_slider.value()
 
     def validate(self):
         domains = self._get_domains()

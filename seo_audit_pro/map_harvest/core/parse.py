@@ -168,7 +168,16 @@ def parse_card(card) -> dict:
     phone = _el_text(phone_el[0]) if phone_el else ""
 
     # Website — skip ad-redirect (/aclk, /url) hrefs; those aren't real sites.
-    for w in card.xpath('.//a[@data-value="Website"]/@href'):
+    for w in card.xpath('.//a[@data-value="Website" or @data-item-id="authority" or contains(@class, "lcr4fd") or contains(translate(@aria-label, "WEBSITE", "website"), "website")]/@href'):
+        if not w or "/maps/" in w or w.startswith("/aclk"):
+            continue
+        if w.startswith(("/url?", "https://www.google.com/url?")):
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(w).query)
+            w = (qs.get("q") or qs.get("url") or [""])[0]
+        if w and not w.startswith(("/aclk", "/url", "https://www.google.")):
+            data["website"] = w
+            break
+    for w in ():
         if w and not w.startswith(("/aclk", "/url", "https://www.google.")):
             data["website"] = w
             break

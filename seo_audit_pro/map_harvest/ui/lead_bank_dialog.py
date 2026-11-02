@@ -64,7 +64,8 @@ class AddToLeadBankDialog(Dialog):
             user_team = (session.user or {}).get("team_id") if session.is_team_lead() else None
             self.picker = AssigneePicker(self.options, user_team)
             al.addWidget(self.picker)
-        fl.addWidget(assign_box)
+        self.picker = None
+        assign_box.hide()
 
         self.body.addLayout(fl)
         self.add_buttons(f"Add {count:,} Leads")

@@ -36,7 +36,7 @@ _FROM = """FROM leads l LEFT JOIN teams t ON t.id = l.assigned_team_id
            LEFT JOIN users u ON u.id = l.assigned_agent_id"""
 BULK_LIMIT = 200_000
 FILTER_KEYS = ("search", "status", "team_id", "agent_id", "assigned", "audited", "outreach", "niche", "area",
-               "batch_id", "has_email", "has_website", "call_status", "service_audited")
+               "batch_id", "has_email", "has_website", "call_status", "service_audited", "country")
 
 
 def lead_out(row):
@@ -123,6 +123,13 @@ def lead_filter(me, args):
         elif value:
             where.append(f"l.{col} = %s")
             params.append(value.lower())
+    if arg("country"):
+        cval = arg("country")
+        if cval == "__none__":
+            where.append("(l.country IS NULL OR l.country = '')")
+        else:
+            where.append("LOWER(COALESCE(l.country, '')) = %s")
+            params.append(cval.lower())
     if arg("batch_id"):
         where.append("l.batch_id = %s")
         params.append(arg("batch_id"))
@@ -326,7 +333,12 @@ def leads_facets():
         out = sorted(niches.values(), key=lambda x: (-x["count"], x["label"].lower()))
         for n in out:
             n["areas"].sort(key=lambda x: (-x["count"], x["label"].lower()))
-        return {"niches": out, "areas": sorted(areas.values(), key=lambda x: (-x["count"], x["label"].lower())),
+        c_rows = db.query(f"""SELECT LOWER(COALESCE(l.country, '')) AS ckey, MIN(l.country) AS clabel, COUNT(*) AS n
+                              FROM leads l WHERE {scope} AND l.status <> 'archived'{extra} AND l.country IS NOT NULL AND l.country <> ''
+                              GROUP BY LOWER(l.country)""", list(sp) + ep)
+        countries = sorted([{"key": r["ckey"], "label": r["clabel"], "count": int(r["n"])} for r in c_rows if r.get("ckey")],
+                           key=lambda x: (-x["count"], x["label"].lower()))
+        return {"niches": out, "areas": sorted(areas.values(), key=lambda x: (-x["count"], x["label"].lower())), "countries": countries,
                 "total": sum(n["count"] for n in out), "unassigned": sum(n["unassigned"] for n in out)}
     key = ("facets", me["id"], me["role"], request.args.get("team_id") or "")
     return jsonify(cache.get_or_set(key, compute, ttl=300))
@@ -638,6 +650,7 @@ def _delete_lead_ids(me, ids, by_filter=False, flt=None):
             tx.execute(f"DELETE FROM audit_results WHERE audit_id IN (SELECT id FROM audits WHERE lead_id IN ({ph}))", chunk)
             tx.execute(f"DELETE FROM audit_issue_states WHERE audit_id IN (SELECT id FROM audits WHERE lead_id IN ({ph}))", chunk)
             tx.execute(f"DELETE FROM audits WHERE lead_id IN ({ph})", chunk)
+            tx.execute(f"UPDATE lead_batch_rejects SET existing_lead_id = NULL WHERE existing_lead_id IN ({ph})", chunk)
             tx.execute(f"DELETE FROM leads WHERE id IN ({ph})", chunk)
             deleted += tx.rowcount
     events.audit(me, "LEADS_DELETED", "lead", ids[0] if len(ids) == 1 else None,
@@ -660,6 +673,70 @@ def delete_leads_bulk():
     data = body()
     ids, by_filter = _target_ids(g.user, data)
     deleted = _delete_lead_ids(g.user, ids, by_filter=by_filter, flt=data.get("filter") if by_filter else None)
+    return jsonify({"deleted": deleted})
+
+
+@bp.post("/api/leads/deduplicate")
+@require()
+def deduplicate_leads():
+    """Remove duplicate leads by domain, email, phone, or (company + area), keeping the richest record."""
+    me = g.user
+    scope, sp = lead_scope(me)
+    rows = db.query(f"""SELECT id, company_key, area_key, normalized_domain, email_key, phone_key,
+                               last_audit_id, services_audit_date, email, phone, website, updated_at
+                        FROM leads l WHERE {scope}
+                        ORDER BY (CASE WHEN last_audit_id IS NOT NULL THEN 4 ELSE 0 END
+                                + CASE WHEN services_audit_date IS NOT NULL THEN 2 ELSE 0 END
+                                + CASE WHEN email IS NOT NULL AND email <> '' THEN 2 ELSE 0 END
+                                + CASE WHEN phone IS NOT NULL AND phone <> '' THEN 1 ELSE 0 END) DESC,
+                                updated_at DESC, id ASC""", sp)
+    seen_domains, seen_emails, seen_phones, seen_comp_area = set(), set(), set(), set()
+    dup_ids = []
+    for r in rows:
+        lid = r["id"]
+        dom = (r.get("normalized_domain") or "").strip().lower()
+        has_real_dom = bool(dom and not dom.startswith("no_site_"))
+        em = (r.get("email_key") or "").strip().lower()
+        ph = (r.get("phone_key") or "").strip()
+        ck = (r.get("company_key") or "").strip().lower()
+        ak = (r.get("area_key") or "").strip().lower()
+        is_dup = False
+        if has_real_dom and dom in seen_domains:
+            is_dup = True
+        elif em and em in seen_emails:
+            is_dup = True
+        elif ph and len(ph) >= 7 and ph in seen_phones:
+            is_dup = True
+        elif ck and (ck, ak) in seen_comp_area:
+            is_dup = True
+        if is_dup:
+            dup_ids.append(lid)
+        else:
+            if has_real_dom:
+                seen_domains.add(dom)
+            if em:
+                seen_emails.add(em)
+            if ph and len(ph) >= 7:
+                seen_phones.add(ph)
+            if ck:
+                seen_comp_area.add((ck, ak))
+    deleted = _delete_lead_ids(me, dup_ids) if dup_ids else 0
+    return jsonify({"deleted": deleted, "remaining": len(rows) - deleted})
+
+
+@bp.post("/api/leads/clear-all")
+@require()
+def clear_all_leads():
+    """Clear all leads and batches in the caller's scope for a fresh start."""
+    me = g.user
+    scope, sp = lead_scope(me)
+    rows = db.query(f"SELECT l.id FROM leads l WHERE {scope}", sp)
+    ids = [r["id"] for r in rows]
+    deleted = _delete_lead_ids(me, ids) if ids else 0
+    with db.transaction() as tx:
+        tx.execute("DELETE FROM lead_batch_rejects")
+        tx.execute("DELETE FROM lead_batches")
+    cache.bump()
     return jsonify({"deleted": deleted})
 
 

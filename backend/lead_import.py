@@ -26,6 +26,7 @@ stores them. Such batches have no stored file (``stored_name`` is NULL).
 """
 
 import csv
+import hashlib
 import io
 import json
 import logging
@@ -359,6 +360,13 @@ def _rating(value):
     return r if r is not None and 0 <= r <= 5 else None
 
 
+def _no_site_key(company, area, phone, fallback):
+    sig_raw = f"{normalize_company(company or '')}|{(area or '').strip().lower()}|{normalize_phone(phone or '')}"
+    if sig_raw.strip("|"):
+        return "no_site_" + hashlib.sha1(sig_raw.encode("utf-8")).hexdigest()[:16]
+    return f"no_site_{fallback}"
+
+
 def _prepare(raw, mapping, batch, now):
     """Turn a file row into a lead tuple, or (None, reason)."""
     get = lambda f: raw.get(mapping[f]) if mapping.get(f) else None  # noqa: E731
@@ -372,7 +380,7 @@ def _prepare(raw, mapping, batch, now):
         phone = _text(get("phone"), 40)
         if not company and not phone:
             return None, "no_website"
-        domain = f"no_site_{lid}"
+        domain = _no_site_key(company, batch.get("area") or _text(get("city"), 120), phone, lid)
         website = ""
         company = company or f"Lead {phone or lid[-6:]}"
     else:
@@ -381,7 +389,7 @@ def _prepare(raw, mapping, batch, now):
             if allow_no_website:
                 company = _text(get("company"), 200)
                 if company:
-                    domain = f"no_site_{lid}"
+                    domain = _no_site_key(company, batch.get("area") or _text(get("city"), 120), phone, lid)
                     website = ""
                 else:
                     return None, "invalid_website"
@@ -461,6 +469,9 @@ def _commit_chunk(batch, rows, seen_domains, seen_phones, first_row_number):
                     dup = existing_domain.get(lead["normalized_domain"]) or \
                         (existing_phone.get(lead["phone_key"]) if lead["phone_key"] else None)
                     if dup:
+                        if lead.get("email"):
+                            tx.execute("UPDATE leads SET email = COALESCE(NULLIF(email, ''), %s), email_key = COALESCE(NULLIF(email_key, ''), %s) WHERE id = %s",
+                                       (lead["email"], lead["email_key"], dup))
                         rejects.append((number, raw, "duplicate_existing", dup))
                     else:
                         prepared.append((number, raw, lead))

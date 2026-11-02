@@ -87,12 +87,14 @@ class ImportFilesDialog(Dialog):
         self.table.setStyleSheet(f"QTableWidget {{ border: 1px solid {C['border']}; border-radius: 8px; }}")
         self.body.addWidget(self.table, 1)
 
-        assign = QWidget()
-        al = vbox(assign, spacing=6)
-        al.addWidget(label("Assign the imported leads (optional)", "FieldLabel"))
-        self.picker = AssigneePicker(options, session.user.get("team_id") if session.is_team_lead() else None)
-        al.addWidget(self.picker)
-        self.body.addWidget(assign)
+        self.picker = None
+        if False:
+            assign = QWidget()
+            al = vbox(assign, spacing=6)
+            al.addWidget(label("Assign the imported leads (optional)", "FieldLabel"))
+            self.picker = AssigneePicker(options, session.user.get("team_id") if session.is_team_lead() else None)
+            al.addWidget(self.picker)
+            self.body.addWidget(assign)
         self.allow_no_site_cb = QCheckBox("Include leads without a website (Campaign 2: Phone & Website Pitch)")
         self.allow_no_site_cb.setChecked(True)
         self.body.addWidget(self.allow_no_site_cb)

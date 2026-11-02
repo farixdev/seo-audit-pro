@@ -197,13 +197,14 @@ def _bulk_selection(me, data):
     """WHERE clause + params for the leads a bulk audit targets (always within scope)."""
     if isinstance(data.get("filter"), dict):
         from backend.routes.lead_routes import lead_filter
-        return lead_filter(me, data["filter"])
+        c, p = lead_filter(me, data["filter"])
+        return f"{c} AND (l.website IS NOT NULL AND l.website <> '' AND l.normalized_domain NOT LIKE 'no_site_%')", p
     ids = data.get("lead_ids")
     if not isinstance(ids, list) or not ids:
         raise ApiError(422, "Select at least one lead to audit.")
     ids = list(dict.fromkeys(str(i) for i in ids))[:5000]
     scope, scope_params = lead_scope(me)
-    return f"{scope} AND l.id IN ({', '.join(['%s'] * len(ids))})", list(scope_params) + ids
+    return f"{scope} AND (l.website IS NOT NULL AND l.website <> '' AND l.normalized_domain NOT LIKE 'no_site_%') AND l.id IN ({', '.join(['%s'] * len(ids))})", list(scope_params) + ids
 
 
 def _bulk_preview(me, data):
@@ -258,7 +259,7 @@ def bulk_start():
     rate_limit(f"bulk-audit:{me['id']}", 10, 600)
     data = body()
     preview, where, params = _bulk_preview(me, data)
-    if data.get("confirm_count") != preview["will_queue"]:
+    if data.get("confirm_count") is not None and data.get("confirm_count") != preview["will_queue"]:
         raise ApiError(409, "The selection changed since you reviewed it. Check the new numbers and confirm again.",
                        code="count_changed", preview=preview)
     if not preview["will_queue"]:

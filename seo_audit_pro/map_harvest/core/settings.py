@@ -4,8 +4,9 @@ from copy import deepcopy
 
 DEFAULT_SETTINGS = {
     "headless": False,
-    "max_limit_cap": 100,
-    "default_max_results": 50,
+    "max_limit_cap": 500,
+    "default_max_results": 500,
+    "scrape_all": True,
     "export_dir": "",
     "saved_searches": [],
 }
