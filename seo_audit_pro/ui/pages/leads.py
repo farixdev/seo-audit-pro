@@ -710,7 +710,7 @@ class LeadsPage(Page):
         self.bulk_buttons["audit"].setVisible(not archived_view)
         self.bulk_buttons["archive"].setVisible(manageable and not archived_view)
         self.bulk_buttons["restore"].setVisible(manageable and archived_view)
-        self.bulk_buttons["assign"].setVisible(manageable and not archived_view)
+        if "assign" in self.bulk_buttons: self.bulk_buttons["assign"].setVisible(manageable and not archived_view)
 
     def _toggle_all_matching(self):
         self.all_matching = not self.all_matching

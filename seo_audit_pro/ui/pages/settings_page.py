@@ -4,7 +4,7 @@ computer (data folder, sharing the workspace on the local network)."""
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QCheckBox, QGridLayout, QPlainTextEdit, QSpinBox, QWidget
+from PySide6.QtWidgets import QCheckBox, QFrame, QGridLayout, QPlainTextEdit, QSpinBox, QWidget
 
 from seo_audit_pro import APP_VERSION, icons, local_server
 from seo_audit_pro.core import api, local, settings, tasks

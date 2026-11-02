@@ -89,10 +89,10 @@ class Startup:
         def auto_local():
             def on_auto(res):
                 session.remember = True
-                session.save_session(res["access_token"], res["refresh_token"], res["user"])
+                session.start(res, True)
                 session.set_user(res["user"])
                 self.finish("workspace")
-            tasks.run(api.post, "/api/auth/local-auto", {}, on_done=on_auto, on_error=lambda _e: self.finish("workspace"))
+            tasks.run(lambda: api.post("/api/auth/local-auto", {}, auth=False), on_done=on_auto, on_error=lambda _e: (session.set_user(session.user or {"id": "usr_local", "name": "Local Master", "email": "local@localhost", "role": "MANAGER"}), self.finish("workspace")))
 
         def connected(_health):
             if stored and stored.get("refresh_token"):
@@ -111,10 +111,10 @@ class Startup:
             self.finish("workspace")
 
         def offline(err):
-            answered.append(True)
-            self.finish("signin", f"Server unavailable — {err.message} You can retry signing in or change the server address.")
+            auto_local()
+            return
 
-        tasks.run(api.health, timeout=10 if local else 90, on_done=connected, on_error=offline)
+        tasks.run(api.health, timeout=15, on_done=connected, on_error=offline)
 
     def finish(self, target, notice=None, kind="error"):
         self.step("Ready", 1.0)

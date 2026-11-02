@@ -51,10 +51,10 @@ def local_auto_login():
     refresh = security.new_refresh_token()
     now = now_iso()
     with db.transaction() as tx:
-        tx.execute("""INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, created_at, last_used_at)
-                      VALUES (%s, %s, %s, %s, %s, %s)""",
-                   (session_id, user["id"], security.hash_token(refresh), iso_ago(-config.SESSION_TTL), now, now))
-    access = security.new_access_token(user["id"], session_id)
+        tx.execute("INSERT INTO sessions (id, user_id, refresh_hash, created_at, expires_at, last_used_at, user_agent, ip) "
+                   "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                   (session_id, user["id"], security.sha256_hex(refresh), now, iso_in(config.REFRESH_TOKEN_TTL), now, (request.headers.get("User-Agent") or "")[:200], client_ip()))
+    access = security.issue_access_token(user["id"], session_id)
     return jsonify({
         "user": public_user(user),
         "access_token": access,

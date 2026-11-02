@@ -285,14 +285,14 @@ class ComposePanel(QWidget):
         self.subject.setMaxLength(200)
         cl.addWidget(_form_row("Subject", self.subject))
         # Attachment and Spam deliverability info
-        extra_row = hbox(spacing=12)
+        extra_wrap = QWidget(); extra_row = hbox(extra_wrap, spacing=12)
         self.attach_pdf_cb = QCheckBox("Attach Client SEO Audit PDF Report")
         self.attach_pdf_cb.setChecked(True)
         extra_row.addWidget(self.attach_pdf_cb)
         extra_row.addStretch(1)
         self.spam_badge = Badge("Deliverability: Checking…", C["success"], C["success_bg"])
         extra_row.addWidget(self.spam_badge)
-        cl.addWidget(_form_row("Options", extra_row))
+        cl.addWidget(_form_row("Options", extra_wrap))
 
         self.body_edit = QPlainTextEdit()
         self.body_edit.setPlaceholderText("Generate the email from the lead's latest audit, then edit it.")
