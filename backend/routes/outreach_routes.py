@@ -359,6 +359,7 @@ def generate():
         pitch = service_audit.compare_and_generate_pitch(lead, s_data, sender_name=g.user["name"])
         db.execute("UPDATE leads SET service_match_score = %s, service_pitch_notes = %s WHERE id = %s",
                    (pitch["score"], pitch["pitch_notes"], lead["id"]))
+        cache.bump()
         return jsonify({
             "subject": pitch["subject"],
             "body": pitch["body"],

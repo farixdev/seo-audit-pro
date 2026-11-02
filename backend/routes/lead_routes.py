@@ -986,9 +986,9 @@ def audit_lead_services(lead_id):
         raise ApiError(422, "This lead does not have a website to audit.")
     from backend import service_audit
     s_data = service_audit.extract_website_services(web)
+    pitch = service_audit.compare_and_generate_pitch(lead, s_data, sender_name=g.user["name"])
     now = now_iso()
     with db.transaction() as tx:
-        pitch = service_audit.compare_and_generate_pitch(lead, s_data, sender_name=g.user["name"])
         tx.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s, service_match_score = %s, service_pitch_notes = %s, updated_at = %s WHERE id = %s",
                    (json.dumps(s_data, ensure_ascii=False), now, pitch["score"], pitch["pitch_notes"], now, lead["id"]))
     cache.bump()
@@ -999,25 +999,38 @@ def audit_lead_services(lead_id):
 @bp.post("/api/leads/mass-service-audit")
 @require()
 def mass_service_audit():
+    from concurrent.futures import ThreadPoolExecutor
     data = body()
     lead_ids = data.get("lead_ids") or ([r["id"] for r in db.query(f"SELECT l.id {_FROM} WHERE {lead_filter(g.user, data['filter'])[0]} LIMIT 50", lead_filter(g.user, data["filter"])[1])] if isinstance(data.get("filter"), dict) else [])
     if not lead_ids or not isinstance(lead_ids, list):
         raise ApiError(422, "Select one or more leads to audit.")
     from backend import service_audit
+    sender_name = g.user["name"]
+    rows = [db.query_one("SELECT * FROM leads WHERE id = %s", (lid,)) for lid in lead_ids[:50]]
+    valid_rows = [r for r in rows if r and r.get("website") and not (r.get("normalized_domain") or "").startswith("no_site_")]
+
+    def _work(row):
+        lid = row["id"]
+        try:
+            s_data = service_audit.extract_website_services(row["website"])
+            pitch = service_audit.compare_and_generate_pitch(row, s_data, sender_name=sender_name)
+            return (lid, True, s_data, pitch, None)
+        except Exception as e:
+            return (lid, False, None, None, str(e))
+
     results_list = []
     now = now_iso()
-    for lid in lead_ids[:50]:
-        row = db.query_one("SELECT * FROM leads WHERE id = %s", (lid,))
-        if row and row.get("website") and not (row.get("normalized_domain") or "").startswith("no_site_"):
-            try:
-                s_data = service_audit.extract_website_services(row["website"])
-                db.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s, updated_at = %s WHERE id = %s",
-                           (json.dumps(s_data, ensure_ascii=False), now, now, lid))
-                pitch = service_audit.compare_and_generate_pitch(row, s_data, sender_name=g.user["name"])
-                db.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s, service_match_score = %s, service_pitch_notes = %s, updated_at = %s WHERE id = %s", (json.dumps(s_data, ensure_ascii=False), now, pitch["score"], pitch["pitch_notes"], now, lid))
-                results_list.append({"id": lid, "ok": True, "services_count": len(s_data.get("services", [])), "score": pitch["score"]})
-            except Exception as e:
-                results_list.append({"id": lid, "ok": False, "error": str(e)})
+    if valid_rows:
+        with ThreadPoolExecutor(max_workers=min(6, len(valid_rows))) as pool:
+            outcomes = list(pool.map(_work, valid_rows))
+        with db.transaction() as tx:
+            for lid, ok, s_data, pitch, err in outcomes:
+                if ok:
+                    tx.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s, service_match_score = %s, service_pitch_notes = %s, updated_at = %s WHERE id = %s",
+                               (json.dumps(s_data, ensure_ascii=False), now, pitch["score"], pitch["pitch_notes"], now, lid))
+                    results_list.append({"id": lid, "ok": True, "services_count": len(s_data.get("services", [])), "score": pitch["score"]})
+                else:
+                    results_list.append({"id": lid, "ok": False, "error": err})
     cache.bump()
     return jsonify({"results": results_list, "total": len(results_list)})
 
@@ -1025,26 +1038,42 @@ def mass_service_audit():
 @bp.post("/api/leads/mass-service-pitch")
 @require()
 def mass_service_pitch():
+    from concurrent.futures import ThreadPoolExecutor
     data = body()
     lead_ids = data.get("lead_ids") or ([r["id"] for r in db.query(f"SELECT l.id {_FROM} WHERE {lead_filter(g.user, data['filter'])[0]} LIMIT 50", lead_filter(g.user, data["filter"])[1])] if isinstance(data.get("filter"), dict) else [])
     if not lead_ids or not isinstance(lead_ids, list):
         raise ApiError(422, "Provide an array of lead_ids.")
     from backend import service_audit
-    results_list = []
-    for lid in lead_ids[:50]:
-        row = db.query_one("SELECT * FROM leads WHERE id = %s", (lid,))
-        if not row:
-            continue
+    sender_name = g.user["name"]
+    rows = [db.query_one("SELECT * FROM leads WHERE id = %s", (lid,)) for lid in lead_ids[:50]]
+    valid_rows = [r for r in rows if r]
+
+    def _work(row):
+        lid = row["id"]
         try:
             s_data = json.loads(row["services_extracted"]) if row.get("services_extracted") else None
             if not s_data and row.get("website") and not (row.get("normalized_domain") or "").startswith("no_site_"):
                 s_data = service_audit.extract_website_services(row["website"])
             if s_data:
-                pitch = service_audit.compare_and_generate_pitch(row, s_data, sender_name=g.user["name"])
-                db.execute("UPDATE leads SET service_match_score = %s, service_pitch_notes = %s WHERE id = %s",
-                           (pitch["score"], pitch["pitch_notes"], lid))
-                results_list.append({"id": lid, "ok": True, "score": pitch["score"], "grade": pitch["grade"]})
+                pitch = service_audit.compare_and_generate_pitch(row, s_data, sender_name=sender_name)
+                return (lid, True, s_data, pitch, None)
+            return (lid, False, None, None, "No website")
         except Exception as e:
-            results_list.append({"id": lid, "ok": False, "error": str(e)})
+            return (lid, False, None, None, str(e))
+
+    results_list = []
+    now = now_iso()
+    if valid_rows:
+        with ThreadPoolExecutor(max_workers=min(6, len(valid_rows))) as pool:
+            outcomes = list(pool.map(_work, valid_rows))
+        with db.transaction() as tx:
+            for lid, ok, s_data, pitch, err in outcomes:
+                if ok:
+                    tx.execute("UPDATE leads SET services_extracted = %s, services_audit_date = COALESCE(NULLIF(services_audit_date, ''), %s), service_match_score = %s, service_pitch_notes = %s, updated_at = %s WHERE id = %s",
+                               (json.dumps(s_data, ensure_ascii=False), now, pitch["score"], pitch["pitch_notes"], now, lid))
+                    results_list.append({"id": lid, "ok": True, "score": pitch["score"], "grade": pitch["grade"]})
+                else:
+                    results_list.append({"id": lid, "ok": False, "error": err})
     cache.bump()
     return jsonify({"results": results_list, "total": len(results_list)})
+

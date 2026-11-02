@@ -880,7 +880,7 @@ class LeadsPage(Page):
         def on_done(res):
             toast(self, "Services audited! Opening outreach pitch…", "success")
             self.ws.navigate("outreach", lead_id=row["id"], campaign="service_pitch")
-        tasks.run(api.post, f"/api/leads/{row['id']}/service-audit", {},
+        tasks.run(api.post, f"/api/leads/{row['id']}/service-audit", {}, timeout=90,
                   on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
 
     def bulk_service_audit(self):
@@ -893,7 +893,7 @@ class LeadsPage(Page):
             self.clear_selection()
             self.load()
         payload = {"filter": self._filter_params()} if self.all_matching else {"lead_ids": ids}
-        tasks.run(api.post, "/api/leads/mass-service-audit", payload,
+        tasks.run(api.post, "/api/leads/mass-service-audit", payload, timeout=180,
                   on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
 
     def bulk_pitch(self):
@@ -906,5 +906,5 @@ class LeadsPage(Page):
             self.clear_selection()
             self.load()
         payload = {"filter": self._filter_params()} if self.all_matching else {"lead_ids": ids}
-        tasks.run(api.post, "/api/leads/mass-service-pitch", payload,
+        tasks.run(api.post, "/api/leads/mass-service-pitch", payload, timeout=180,
                   on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)

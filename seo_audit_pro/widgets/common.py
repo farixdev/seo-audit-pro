@@ -3,8 +3,8 @@
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal, Property
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QStackedWidget, QToolButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QStackedWidget,
+                               QStyle, QStyleOptionButton, QStylePainter, QToolButton, QVBoxLayout, QWidget)
 
 from seo_audit_pro import icons
 from seo_audit_pro.theme import C, STATUS, SEVERITY
@@ -46,8 +46,199 @@ def divider():
     return line
 
 
+class MarqueePushButton(QPushButton):
+    """PushButton that never cuts off long text silently:
+    - Requests enough width via sizeHint() when layout space allows.
+    - When constrained in a narrower layout so text exceeds available width,
+      automatically scrolls/marquees across the full label once on first display
+      (then loops back to start and stops), and re-scrolls smoothly on hover."""
+
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._explicit_tooltip = ""
+        self._offset = 0.0
+        self._pause_ticks = 0
+        self._phase = "idle"  # idle | pause_start | scrolling | pause_end
+        self._hovered = False
+        self._initial_pass_done = False
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._tick)
+        if text:
+            super().setToolTip(text)
+
+    def setToolTip(self, tip):
+        self._explicit_tooltip = tip or ""
+        super().setToolTip(tip or self.text())
+
+    def setText(self, text):
+        super().setText(text)
+        if not self._explicit_tooltip:
+            super().setToolTip(text or "")
+        self._offset = 0.0
+        self._initial_pass_done = False
+        self.updateGeometry()
+        if self.isVisible():
+            QTimer.singleShot(60, self._check_initial_marquee)
+        self.update()
+
+    def _pad_x(self):
+        return 8 if self.property("size") == "sm" else 12
+
+    def _icon_advance(self):
+        if self.icon().isNull():
+            return 0
+        return self.iconSize().width() + 6
+
+    def _avail_text_width(self):
+        return max(10, self.width() - (self._pad_x() * 2) - self._icon_advance())
+
+    def _text_width(self):
+        return QFontMetrics(self.font()).horizontalAdvance(self.text() or "")
+
+    def _max_offset(self):
+        over = self._text_width() - self._avail_text_width()
+        return (over + 8) if over > 2 else 0
+
+    def sizeHint(self):
+        sh = super().sizeHint()
+        tw = self._text_width() + (self._pad_x() * 2) + self._icon_advance() + 6
+        return QSize(max(sh.width(), tw), sh.height())
+
+    def minimumSizeHint(self):
+        sh = self.sizeHint()
+        # Allow shrinking in tight multi-column layouts so marquee takes over instead of clipping window
+        return QSize(min(sh.width(), 110), sh.height())
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not self._initial_pass_done:
+            QTimer.singleShot(80, self._check_initial_marquee)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self._max_offset() <= 0 and self._timer.isActive():
+            self._stop_marquee()
+        elif not self._initial_pass_done and self.isVisible():
+            QTimer.singleShot(60, self._check_initial_marquee)
+
+    def _check_initial_marquee(self):
+        if not self.isVisible():
+            return
+        if self._max_offset() > 0 and not self._initial_pass_done:
+            self._initial_pass_done = True
+            self._start_marquee()
+
+    def enterEvent(self, e):
+        self._hovered = True
+        if self._max_offset() > 0:
+            self._start_marquee()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hovered = False
+        self._stop_marquee()
+        super().leaveEvent(e)
+
+    def hideEvent(self, e):
+        self._stop_marquee()
+        super().hideEvent(e)
+
+    def _start_marquee(self):
+        self._offset = 0.0
+        self._pause_ticks = 18
+        self._phase = "pause_start"
+        if not self._timer.isActive():
+            self._timer.start()
+        self.update()
+
+    def _stop_marquee(self):
+        self._timer.stop()
+        self._phase = "idle"
+        if self._offset != 0.0:
+            self._offset = 0.0
+            self.update()
+
+    def _tick(self):
+        max_off = self._max_offset()
+        if max_off <= 0:
+            self._stop_marquee()
+            return
+        if self._phase == "pause_start":
+            self._pause_ticks -= 1
+            if self._pause_ticks <= 0:
+                self._phase = "scrolling"
+        elif self._phase == "scrolling":
+            self._offset += 1.4
+            if self._offset >= max_off:
+                self._offset = float(max_off)
+                self._pause_ticks = 28
+                self._phase = "pause_end"
+            self.update()
+        elif self._phase == "pause_end":
+            self._pause_ticks -= 1
+            if self._pause_ticks <= 0:
+                self._offset = 0.0
+                self.update()
+                if self._hovered:
+                    self._pause_ticks = 22
+                    self._phase = "pause_start"
+                else:
+                    self._stop_marquee()
+
+    def paintEvent(self, e):
+        if self._max_offset() <= 0:
+            super().paintEvent(e)
+            return
+        p = QStylePainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        opt = QStyleOptionButton()
+        self.initStyleOption(opt)
+        full_text = opt.text
+        icon = opt.icon
+        icon_sz = opt.iconSize
+        opt.text = ""
+        opt.icon = QIcon()
+        p.drawControl(QStyle.ControlElement.CE_PushButton, opt)
+
+        pad_x = self._pad_x()
+        cur_x = pad_x
+        h = self.height()
+        if not icon.isNull():
+            iw, ih = icon_sz.width(), icon_sz.height()
+            mode = QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled
+            pix = icon.pixmap(QSize(iw, ih), mode)
+            p.drawPixmap(int(cur_x), int((h - ih) / 2), pix)
+            cur_x += iw + 6
+
+        avail_w = max(10, self.width() - cur_x - pad_x)
+        clip_rect = QRectF(cur_x, 0, avail_w, h)
+        p.save()
+        p.setClipRect(clip_rect)
+        p.setFont(self.font())
+        variant = self.property("variant")
+        if not self.isEnabled():
+            fg = "#F4F4F5" if variant == "primary" else C["muted"]
+        elif variant == "primary":
+            fg = "#FFFFFF"
+        elif variant == "danger":
+            fg = C["danger"]
+        elif variant == "link":
+            fg = C["accent"]
+        elif variant == "ghost" and not self._hovered:
+            fg = C["text_2"]
+        else:
+            fg = C["text"]
+        p.setPen(QColor(fg))
+        tw = self._text_width()
+        draw_rect = QRectF(cur_x - self._offset, 0, tw + 20, h)
+        p.drawText(draw_rect, int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), full_text)
+        p.restore()
+        p.end()
+
+
 def button(text, variant=None, icon_name=None, size=None, tooltip=None):
-    btn = QPushButton(text)
+    btn = MarqueePushButton(text)
     if variant:
         btn.setProperty("variant", variant)
     if size:
@@ -80,7 +271,7 @@ class Card(QFrame):
         self.body = vbox(self, (padding, padding, padding, padding), spacing)
 
 
-class BusyButton(QPushButton):
+class BusyButton(MarqueePushButton):
     """Button that disables itself and shows progress text while busy
     (double-submit protection in the UI; the server guards as well)."""
 
@@ -92,6 +283,7 @@ class BusyButton(QPushButton):
             self.setProperty("size", size)
         if icon_name:
             self.setIcon(icons.icon(icon_name, "#FFFFFF" if variant == "primary" else C["text_2"], 16))
+            self.setIconSize(QSize(15, 15))
         self._idle_text = text
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -497,7 +689,7 @@ class Segmented(QWidget):
         self.group.setExclusive(True)
         self.buttons = {}
         for text, value in options:
-            b = QPushButton(text)
+            b = MarqueePushButton(text)
             b.setCheckable(True)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda _c=False, v=value: self.changed.emit(v))

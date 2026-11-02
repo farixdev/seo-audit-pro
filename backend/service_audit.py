@@ -12,8 +12,12 @@ import logging
 import re
 from urllib.parse import urljoin, urlparse
 
+from concurrent.futures import ThreadPoolExecutor
 import requests
+import urllib3
 from bs4 import BeautifulSoup
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from backend import db, security
 from backend.util import now_iso
@@ -156,7 +160,7 @@ def extract_website_services(url):
     base_domain = urlparse(url).netloc.lower()
 
     try:
-        resp = session.get(url, timeout=12, verify=False)
+        resp = session.get(url, timeout=7, verify=False)
         if resp.status_code < 400:
             soup = BeautifulSoup(resp.text, "html.parser")
             title = soup.title.string.strip() if soup.title and soup.title.string else ""
@@ -184,17 +188,24 @@ def extract_website_services(url):
     except Exception as e:
         log.warning("Could not fetch homepage %s: %s", url, e)
 
-    # Fetch up to 2 service pages
-    for s_url in service_links[:2]:
+    # Fetch up to 2 service pages concurrently
+    def _fetch_sub(s_url):
         try:
-            r = session.get(s_url, timeout=10, verify=False)
+            r = session.get(s_url, timeout=6, verify=False)
             if r.status_code < 400:
                 s_soup = BeautifulSoup(r.text, "html.parser")
                 s_h1 = [h.get_text(strip=True) for h in s_soup.find_all("h1") if h.get_text(strip=True)]
                 s_h2 = [h.get_text(strip=True) for h in s_soup.find_all("h2") if h.get_text(strip=True)][:6]
-                pages_text.append(f"Subpage {s_url}:\nHeadings: {' | '.join(s_h1 + s_h2)}")
+                return f"Subpage {s_url}:\nHeadings: {' | '.join(s_h1 + s_h2)}"
         except Exception:
             pass
+        return None
+
+    if service_links[:2]:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            for sub_txt in pool.map(_fetch_sub, service_links[:2]):
+                if sub_txt:
+                    pages_text.append(sub_txt)
 
     combined = "\n\n".join(pages_text)
 
