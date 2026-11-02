@@ -58,7 +58,7 @@ def text(data, key, required=False, max_len=500, label=None):
     return val
 
 
-def email_value(data, key="email", required=True):
+def email_value(data, key="email", required=True, label="Email"):
     val = text(data, key, required=required, max_len=254, label="Email").lower()
     if val and not EMAIL_RE.match(val):
         raise ApiError(422, "Enter a valid email address.", field=key)

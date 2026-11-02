@@ -30,7 +30,10 @@ class Page(QWidget):
             area.setWidgetResizable(True)
             area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             inner = QWidget()
+            from PySide6.QtWidgets import QSizePolicy
             inner.setObjectName("Canvas")
+            inner.setMinimumWidth(0)
+            inner.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             self.body = vbox(inner, margins, spacing)
             area.setWidget(inner)
             outer.addWidget(area)

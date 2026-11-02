@@ -4,7 +4,7 @@ computer (data folder, sharing the workspace on the local network)."""
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QCheckBox, QFrame, QGridLayout, QPlainTextEdit, QSpinBox, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QFrame, QGridLayout, QPlainTextEdit, QSpinBox, QWidget
 
 from seo_audit_pro import APP_VERSION, icons, local_server
 from seo_audit_pro.core import api, local, settings, tasks
@@ -88,7 +88,7 @@ class SettingsPage(Page):
         self.encryption = combo(ENCRYPTION, "starttls")
         self.username = line_edit("Usually the full email address")
         self.password = PasswordInput("App password")
-        self.from_name = line_edit("e.g. Mindcob SEO Team")
+        self.from_name = line_edit("e.g. Your Name or Agency")
         self.from_email = line_edit("outreach@yourdomain.com")
         self.smtp_fields = {
             "host": Field("SMTP host", self.host), "port": Field("Port", self.port),
@@ -184,6 +184,22 @@ class SettingsPage(Page):
             self.port.setValue(suggested)
 
     def _smtp_payload(self):
+        uname = self.username.text().strip()
+        femail = self.from_email.text().strip()
+        if "@" in uname and not femail:
+            self.from_email.setText(uname)
+            femail = uname
+        elif "@" in femail and not uname and not self._is_brevo():
+            self.username.setText(femail)
+            uname = femail
+        fname = self.from_name.text().strip()
+        if not fname and "@" in femail:
+            fname = femail.split("@")[0].replace(".", " ").replace("_", " ").title()
+            self.from_name.setText(fname)
+        if not self._is_brevo() and not self.host.text().strip() and femail.lower().endswith(("@gmail.com", "@googlemail.com")):
+            self.host.setText("smtp.gmail.com")
+            self.port.setValue(587)
+            self.encryption.setCurrentIndex(self.encryption.findData("starttls"))
         data = {"provider": self.provider.currentData(), "host": self.host.text().strip(), "port": self.port.value(),
                 "encryption": self.encryption.currentData(), "username": self.username.text().strip(),
                 "from_name": self.from_name.text().strip(), "from_email": self.from_email.text().strip()}
@@ -514,13 +530,18 @@ class SettingsPage(Page):
 
         def done(res):
             self.send_test_btn.busy(False)
+            self.has_password = True
+            self.saved_provider = data["provider"]
+            self.smtp_state.setText("Configured" + (" · Brevo" if data["provider"] == "brevo" else ""))
+            self.smtp_state.set_colors(C["success"], C["success_bg"])
             self.send_test_result.setText("✔ " + (res.get("message") or "Test email delivered successfully!"))
             self.send_test_result.setStyleSheet("color: " + C["success"] + "; font-weight: 600;")
             toast(self, "Test email delivered!", "success")
 
         def fail(err):
             self.send_test_btn.busy(False)
-            self.send_test_result.setText("✘ " + (err.data.get("message") if hasattr(err, "data") else err.message))
+            msg = (err.data.get("message") or err.data.get("error")) if hasattr(err, "data") and isinstance(err.data, dict) else None
+            self.send_test_result.setText("✘ " + (msg or getattr(err, "message", None) or str(err) or "Could not send test email."))
             self.send_test_result.setStyleSheet("color: " + C["danger"] + ";")
 
         tasks.run(api.post, "/api/outreach/smtp/send-test", data, timeout=40, on_done=done, on_error=fail, owner=self)
@@ -550,8 +571,16 @@ class SettingsPage(Page):
         self.llm_provider_combo.currentIndexChanged.connect(self._on_llm_provider_changed)
         llm_row.addWidget(Field("LLM Provider", self.llm_provider_combo), 1)
 
-        self.llm_model_edit = line_edit("e.g. llama-3.3-70b-versatile, gemini-2.0-flash, gpt-4o-mini")
-        llm_row.addWidget(Field("LLM Model (optional — auto-selected if blank)", self.llm_model_edit), 1)
+        self.llm_model_combo = QComboBox()
+        self.llm_model_combo.setEditable(True)
+        self.llm_model_combo.setMinimumWidth(240)
+        for m in ("llama-3.3-70b-versatile", "openai/gpt-oss-120b", "llama-3.1-8b-instant", "gemini-2.0-flash", "gemini-1.5-pro", "gpt-4o-mini", "gpt-4o", "openai/gpt-4o-mini", "claude-3-5-haiku-latest", "claude-3-5-sonnet-latest"):
+            self.llm_model_combo.addItem(m, m)
+        llm_row.addWidget(Field("LLM Model (choose from list or fetch live)", self.llm_model_combo), 1)
+        self.fetch_models_btn = BusyButton("Fetch Models", "secondary", icon_name="refresh")
+        self.fetch_models_btn.clicked.connect(lambda: self._fetch_llm_models(show_toast=True))
+        llm_row.addWidget(self.fetch_models_btn, 0, Qt.AlignmentFlag.AlignBottom)
+        # Model combo already added above
         card.body.addLayout(llm_row)
 
         key_row = hbox(spacing=10)
@@ -587,7 +616,64 @@ class SettingsPage(Page):
         card.body.addLayout(act)
         return card
 
+    def _set_model_value(self, mdl):
+        mdl = (mdl or "").strip()
+        if not mdl:
+            return
+        idx = self.llm_model_combo.findText(mdl)
+        if idx >= 0:
+            self.llm_model_combo.setCurrentIndex(idx)
+        else:
+            self.llm_model_combo.insertItem(0, mdl, mdl)
+            self.llm_model_combo.setCurrentIndex(0)
+
+    def _fetch_llm_models(self, show_toast=False, select_model=None):
+        payload = {
+            "llm_api_key": self.llm_key_input.text().strip() if hasattr(self, "llm_key_input") else "",
+            "llm_provider": self.llm_provider_combo.currentData() or "",
+        }
+        if show_toast and hasattr(self, "fetch_models_btn"):
+            self.fetch_models_btn.busy(True, "Fetching…")
+
+        def done(res):
+            if hasattr(self, "fetch_models_btn"):
+                self.fetch_models_btn.busy(False)
+            models = res.get("models") or []
+            cur = select_model or self.llm_model_combo.currentText().strip() or res.get("default_model") or ""
+            self.llm_model_combo.blockSignals(True)
+            self.llm_model_combo.clear()
+            for m in models:
+                self.llm_model_combo.addItem(m, m)
+            if cur:
+                idx = self.llm_model_combo.findText(cur)
+                if idx >= 0:
+                    self.llm_model_combo.setCurrentIndex(idx)
+                else:
+                    self.llm_model_combo.insertItem(0, cur, cur)
+                    self.llm_model_combo.setCurrentIndex(0)
+            self.llm_model_combo.blockSignals(False)
+            if show_toast:
+                src = "live API" if res.get("live") else "provider catalog"
+                toast(self, f"Loaded {len(models)} models from {src}.", "success")
+
+        def fail(_err):
+            if hasattr(self, "fetch_models_btn"):
+                self.fetch_models_btn.busy(False)
+
+        tasks.run(api.post, "/api/outreach/llm/models", payload, timeout=18, on_done=done, on_error=fail, owner=self)
+
     def _on_llm_provider_changed(self, _idx=0):
+        defaults = {
+            "groq": "llama-3.3-70b-versatile",
+            "gemini": "gemini-2.0-flash",
+            "openai": "gpt-4o-mini",
+            "openrouter": "openai/gpt-4o-mini",
+            "anthropic": "claude-3-5-haiku-latest",
+        }
+        prov = self.llm_provider_combo.currentData() or ""
+        def_mdl = defaults.get(prov)
+        self._fetch_llm_models(show_toast=False, select_model=def_mdl)
+        return
         defaults = {
             "groq": "llama-3.3-70b-versatile",
             "gemini": "gemini-2.0-flash",
@@ -607,7 +693,8 @@ class SettingsPage(Page):
         prov = data.get("llm_provider") or ""
         idx = self.llm_provider_combo.findData(prov)
         self.llm_provider_combo.setCurrentIndex(max(0, idx))
-        self.llm_model_edit.setText(data.get("llm_model") or "")
+        self._set_model_value(data.get("llm_model") or "")
+        self._fetch_llm_models(show_toast=False, select_model=data.get("llm_model") or "")
         has_key = bool(data.get("has_llm_key"))
         hint = data.get("llm_key_hint") or ""
         prov_label = data.get("llm_provider_label") or prov.upper() or "Configured"
@@ -627,7 +714,7 @@ class SettingsPage(Page):
         payload = {
             "llm_api_key": self.llm_key_input.text().strip(),
             "llm_provider": self.llm_provider_combo.currentData() or "",
-            "llm_model": self.llm_model_edit.text().strip(),
+            "llm_model": self.llm_model_combo.currentText().strip(),
         }
         self.llm_test_btn.busy(True, "Testing…")
         self.llm_test_result.setText("")
@@ -636,12 +723,15 @@ class SettingsPage(Page):
             self.llm_test_btn.busy(False)
             self.llm_test_result.setText("✔ " + (res.get("message") or "LLM key verified!"))
             self.llm_test_result.setStyleSheet("color: " + C["success"] + "; font-weight: 600;")
-            if res.get("model") and not self.llm_model_edit.text().strip():
+            if res.get("model"):
+                self._set_model_value(res["model"])
+            self._fetch_llm_models(show_toast=False, select_model=res.get("model"))
+        if False:
                 self.llm_model_edit.setText(res["model"])
 
         def fail(err):
             self.llm_test_btn.busy(False)
-            msg = err.data.get("message") if hasattr(err, "data") and isinstance(err.data, dict) else err.message
+            msg = (err.data.get("message") or err.data.get("error")) if hasattr(err, "data") and isinstance(err.data, dict) else getattr(err, "message", str(err))
             self.llm_test_result.setText("✘ " + (msg or "LLM test failed."))
             self.llm_test_result.setStyleSheet("color: " + C["danger"] + ";")
 
@@ -667,7 +757,7 @@ class SettingsPage(Page):
         custom = self.agency_instructions_edit.text().strip()
         llm_key = self.llm_key_input.text().strip()
         llm_prov = self.llm_provider_combo.currentData() or ""
-        llm_mdl = self.llm_model_edit.text().strip()
+        llm_mdl = self.llm_model_combo.currentText().strip()
         payload = {
             "services": services,
             "custom_instructions": custom,

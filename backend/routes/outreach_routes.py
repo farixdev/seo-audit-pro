@@ -57,7 +57,9 @@ def _smtp_from_body(data, require_password):
     if require_password and not password:
         raise ApiError(422, "Enter the SMTP password or app password.", field="password")
     from_email = email_value(data, "from_email")
-    from_name = text(data, "from_name", required=True, max_len=120, label="From name")
+    if not username and from_email and host.lower() not in ("localhost", "127.0.0.1", "::1"):
+        username = from_email
+    from_name = text(data, "from_name", max_len=120, label="From name") or (from_email.split("@")[0].replace(".", " ").title() if "@" in from_email else "Outreach Team")
     return {"provider": "smtp", "host": host, "port": port, "encryption": encryption, "username": username,
             "password": password, "from_email": from_email, "from_name": from_name}
 
@@ -118,7 +120,7 @@ def test_smtp():
 @require()
 def send_test_email_route():
     data = body()
-    to_email = email_value(data, "to_email", required=True, label="Test Recipient Email")
+    to_email = email_value(data, "to_email", required=True)
     include_attachment = bool(data.get("include_attachment"))
 
     if data.get("host") or data.get("provider") == "brevo":
@@ -139,10 +141,22 @@ def send_test_email_route():
 
     try:
         ok, msg = mailer.send_test_email(cfg, to_email, include_attachment=include_attachment)
+        if ok and cfg.get("password"):
+            enc = security.encrypt_secret(cfg["password"])
+            now = now_iso()
+            with db.transaction() as tx:
+                tx.execute("DELETE FROM smtp_settings WHERE id = 'default'")
+                tx.execute("""INSERT INTO smtp_settings (id, provider, host, port, username, password_enc, encryption, from_name,
+                              from_email, updated_by, updated_at) VALUES ('default', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                           (cfg["provider"], cfg["host"], cfg["port"], cfg["username"], enc, cfg["encryption"],
+                            cfg["from_name"], cfg["from_email"], g.user["id"], now))
         events.audit(g.user, "SMTP_TEST_SENT", "settings", "smtp", {"to": to_email, "ok": ok})
         return jsonify({"ok": True, "message": msg})
     except mailer.MailError as e:
         raise ApiError(422, str(e), code="smtp_send_failed")
+    except Exception as e:
+        friendly = mailer._friendly(e, cfg)
+        raise ApiError(422, friendly, code="smtp_send_failed")
 
 
 @bp.post("/api/outreach/analyze-spam")
@@ -177,6 +191,25 @@ def save_agency_settings_route():
         clear_llm_key=bool(data.get("clear_llm_key")),
     )
     return jsonify(res)
+
+
+@bp.post("/api/outreach/llm/models")
+@require()
+def fetch_llm_models_route():
+    data = body()
+    from backend.service_audit import get_llm_credentials
+    import llm as llm_client
+    key = (data.get("llm_api_key") or "").strip()
+    saved_key, saved_prov, saved_mdl = get_llm_credentials()
+    use_key = key or saved_key
+    prov = (data.get("llm_provider") or "").strip()
+    models, def_mdl, resolved_prov, live_ok = llm_client.fetch_models(use_key, prov)
+    return jsonify({
+        "models": models,
+        "default_model": def_mdl,
+        "provider": resolved_prov,
+        "live": live_ok,
+    })
 
 
 @bp.post("/api/outreach/llm/test")
@@ -333,6 +366,13 @@ def generate():
             "",
             "PS: If you prefer not to hear from me, simply reply 'no' and I will not contact you again."
         ]
+        # C2 AI generation
+        from backend import service_audit
+        ai_c2 = service_audit.generate_no_website_pitch_ai(lead, sub, "\n".join(lines), sender_name=g.user["name"])
+        if ai_c2.get("ai_generated"):
+            sub, lines = ai_c2["subject"], [ai_c2["body"]]
+        _unused = [
+        ]
         return jsonify({
             "subject": sub,
             "body": "\n".join(lines),
@@ -357,8 +397,8 @@ def generate():
                        (json.dumps(s_data, ensure_ascii=False), now, lead["id"]))
 
         pitch = service_audit.compare_and_generate_pitch(lead, s_data, sender_name=g.user["name"])
-        db.execute("UPDATE leads SET service_match_score = %s, service_pitch_notes = %s WHERE id = %s",
-                   (pitch["score"], pitch["pitch_notes"], lead["id"]))
+        db.execute("UPDATE leads SET services_extracted = %s, service_match_score = %s, service_pitch_notes = %s WHERE id = %s", (json.dumps(pitch.get("service_data") or s_data, ensure_ascii=False), pitch["score"], pitch["pitch_notes"], lead["id"]))
+
         cache.bump()
         return jsonify({
             "subject": pitch["subject"],
@@ -368,13 +408,15 @@ def generate():
             "score": pitch["score"],
             "grade": pitch["grade"],
             "services_found": pitch["services_extracted"],
+            "what_we_can_provide": pitch.get("what_we_can_provide") or [],
             "digital_gaps": pitch["digital_gaps"],
             "report_id": None
         })
 
     # Campaign 1: SEO Audit Report Email
     audit_row = _latest_completed_audit(lead["id"], data.get("audit_id") or None)
-    draft = build_draft(lead, audit_row, g.user)
+    from backend import service_audit
+    draft = service_audit.generate_seo_audit_email_ai(lead, audit_row, build_draft(lead, audit_row, g.user), sender_name=g.user["name"])
 
     # Check if a client PDF report exists to attach
     client_rep = None

@@ -42,7 +42,7 @@ def register(app):
 
     @app.errorhandler(ApiError)
     def _api_error(e):
-        body = {"error": e.message, "code": e.code}
+        body = {"error": e.message, "message": e.message, "code": e.code}
         body.update(e.extra)
         return jsonify(body), e.status
 

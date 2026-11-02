@@ -82,46 +82,17 @@ def dashboard():
                                  {audit_base.replace('WHERE', 'LEFT JOIN users u ON u.id = a.requested_by WHERE', 1)}
                                  ORDER BY a.created_at DESC LIMIT 8""", sp)
 
-    team_perf = []
-    if me["role"] in (MANAGER, TEAM_LEAD):
-        if me["role"] == MANAGER:
-            groups = db.query("SELECT id, name FROM teams ORDER BY name")
-            for t in groups:
-                tid = t["id"]
-                team_perf.append({
-                    "id": tid, "name": t["name"],
-                    "leads": db.scalar("SELECT COUNT(*) FROM leads WHERE assigned_team_id = %s AND status <> 'archived'", (tid,)) or 0,
-                    "audits": db.scalar("SELECT COUNT(*) FROM audits WHERE team_id = %s AND status = 'completed' AND completed_at > %s",
-                                        (tid, month)) or 0,
-                    "outreach": db.scalar("SELECT COUNT(*) FROM lead_outreach WHERE team_id = %s AND outreached = 1 "
-                                          "AND created_at > %s", (tid, month)) or 0,
-                    "won": db.scalar("SELECT COUNT(*) FROM leads WHERE assigned_team_id = %s AND status = 'won'", (tid,)) or 0,
-                })
-        else:
-            members = db.query("SELECT id, name, role FROM users WHERE team_id = %s AND is_active = 1 ORDER BY name",
-                               (me["team_id"],))
-            for m in members:
-                uid = m["id"]
-                team_perf.append({
-                    "id": uid, "name": m["name"], "role": m["role"],
-                    "leads": db.scalar("SELECT COUNT(*) FROM leads WHERE assigned_agent_id = %s AND status <> 'archived'", (uid,)) or 0,
-                    "audits": db.scalar("SELECT COUNT(*) FROM audits WHERE requested_by = %s AND status = 'completed' AND completed_at > %s",
-                                        (uid, month)) or 0,
-                    "outreach": db.scalar("SELECT COUNT(*) FROM lead_outreach WHERE user_id = %s AND outreached = 1 "
-                                          "AND created_at > %s", (uid, month)) or 0,
-                    "won": db.scalar("SELECT COUNT(*) FROM leads WHERE assigned_agent_id = %s AND status = 'won'", (uid,)) or 0,
-                })
+    recent_service_audits = db.query(f"""SELECT l.id, l.company, l.normalized_domain, l.website,
+                                                l.services_extracted, l.service_match_score,
+                                                l.service_pitch_notes, l.services_audit_date
+                                         FROM leads l WHERE {scope} AND l.services_audit_date IS NOT NULL
+                                         AND l.status <> 'archived'
+                                         ORDER BY l.services_audit_date DESC LIMIT 8""", sp)
 
-    if me["role"] == MANAGER:
-        recent = db.query("""SELECT al.action, al.entity_type, al.entity_id, al.created_at, u.name AS user_name
-                             FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id
-                             WHERE al.action NOT IN ('LOGIN', 'LOGOUT', 'LOGIN_FAILED', 'SMTP_TESTED', 'REPORT_DOWNLOADED')
-                             ORDER BY al.created_at DESC LIMIT 12""")
-    else:
-        recent = db.query(f"""SELECT al.action, al.entity_type, al.entity_id, al.created_at, u.name AS user_name
-                              FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id
-                              WHERE al.entity_type = 'lead' AND al.entity_id IN (SELECT l.id FROM leads l WHERE {scope})
-                              ORDER BY al.created_at DESC LIMIT 12""", sp)
+    recent = db.query("""SELECT al.action, al.entity_type, al.entity_id, al.created_at, u.name AS user_name
+                         FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id
+                         WHERE al.action NOT IN ('LOGIN', 'LOGOUT', 'LOGIN_FAILED', 'SMTP_TESTED', 'REPORT_DOWNLOADED')
+                         ORDER BY al.created_at DESC LIMIT 12""")
 
     seo_audited_total = db.scalar(f"SELECT COUNT(*) FROM leads l WHERE {scope} AND l.last_audit_id IS NOT NULL AND l.status <> 'archived'", sp) or 0
     service_audited_total = db.scalar(f"SELECT COUNT(*) FROM leads l WHERE {scope} AND l.services_audit_date IS NOT NULL AND l.status <> 'archived'", sp) or 0
@@ -137,7 +108,8 @@ def dashboard():
         "pipeline": pipeline,
         "audit_activity": activity,
         "recent_audits": recent_audits,
-        "team_performance": team_perf,
+        "recent_service_audits": recent_service_audits,
+        "team_performance": [],
         "recent_activity": recent,
     })
 

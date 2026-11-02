@@ -247,8 +247,8 @@ class SearchPopup(QFrame):
         self.list.clear()
         groups = [("leads", "Leads", "leads", lambda r: (r["company"], r["normalized_domain"])),
                   ("audits", "Audits", "audit", lambda r: (r["company"], f"{r['status'].title()} · {fmt.date(r['created_at'])}")),
-                  ("users", "People", "user", lambda r: (r["name"], r["email"])),
-                  ("teams", "Teams", "teams", lambda r: (r["name"], ""))]
+                  # Solo workspace: only leads and audits in search
+                  ]
         count = 0
         for key, title, icon_name, render in groups:
             rows = results.get(key) or []
@@ -421,7 +421,7 @@ class TopBar(QFrame):
         self.title.setStyleSheet("font-size: 14px; font-weight: 600;")
         row.addWidget(self.title)
         row.addStretch(1)
-        self.search = SearchBox("Search leads, audits, people…  (Ctrl+K)")
+        self.search = SearchBox("Search leads, audits…  (Ctrl+K)")
         self.search.setFixedWidth(340)
         self.search.search.connect(self._search)
         row.addWidget(self.search)
@@ -446,6 +446,7 @@ class TopBar(QFrame):
         self.avatar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         av_lay.addWidget(self.avatar)
         self.avatar_btn.clicked.connect(self._menu)
+        self.avatar_btn.hide()
         row.addWidget(self.avatar_btn)
         self.popup = SearchPopup(self)
         self.popup.chosen.connect(self.search_chosen.emit)

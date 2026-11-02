@@ -139,8 +139,9 @@ def _connect(cfg, timeout=20):
         if cfg["encryption"] == "starttls":
             server.starttls(context=ctx)
             server.ehlo()
-    if cfg.get("username"):
-        server.login(cfg["username"], cfg["password"])
+    login_user = (cfg.get("username") or "").strip() or ((cfg.get("from_email") or "").strip() if host.lower() not in ("localhost", "127.0.0.1", "::1") else "")
+    if login_user and cfg.get("password"):
+        server.login(login_user, cfg["password"])
     return server
 
 

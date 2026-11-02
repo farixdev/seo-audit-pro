@@ -123,8 +123,8 @@ def _auth_headers(api_key, provider=None):
     provider = provider or provider_for_key(api_key)
     h = {"Authorization": "Bearer %s" % api_key, "Content-Type": "application/json"}
     if provider == "openrouter":
-        h["HTTP-Referer"] = "https://mindcob.tools"
-        h["X-Title"] = "Mindcob SEO Audit Pro"
+        h["HTTP-Referer"] = "https://localhost"
+        h["X-Title"] = "SEO Audit Pro"
     elif provider == "anthropic":
         # Anthropic's native /models wants these; its OpenAI-compatible
         # /chat/completions accepts the Bearer header. Sending all is harmless.
@@ -246,6 +246,54 @@ def chat(api_key, model, system, user, timeout=90, max_tokens=1600,
 def chat_json(api_key, model, system, user, **kw):
     """Chat completion that returns parsed JSON (dict or list)."""
     return _parse_json_blob(chat(api_key, model, system, user, **kw))
+
+
+def fetch_models(api_key="", provider=""):
+    """Return (models_list, default_model_id, resolved_provider, live_fetched_bool).
+    When an API key is provided, fetches live models from the provider's /models endpoint
+    and merges them with curated suggested models at the top."""
+    api_key = (api_key or "").strip()
+    prov = (provider or "").strip().lower()
+    if prov not in _BASE:
+        prov = provider_for_key(api_key) if api_key else "groq"
+    curated = list(SUGGESTED_MODELS.get(prov, SUGGESTED_MODELS["groq"]))
+    def_mdl = default_model(prov)
+    live_ids = []
+    live_ok = False
+    if api_key:
+        try:
+            r = requests.get(
+                _BASE[prov] + "/models",
+                headers=_auth_headers(api_key, prov),
+                timeout=12,
+            )
+            if r.status_code == 200:
+                data = r.json().get("data", [])
+                skip_tokens = ("whisper", "tts", "embedding", "moderation", "dall-e", "audio", "guard", "vision-preview")
+                for m in data:
+                    mid = (m.get("id") or "").strip()
+                    if mid.startswith("models/"):
+                        mid = mid.split("/", 1)[1]
+                    if not mid or any(tok in mid.lower() for tok in skip_tokens):
+                        continue
+                    live_ids.append(mid)
+                live_ok = bool(live_ids)
+        except Exception:
+            pass
+    merged = []
+    seen = set()
+    for m in curated + sorted(set(live_ids)):
+        if m and m not in seen:
+            seen.add(m)
+            merged.append(m)
+    if not provider and not api_key:
+        # When "Auto-detect" is selected and no key is entered yet, include top models from all providers
+        for p in PROVIDERS:
+            for m in SUGGESTED_MODELS.get(p, []):
+                if m not in seen:
+                    seen.add(m)
+                    merged.append(m)
+    return merged, def_mdl, prov, live_ok
 
 
 def test_key(api_key, provider=None, model=None):

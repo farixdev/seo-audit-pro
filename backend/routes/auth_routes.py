@@ -36,6 +36,7 @@ def _me(user_id):
 
 @bp.post("/api/auth/local-auto")
 def local_auto_login():
+    db.execute("UPDATE users SET name = 'Outreach Team', email = 'local@localhost', role = 'MANAGER', team_id = NULL WHERE id = (SELECT id FROM users WHERE is_active = 1 ORDER BY (role = 'MANAGER') DESC, created_at ASC LIMIT 1) AND LOWER(email) LIKE '%mindcob%'")
     """Auto-authenticates the local offline user without password friction."""
     user = db.query_one("SELECT * FROM users WHERE is_active = 1 ORDER BY (role = 'MANAGER') DESC, created_at ASC LIMIT 1")
     if not user:

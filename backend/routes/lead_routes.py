@@ -65,6 +65,13 @@ def lead_out(row):
         except Exception:
             pass
     out["services_list"] = s_list
+    try:
+        _p = json.loads(row["services_extracted"]) if row.get("services_extracted") else {}
+        out["what_we_can_provide"] = (_p.get("what_we_can_provide") or _p.get("recommended_services") or []) if isinstance(_p, dict) else []
+        out["digital_gaps"] = (_p.get("digital_gaps") or []) if isinstance(_p, dict) else []
+    except Exception:
+        out["what_we_can_provide"] = []
+        out["digital_gaps"] = []
     out["seo_audit_status"] = "no_website" if not out["has_website"] else ("audited" if row.get("last_audit_id") else "not_audited")
     out["service_audit_status"] = "no_website" if not out["has_website"] else ("pitched" if row.get("service_match_score") is not None else ("audited" if row.get("services_audit_date") else "not_audited"))
     try:
