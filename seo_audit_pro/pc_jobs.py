@@ -104,7 +104,7 @@ def _run_audit(job, folder, channel):
     import audit as engine
 
     params = {"url": job["url"], "max_pages": job["max_pages"], "psi_strategy": job["psi_strategy"],
-              "psi_key": None, "cancel": threading.Event(), "places_remote": _places_via_app(folder, channel)}
+              "psi_key": None, "api_key": job.get("api_key"), "model": job.get("model"), "cancel": threading.Event(), "places_remote": _places_via_app(folder, channel)}
     # Screenshots and the Google Maps profile run while the site is crawled.
     import client_pdf
     shots_dir = os.path.join(folder, "client")

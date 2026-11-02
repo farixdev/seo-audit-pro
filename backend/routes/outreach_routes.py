@@ -173,8 +173,28 @@ def save_agency_settings_route():
         custom_instructions=data.get("custom_instructions"),
         llm_provider=data.get("llm_provider"),
         llm_model=data.get("llm_model"),
+        llm_api_key=data.get("llm_api_key"),
+        clear_llm_key=bool(data.get("clear_llm_key")),
     )
     return jsonify(res)
+
+
+@bp.post("/api/outreach/llm/test")
+@require()
+def test_llm_route():
+    data = body()
+    from backend.service_audit import get_llm_credentials
+    import llm as llm_client
+    key = (data.get("llm_api_key") or "").strip()
+    saved_key, saved_prov, saved_mdl = get_llm_credentials()
+    use_key = key or saved_key
+    prov = (data.get("llm_provider") or saved_prov or "").strip()
+    mdl = (data.get("llm_model") or saved_mdl or "").strip()
+    ok, prov_used, mdl_used, msg = llm_client.test_key(use_key, provider=prov, model=mdl)
+    payload = {"ok": ok, "provider": prov_used, "model": mdl_used, "message": msg}
+    if not ok:
+        payload.update(error=msg, code="llm_test_failed")
+    return jsonify(payload), (200 if ok else 422)
 
 
 @bp.post("/api/outreach/send-direct")

@@ -33,45 +33,112 @@ DEFAULT_AGENCY_SERVICES = (
 )
 
 
+import os
+import llm
+
+
+def _mask_key(key):
+    if not key or len(key) < 8:
+        return ""
+    return f"{key[:4]}••••{key[-4:]}"
+
+
+def get_llm_credentials():
+    """Return (api_key, provider, model) from agency_settings DB or environment."""
+    row = db.query_one("SELECT llm_provider, llm_model, llm_api_key_enc FROM agency_settings WHERE id = 'default'")
+    api_key = ""
+    provider = ""
+    model = ""
+    if row:
+        provider = (row.get("llm_provider") or "").strip()
+        model = (row.get("llm_model") or "").strip()
+        enc = row.get("llm_api_key_enc")
+        if enc:
+            try:
+                api_key = security.decrypt_secret(enc).strip()
+            except Exception:
+                api_key = ""
+    if not api_key:
+        for prov, env_name in llm.ENV_KEYS.items():
+            val = (os.environ.get(env_name) or "").strip()
+            if val:
+                api_key = val
+                provider = provider or prov
+                break
+    if api_key and not provider:
+        provider = llm.provider_for_key(api_key)
+    if api_key and not model:
+        model = llm.default_model(provider)
+    return api_key, provider, model
+
+
 def get_agency_settings():
     row = db.query_one("SELECT * FROM agency_settings WHERE id = 'default'")
+    api_key, det_provider, det_model = get_llm_credentials()
     if not row:
         return {
             "services": DEFAULT_AGENCY_SERVICES,
             "pitch_prompt": "",
             "custom_instructions": "",
-            "llm_provider": "",
-            "llm_model": "",
+            "llm_provider": det_provider,
+            "llm_model": det_model,
+            "has_llm_key": bool(api_key),
+            "llm_key_hint": _mask_key(api_key),
+            "llm_provider_label": llm.provider_label(det_provider) if det_provider else "",
         }
-    return dict(row)
+    out = dict(row)
+    out.pop("llm_api_key_enc", None)
+    out["llm_provider"] = out.get("llm_provider") or det_provider
+    out["llm_model"] = out.get("llm_model") or det_model
+    out["has_llm_key"] = bool(api_key)
+    out["llm_key_hint"] = _mask_key(api_key)
+    out["llm_provider_label"] = llm.provider_label(out["llm_provider"]) if out.get("llm_provider") else ""
+    return out
 
 
 def save_agency_settings(services=None, pitch_prompt=None, custom_instructions=None,
-                         llm_provider=None, llm_model=None, llm_api_key=None):
+                         llm_provider=None, llm_model=None, llm_api_key=None, clear_llm_key=False):
+    row = db.query_one("SELECT * FROM agency_settings WHERE id = 'default'") or {}
     current = get_agency_settings()
     now = now_iso()
+
+    key_enc = row.get("llm_api_key_enc")
+    raw_key = (llm_api_key or "").strip() if isinstance(llm_api_key, str) else ""
+    if clear_llm_key:
+        key_enc = None
+    elif raw_key:
+        key_enc = security.encrypt_secret(raw_key)
+
+    prov = (llm_provider if llm_provider is not None else current.get("llm_provider") or "").strip()
+    if raw_key and not prov:
+        prov = llm.provider_for_key(raw_key)
+    mdl = (llm_model if llm_model is not None else current.get("llm_model") or "").strip()
+    if (raw_key or prov) and not mdl:
+        mdl = llm.default_model(prov or llm.provider_for_key(raw_key))
+
     fields = {
         "services": ("\n".join(str(x) for x in services) if isinstance(services, list) else str(services)) if services is not None else current["services"],
         "pitch_prompt": pitch_prompt if pitch_prompt is not None else current["pitch_prompt"],
         "custom_instructions": custom_instructions if custom_instructions is not None else current["custom_instructions"],
-        "llm_provider": llm_provider if llm_provider is not None else current["llm_provider"],
-        "llm_model": llm_model if llm_model is not None else current["llm_model"],
+        "llm_provider": prov,
+        "llm_model": mdl,
         "updated_at": now,
     }
     with db.transaction() as tx:
         tx.execute("""INSERT INTO agency_settings (id, services, pitch_prompt, custom_instructions,
-                                                 llm_provider, llm_model, updated_at)
-                      VALUES ('default', %s, %s, %s, %s, %s, %s)
+                                                 llm_provider, llm_model, llm_api_key_enc, updated_at)
+                      VALUES ('default', %s, %s, %s, %s, %s, %s, %s)
                       ON CONFLICT(id) DO UPDATE SET
                           services = excluded.services,
                           pitch_prompt = excluded.pitch_prompt,
                           custom_instructions = excluded.custom_instructions,
                           llm_provider = excluded.llm_provider,
                           llm_model = excluded.llm_model,
+                          llm_api_key_enc = excluded.llm_api_key_enc,
                           updated_at = excluded.updated_at""",
                    (fields["services"], fields["pitch_prompt"], fields["custom_instructions"],
-                    fields["llm_provider"], fields["llm_model"], now))
-    return fields
+                    fields["llm_provider"], fields["llm_model"], key_enc, now))
+    return get_agency_settings()
 
 
 def extract_website_services(url):
@@ -187,38 +254,42 @@ def compare_and_generate_pitch(lead, service_data, agency_services=None, sender_
     services_list = service_data.get("services") or []
     gaps_list = service_data.get("digital_gaps") or []
 
+    cfg = get_agency_settings()
     if not agency_services:
-        cfg = get_agency_settings()
         agency_services = cfg.get("services") or DEFAULT_AGENCY_SERVICES
+    custom_instructions = (cfg.get("custom_instructions") or "").strip()
 
-    # Check if LLM is available
+    # Check if LLM key is configured in Settings or environment
     llm_result = None
     try:
-        import llm
-        client = llm.from_env()
-        if client:
-            prompt = (
-                f"You are a top B2B digital agency consultant writing a high-converting, spam-proof cold email.\n"
+        api_key, provider, model = get_llm_credentials()
+        if api_key:
+            sys_prompt = (
+                "You are a top B2B digital agency strategist writing a high-converting, "
+                "spam-proof cold email. Never use spam trigger words (free, guarantee, urgent, "
+                "act now, 100%, click here). Return ONLY valid JSON."
+            )
+            user_prompt = (
                 f"Prospect Company: {company} ({domain})\n"
-                f"Prospect's Current Services: {', '.join(services_list)}\n"
+                f"Prospect Contact: {contact or 'Owner / Team'}\n"
+                f"Prospect's Current Services Extracted from Website: {', '.join(services_list)}\n"
                 f"Identified Website Gaps: {', '.join(gaps_list)}\n\n"
-                f"Our Agency Services:\n{agency_services}\n\n"
+                f"Our Agency Services & Offerings:\n{agency_services}\n\n"
+                + (f"Custom Pitch Instructions: {custom_instructions}\n\n" if custom_instructions else "")
+                + f"Sender Name: {sender_name}\n\n"
                 f"TASK:\n"
-                f"1. Choose 1-2 complementary services from our agency that will directly bring more revenue to {company}.\n"
-                f"2. Write a short, personalized, natural cold outreach email (under 120 words).\n"
-                f"3. Calculate an Opportunity Score (70-98).\n"
-                f"4. Provide 2 bullet points of why this is a prime pitch.\n\n"
-                f"Return ONLY valid JSON:\n"
+                f"1. Compare {company}'s current services against Our Agency Services and pick the 1-2 highest-value services we can provide them.\n"
+                f"2. Write a natural, conversational cold outreach email (under 130 words) signed by {sender_name} with a polite opt-out PS.\n"
+                f"3. Calculate a Service Match / Opportunity Score (integer 65-98).\n"
+                f"4. Write concise pitch_notes explaining why our services match their gaps.\n\n"
+                f"Return ONLY valid JSON with keys:\n"
                 f'{{"score": 88, "pitch_notes": "...", "subject": "...", "body": "..."}}'
             )
-            raw = client.complete(
-                model=client.default_model(),
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.4,
-                response_format={"type": "json_object"}
+            data = llm.chat_json(
+                api_key, model, sys_prompt, user_prompt,
+                timeout=35, max_tokens=900, temperature=0.4, max_retries=2, provider=provider
             )
-            data = json.loads(raw.strip())
-            if "score" in data and "body" in data:
+            if isinstance(data, dict) and "score" in data and "body" in data:
                 llm_result = data
     except Exception as e:
         log.info("LLM not used or returned error, using built-in generator: %s", e)

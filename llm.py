@@ -31,55 +31,61 @@ GROQ_BASE = "https://api.groq.com/openai/v1"
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 ANTHROPIC_BASE = "https://api.anthropic.com/v1"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
+OPENAI_BASE = "https://api.openai.com/v1"
 
 _BASE = {
     "groq": GROQ_BASE,
     "openrouter": OPENROUTER_BASE,
     "anthropic": ANTHROPIC_BASE,
     "gemini": GEMINI_BASE,
+    "openai": OPENAI_BASE,
 }
 
 # Order shown in the UI dropdown, plus their human labels.
-PROVIDERS = ["groq", "openrouter", "anthropic", "gemini"]
+PROVIDERS = ["groq", "gemini", "openai", "openrouter", "anthropic"]
 PROVIDER_LABELS = {
     "groq": "Groq (free · rate-limited)",
+    "gemini": "Google Gemini",
+    "openai": "OpenAI (GPT-4o / GPT-4o-mini)",
     "openrouter": "OpenRouter (your credits)",
     "anthropic": "Anthropic (Claude)",
-    "gemini": "Google Gemini",
 }
 # Environment-variable name each provider's key loads from / saves to.
 ENV_KEYS = {
     "groq": "GROQ_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "openai": "OPENAI_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
-    "gemini": "GEMINI_API_KEY",
 }
 
 # Per-provider default model — all cheap-or-free and reliable at structured JSON.
 DEFAULT_MODELS = {
     "groq": "llama-3.3-70b-versatile",
+    "gemini": "gemini-2.0-flash",
+    "openai": "gpt-4o-mini",
     "openrouter": "openai/gpt-4o-mini",
     "anthropic": "claude-3-5-haiku-latest",
-    "gemini": "gemini-2.0-flash",
 }
 
 # Suggested models per provider, shown in the app's dropdown.
 SUGGESTED_MODELS = {
     "groq": ["llama-3.3-70b-versatile", "openai/gpt-oss-120b",
              "openai/gpt-oss-20b", "llama-3.1-8b-instant"],
+    "gemini": ["gemini-2.0-flash", "gemini-2.0-flash-lite",
+               "gemini-1.5-flash", "gemini-1.5-pro"],
+    "openai": ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"],
     "openrouter": ["openai/gpt-4o-mini", "google/gemini-2.0-flash-001",
                    "anthropic/claude-3.5-haiku",
                    "meta-llama/llama-3.3-70b-instruct",
                    "deepseek/deepseek-chat", "openai/gpt-4o"],
     "anthropic": ["claude-3-5-haiku-latest", "claude-3-5-sonnet-latest",
                   "claude-3-7-sonnet-latest", "claude-sonnet-4-20250514"],
-    "gemini": ["gemini-2.0-flash", "gemini-2.0-flash-lite",
-               "gemini-1.5-flash", "gemini-1.5-pro"],
 }
 
 
 def provider_for_key(api_key):
-    """Return 'groq' | 'openrouter' | 'anthropic' | 'gemini' from the key
+    """Return 'groq' | 'openrouter' | 'anthropic' | 'gemini' | 'openai' from the key
     prefix. Order matters: 'sk-or…' and 'sk-ant…' both begin 'sk-'."""
     k = (api_key or "").strip()
     if k.startswith("sk-or"):
@@ -88,6 +94,8 @@ def provider_for_key(api_key):
         return "anthropic"
     if k.startswith("AIza"):
         return "gemini"
+    if k.startswith("sk-"):
+        return "openai"
     return "groq"
 
 
@@ -174,16 +182,17 @@ def _parse_json_blob(content):
 
 
 def chat(api_key, model, system, user, timeout=90, max_tokens=1600,
-         temperature=0.4, json_mode=True, max_retries=6):
+         temperature=0.4, json_mode=True, max_retries=6, provider=None):
     """Chat completion with rate-limit (429) and 5xx backoff. Returns content."""
     if not api_key:
         raise RuntimeError("No LLM API key set.")
-    provider = provider_for_key(api_key)
+    provider = provider if provider in _BASE else provider_for_key(api_key)
+    model = model or default_model(provider)
     base = _BASE[provider]
     headers = _auth_headers(api_key, provider)
 
     tok_key = "max_completion_tokens" if provider == "groq" else "max_tokens"
-    supports_json = provider in ("groq", "openrouter", "gemini")
+    supports_json = provider in ("groq", "openrouter", "gemini", "openai")
 
     def build(use_json):
         p = {"model": model,
@@ -237,3 +246,19 @@ def chat(api_key, model, system, user, timeout=90, max_tokens=1600,
 def chat_json(api_key, model, system, user, **kw):
     """Chat completion that returns parsed JSON (dict or list)."""
     return _parse_json_blob(chat(api_key, model, system, user, **kw))
+
+
+def test_key(api_key, provider=None, model=None):
+    """Verify an LLM API key by running a quick ping completion."""
+    api_key = (api_key or "").strip()
+    if not api_key:
+        return False, "", "", "Enter an LLM API key first."
+    prov = provider if provider in _BASE else provider_for_key(api_key)
+    mdl = (model or "").strip() or default_model(prov)
+    try:
+        reply = chat(api_key, mdl, "Reply with the word OK.", "Ping", timeout=20, max_tokens=20,
+                     temperature=0.0, json_mode=False, max_retries=1, provider=prov)
+        return True, prov, mdl, f"Connected to {provider_label(prov)} ({mdl}) — Response: {reply.strip()[:40]}"
+    except Exception as e:
+        return False, prov, mdl, str(e)
+

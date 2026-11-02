@@ -591,6 +591,14 @@ def _run(audit_id):
     params = {"url": row["url"], "max_pages": params.get("max_pages") or defaults["max_pages"],
               "psi_strategy": params.get("psi_strategy") or defaults.get("psi_strategy", "both"),
               "psi_key": pagespeed_key()}
+    try:
+        from backend.service_audit import get_llm_credentials
+        llm_key, _llm_prov, llm_mdl = get_llm_credentials()
+        if llm_key:
+            params["api_key"] = llm_key
+            params["model"] = llm_mdl
+    except Exception:
+        pass
     state = dict(_new_state(), last_write=0.0)
     flush_lock = threading.Lock()
 
@@ -686,7 +694,12 @@ def claim_jobs(user, device, restart=False):
                 params = json.loads(row.get("params") or "{}")
             except ValueError:
                 params = {}
-            jobs.append({"audit_id": row["id"], "url": row["url"],
+            try:
+                from backend.service_audit import get_llm_credentials
+                _lk, _lp, _lm = get_llm_credentials()
+            except Exception:
+                _lk, _lm = "", ""
+            jobs.append({"audit_id": row["id"], "url": row["url"], "api_key": _lk or None, "model": _lm or None,
                          "max_pages": params.get("max_pages") or defaults["max_pages"],
                          "psi_strategy": params.get("psi_strategy") or defaults.get("psi_strategy", "both")})
             ctx = _context(row["id"])

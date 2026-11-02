@@ -476,6 +476,7 @@ class SettingsPage(Page):
                 self._fill_audit(state["settings"])
                 self._fill_psi(state["settings"])
                 if state.get("agency"):
+                    self._fill_agency(state["agency"])
                     self.agency_services_edit.setPlainText(state["agency"].get("services") or "")
                     self.agency_instructions_edit.setText(state["agency"].get("custom_instructions") or "")
                 self.area.ready()
@@ -526,13 +527,49 @@ class SettingsPage(Page):
 
     def _agency_services_card(self):
         card = Card(padding=24, spacing=16)
-        card.body.addWidget(label("Campaign 3: Agency Services & Pitching (LLM Comparison)", "SectionTitle"))
+        head = hbox(spacing=10)
+        head.addWidget(label("AI / LLM API Key & Agency Services (Audit 2 / Campaign 3 & Executive Summaries)", "SectionTitle"), 1)
+        self.llm_badge = Badge("No LLM Key (Smart Built-in Active)", C["warning"], C["warning_bg"])
+        head.addWidget(self.llm_badge)
+        card.body.addLayout(head)
         card.body.addWidget(label(
-            "Define your agency's service capabilities. When running Campaign 3, our auditing engine inspects each prospect's website "
-            "to extract what services they offer, then uses AI to identify missing capabilities and generate custom high-converting pitch proposals.",
+            "Configure your LLM API key (Groq, Google Gemini, OpenAI, OpenRouter, or Anthropic Claude) and your agency's service offerings. "
+            "When running Audit 2 (Campaign 3), the system extracts each lead's website services, uses your LLM to compare them against your "
+            "offerings, scores the opportunity (0–100), and writes a tailored, spam-checked pitch email.",
             "Meta", wrap=True))
 
-        card.body.addWidget(label("Our Agency Services & Offerings", "FieldLabel"))
+        llm_row = hbox(spacing=12)
+        self.llm_provider_combo = combo([
+            ("Auto-detect from key prefix (Recommended)", ""),
+            ("Groq — Fast & Free (gsk_…)", "groq"),
+            ("Google Gemini (AIza…)", "gemini"),
+            ("OpenAI — GPT-4o / GPT-4o-mini (sk-…)", "openai"),
+            ("OpenRouter (sk-or-…)", "openrouter"),
+            ("Anthropic Claude (sk-ant-…)", "anthropic"),
+        ], "")
+        self.llm_provider_combo.currentIndexChanged.connect(self._on_llm_provider_changed)
+        llm_row.addWidget(Field("LLM Provider", self.llm_provider_combo), 1)
+
+        self.llm_model_edit = line_edit("e.g. llama-3.3-70b-versatile, gemini-2.0-flash, gpt-4o-mini")
+        llm_row.addWidget(Field("LLM Model (optional — auto-selected if blank)", self.llm_model_edit), 1)
+        card.body.addLayout(llm_row)
+
+        key_row = hbox(spacing=10)
+        self.llm_key_input = PasswordInput("Paste your LLM API key (gsk_…, AIza…, sk-…, sk-or-…, sk-ant-…)")
+        key_row.addWidget(Field("LLM API Key (encrypted locally)", self.llm_key_input), 1)
+        self.llm_test_btn = BusyButton("Test LLM key", None, icon_name="zap")
+        self.llm_test_btn.clicked.connect(self._test_llm_key)
+        key_row.addWidget(self.llm_test_btn, 0, Qt.AlignmentFlag.AlignBottom)
+        self.llm_clear_btn = button("Remove key", "ghost")
+        self.llm_clear_btn.setVisible(False)
+        self.llm_clear_btn.clicked.connect(self._clear_llm_key)
+        key_row.addWidget(self.llm_clear_btn, 0, Qt.AlignmentFlag.AlignBottom)
+        card.body.addLayout(key_row)
+
+        self.llm_test_result = label("", wrap=True)
+        card.body.addWidget(self.llm_test_result)
+
+        card.body.addWidget(label("Our Agency Services & Offerings (Compared against each lead's website)", "FieldLabel"))
         self.agency_services_edit = QPlainTextEdit()
         self.agency_services_edit.setPlaceholderText("List your agency services here...")
         self.agency_services_edit.setMinimumHeight(120)
@@ -544,24 +581,111 @@ class SettingsPage(Page):
 
         act = hbox(spacing=8)
         act.addStretch(1)
-        self.save_agency_btn = BusyButton("Save agency offerings", "primary")
+        self.save_agency_btn = BusyButton("Save LLM key & agency offerings", "primary")
         self.save_agency_btn.clicked.connect(self._save_agency_settings)
         act.addWidget(self.save_agency_btn)
         card.body.addLayout(act)
         return card
 
-    def _save_agency_settings(self):
-        services = self.agency_services_edit.toPlainText().strip()
-        custom = self.agency_instructions_edit.text().strip()
-        self.save_agency_btn.busy(True, "Saving…")
+    def _on_llm_provider_changed(self, _idx=0):
+        defaults = {
+            "groq": "llama-3.3-70b-versatile",
+            "gemini": "gemini-2.0-flash",
+            "openai": "gpt-4o-mini",
+            "openrouter": "openai/gpt-4o-mini",
+            "anthropic": "claude-3-5-haiku-latest",
+        }
+        prov = self.llm_provider_combo.currentData() or ""
+        if prov in defaults and not self.llm_model_edit.text().strip():
+            self.llm_model_edit.setText(defaults[prov])
 
-        def done(_res):
+    def _fill_agency(self, data):
+        if not isinstance(data, dict):
+            return
+        self.agency_services_edit.setPlainText(data.get("services") or "")
+        self.agency_instructions_edit.setText(data.get("custom_instructions") or "")
+        prov = data.get("llm_provider") or ""
+        idx = self.llm_provider_combo.findData(prov)
+        self.llm_provider_combo.setCurrentIndex(max(0, idx))
+        self.llm_model_edit.setText(data.get("llm_model") or "")
+        has_key = bool(data.get("has_llm_key"))
+        hint = data.get("llm_key_hint") or ""
+        prov_label = data.get("llm_provider_label") or prov.upper() or "Configured"
+        if has_key:
+            self.llm_badge.setText(f"LLM Key Saved · {prov_label}" + (f" ({hint})" if hint else ""))
+            self.llm_badge.set_colors(C["success"], C["success_bg"])
+            self.llm_key_input.edit.setPlaceholderText(f"Saved ({hint}) — paste a new key to replace, or leave blank to keep")
+            self.llm_clear_btn.setVisible(True)
+        else:
+            self.llm_badge.setText("No LLM Key (Smart Built-in Active)")
+            self.llm_badge.set_colors(C["warning"], C["warning_bg"])
+            self.llm_key_input.edit.setPlaceholderText("Paste your LLM API key (gsk_…, AIza…, sk-…, sk-or-…, sk-ant-…)")
+            self.llm_clear_btn.setVisible(False)
+        self.llm_key_input.clear()
+
+    def _test_llm_key(self):
+        payload = {
+            "llm_api_key": self.llm_key_input.text().strip(),
+            "llm_provider": self.llm_provider_combo.currentData() or "",
+            "llm_model": self.llm_model_edit.text().strip(),
+        }
+        self.llm_test_btn.busy(True, "Testing…")
+        self.llm_test_result.setText("")
+
+        def done(res):
+            self.llm_test_btn.busy(False)
+            self.llm_test_result.setText("✔ " + (res.get("message") or "LLM key verified!"))
+            self.llm_test_result.setStyleSheet("color: " + C["success"] + "; font-weight: 600;")
+            if res.get("model") and not self.llm_model_edit.text().strip():
+                self.llm_model_edit.setText(res["model"])
+
+        def fail(err):
+            self.llm_test_btn.busy(False)
+            msg = err.data.get("message") if hasattr(err, "data") and isinstance(err.data, dict) else err.message
+            self.llm_test_result.setText("✘ " + (msg or "LLM test failed."))
+            self.llm_test_result.setStyleSheet("color: " + C["danger"] + ";")
+
+        tasks.run(api.post, "/api/outreach/llm/test", payload, timeout=30, on_done=done, on_error=fail, owner=self)
+
+    def _clear_llm_key(self):
+        self.save_agency_btn.busy(True, "Removing key…")
+
+        def done(res):
             self.save_agency_btn.busy(False)
-            toast(self, "Agency services saved.", "success")
+            self._fill_agency(res)
+            self.llm_test_result.setText("")
+            toast(self, "LLM API key removed.", "success")
 
         def fail(err):
             self.save_agency_btn.busy(False)
             show_error(self, err)
 
-        tasks.run(api.put, "/api/outreach/agency-settings", {"services": services, "custom_instructions": custom},
-                  on_done=done, on_error=fail, owner=self)
+        tasks.run(api.put, "/api/outreach/agency-settings", {"clear_llm_key": True}, on_done=done, on_error=fail, owner=self)
+
+    def _save_agency_settings(self):
+        services = self.agency_services_edit.toPlainText().strip()
+        custom = self.agency_instructions_edit.text().strip()
+        llm_key = self.llm_key_input.text().strip()
+        llm_prov = self.llm_provider_combo.currentData() or ""
+        llm_mdl = self.llm_model_edit.text().strip()
+        payload = {
+            "services": services,
+            "custom_instructions": custom,
+            "llm_provider": llm_prov,
+            "llm_model": llm_mdl,
+        }
+        if llm_key:
+            payload["llm_api_key"] = llm_key
+        self.save_agency_btn.busy(True, "Saving…")
+
+        def done(res):
+            self.save_agency_btn.busy(False)
+            self._fill_agency(res)
+            toast(self, "LLM API key & agency settings saved.", "success")
+
+        def fail(err):
+            self.save_agency_btn.busy(False)
+            show_error(self, err)
+
+        tasks.run(api.put, "/api/outreach/agency-settings", payload, on_done=done, on_error=fail, owner=self)
+        card = Card(padding=24, spacing=16)
