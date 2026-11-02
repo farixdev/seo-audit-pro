@@ -11,7 +11,8 @@ from urllib.parse import quote
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QPlainTextEdit, QTabWidget, QWidget
+from PySide6.QtWidgets import QCheckBox, QFrame, QLabel, QLineEdit, QPlainTextEdit, QTabWidget, QWidget
+from seo_audit_pro.widgets.common import Badge
 
 from seo_audit_pro import icons
 from seo_audit_pro.core import api, fmt, tasks
@@ -239,9 +240,23 @@ class ComposePanel(QWidget):
         super().__init__()
         self.page = page
         self.lead = None
+        self.report_id = None
         outer = vbox(self, (0, 16, 0, 0), 12)
         self.notice = Banner()
         outer.addWidget(self.notice)
+
+        # Campaign selector at top
+        camp_row = hbox(spacing=10)
+        camp_row.addWidget(label("Outreach Campaign:", "FieldLabel"))
+        self.campaign_picker = Segmented([
+            ("Campaign 1: SEO Report", "seo_audit"),
+            ("Campaign 2: Website Pitch (No Site)", "website_pitch"),
+            ("Campaign 3: Service Comparison Pitch", "service_pitch")
+        ])
+        self.campaign_picker.changed.connect(lambda _v: self.generate())
+        camp_row.addWidget(self.campaign_picker, 1)
+        outer.addLayout(camp_row)
+
         card = QFrame()
         card.setObjectName("Surface")
         cl = vbox(card, (20, 18, 20, 18), 12)
@@ -269,14 +284,26 @@ class ComposePanel(QWidget):
         self.subject.setPlaceholderText("Subject")
         self.subject.setMaxLength(200)
         cl.addWidget(_form_row("Subject", self.subject))
+        # Attachment and Spam deliverability info
+        extra_row = hbox(spacing=12)
+        self.attach_pdf_cb = QCheckBox("Attach Client SEO Audit PDF Report")
+        self.attach_pdf_cb.setChecked(True)
+        extra_row.addWidget(self.attach_pdf_cb)
+        extra_row.addStretch(1)
+        self.spam_badge = Badge("Deliverability: Checking…", C["success"], C["success_bg"])
+        extra_row.addWidget(self.spam_badge)
+        cl.addWidget(_form_row("Options", extra_row))
+
         self.body_edit = QPlainTextEdit()
         self.body_edit.setPlaceholderText("Generate the email from the lead's latest audit, then edit it.")
-        self.body_edit.setMinimumHeight(300)
+        self.body_edit.setMinimumHeight(280)
         cl.addWidget(_form_row("Message", self.body_edit, align_top=True), 1)
 
         actions = hbox(spacing=8)
-        actions.addWidget(label("Send it from your own mailbox, then record it.", "Meta"), 1)
-        self.generate_btn = BusyButton("Generate from audit", None, icon_name="zap")
+        self.send_direct_btn = BusyButton("Send email now (Gmail/SMTP)", "primary", icon_name="mail")
+        self.send_direct_btn.clicked.connect(self.send_direct)
+        actions.addWidget(self.send_direct_btn)
+        self.generate_btn = BusyButton("Generate email", None, icon_name="zap")
         self.generate_btn.clicked.connect(self.generate)
         actions.addWidget(self.generate_btn)
         self.copy_subject_btn = button("Copy subject", icon_name="copy")
@@ -285,10 +312,8 @@ class ComposePanel(QWidget):
         self.copy_body_btn = button("Copy message", icon_name="copy")
         self.copy_body_btn.clicked.connect(lambda: self._copy(self.body_edit.toPlainText(), "Message copied."))
         actions.addWidget(self.copy_body_btn)
-        self.mail_btn = button("Open in mail app", icon_name="external")
-        self.mail_btn.clicked.connect(self.open_mail_app)
-        actions.addWidget(self.mail_btn)
-        self.mark_btn = button("Mark outreached…", "primary", icon_name="check")
+        actions.addStretch(1)
+        self.mark_btn = button("Mark outreached…", "ghost", icon_name="check")
         self.mark_btn.clicked.connect(self.mark)
         actions.addWidget(self.mark_btn)
         cl.addLayout(actions)
@@ -328,13 +353,62 @@ class ComposePanel(QWidget):
     def _update_state(self):
         has_lead = self.lead is not None
         has_text = bool(self.body_edit.toPlainText().strip())
-        self.generate_btn.setEnabled(has_lead and bool(self.lead.get("last_audit_id")))
-        self.generate_btn.setToolTip("" if not has_lead or self.lead.get("last_audit_id")
-                                     else "Audit this lead first: the email is written from its findings.")
+        has_to = bool(self.to.text().strip())
+        self.generate_btn.setEnabled(has_lead)
+        self.send_direct_btn.setEnabled(has_lead and has_text and has_to)
         self.copy_subject_btn.setEnabled(bool(self.subject.text().strip()))
         self.copy_body_btn.setEnabled(has_text)
-        self.mail_btn.setEnabled(has_text)
         self.mark_btn.setEnabled(has_lead)
+        self._check_spam_deliverability()
+
+    def _check_spam_deliverability(self):
+        sub = self.subject.text().strip()
+        body = self.body_edit.toPlainText().strip()
+        if not body:
+            self.spam_badge.setText("Deliverability: Ready")
+            self.spam_badge.set_colors(C["text_2"], C["neutral_bg"])
+            return
+
+        from backend.mailer import analyze_spam_risk
+        res = analyze_spam_risk(sub, body)
+        sc = res.get("spam_score", 90)
+        grade = res.get("grade", "Inbox Ready")
+        if sc >= 80:
+            self.spam_badge.setText(f"Spam Score: {sc}/100 · {grade}")
+            self.spam_badge.set_colors(C["success"], C["success_bg"])
+        elif sc >= 65:
+            self.spam_badge.setText(f"Spam Score: {sc}/100 · {grade}")
+            self.spam_badge.set_colors(C["warning"], C["warning_bg"])
+        else:
+            self.spam_badge.setText(f"Spam Score: {sc}/100 · High Risk")
+            self.spam_badge.set_colors(C["danger"], C["danger_bg"])
+
+    def send_direct(self):
+        if not self.lead or not self.to.text().strip():
+            toast(self, "Enter a recipient email address.", "error")
+            return
+        to_email = self.to.text().strip()
+        sub = self.subject.text().strip()
+        body = self.body_edit.toPlainText().strip()
+        rep_id = self.report_id if (hasattr(self, "attach_pdf_cb") and self.attach_pdf_cb.isChecked()) else None
+
+        self.send_direct_btn.busy(True, "Sending…")
+        def on_done(res):
+            self.send_direct_btn.busy(False)
+            toast(self, res.get("message") or f"Email sent to {to_email} successfully!", "success")
+            self.status_label.setText(f"Outreached · Email · {to_email} · just now")
+
+        def on_fail(err):
+            self.send_direct_btn.busy(False)
+            show_error(self, err, "Email sending failed")
+
+        tasks.run(api.post, "/api/outreach/send-direct", {
+            "lead_id": self.lead["id"],
+            "to_email": to_email,
+            "subject": sub,
+            "body": body,
+            "report_id": rep_id
+        }, on_done=on_done, on_error=on_fail, owner=self)
 
     def generate(self):
         if not self.lead:
@@ -363,7 +437,9 @@ class ComposePanel(QWidget):
             else:
                 show_error(self, err, "Email not written")
 
-        tasks.run(api.post, "/api/outreach/generate", {"lead_id": self.lead["id"]}, on_done=done, on_error=fail, owner=self)
+        camp = self.campaign_picker.value() if hasattr(self, "campaign_picker") else "seo_audit"
+        tasks.run(api.post, "/api/outreach/generate", {"lead_id": self.lead["id"], "campaign": camp},
+                  on_done=done, on_error=fail, owner=self)
 
     def _copy(self, text, message):
         QGuiApplication.clipboard().setText(text)

@@ -116,11 +116,8 @@ class LeadFormDialog(Dialog):
             f.set_error("")
         self.clear_error()
         data = self.payload()
-        if not data["company"]:
-            self.fields["company"].set_error("Company is required.")
-        if not data["website"]:
-            self.fields["website"].set_error("Website is required.")
-        if not data["company"] or not data["website"]:
+        if not data["company"] and not data.get("phone"):
+            self.fields["company"].set_error("Enter a company name or phone number.")
             return
         self.primary.busy(True, "Saving…")
         if self.lead:
@@ -306,3 +303,88 @@ def set_archived(page, archived, on_done, leads=None, selection=None):
     tasks.run(api.post, "/api/leads/archive" if archived else "/api/leads/restore", payload, timeout=180,
               on_done=lambda r: (toast(page, f"{verb}d {r['updated']:,} lead(s).", "success"), on_done()),
               on_error=lambda e: show_error(page, e), owner=page)
+
+
+
+CALL_STATUSES = [
+    ("Not Called Yet", "not_called"),
+    ("No Answer / Voicemail", "no_answer"),
+    ("Call Back Later", "callback"),
+    ("Website Pitched", "pitched"),
+    ("Interested / Meeting Scheduled", "interested"),
+    ("Deal Won (Website Closed)", "won"),
+    ("Not Interested", "not_interested"),
+]
+
+
+class CallLogDialog(Dialog):
+    """Log phone outreach and website pitches for leads (especially leads without a website)."""
+
+    def __init__(self, parent, lead):
+        self.lead = lead
+        company = lead.get("company") or "Business"
+        phone = lead.get("phone") or "No phone number"
+        super().__init__(parent, f"Call & Pitch: {company}", f"Phone: {phone}", 560)
+
+        fl = vbox(spacing=12)
+
+        # Phone copy / quick dial
+        ph_row = hbox(spacing=8)
+        ph_row.addWidget(label(f"Phone: <b>{phone}</b>", selectable=True), 1)
+        cp_btn = button("Copy phone", "ghost", icon_name="copy", size="sm")
+        cp_btn.clicked.connect(lambda: self._copy(phone))
+        ph_row.addWidget(cp_btn)
+        fl.addLayout(ph_row)
+
+        # Call Status
+        fl.addWidget(label("Call Outcome / Status", "FieldLabel"))
+        self.status_combo = combo(CALL_STATUSES, lead.get("call_status") or "pitched")
+        fl.addWidget(self.status_combo)
+
+        # Notes
+        fl.addWidget(label("Call Notes & Pitch Details", "FieldLabel"))
+        self.notes_edit = text_area("e.g. Spoke with owner Bob, interested in a 5-page mobile website with booking form. Following up Tuesday.")
+        self.notes_edit.setPlainText(lead.get("call_notes") or "")
+        self.notes_edit.setMinimumHeight(100)
+        fl.addWidget(self.notes_edit)
+
+        # Built-in Pitch Script
+        fl.addWidget(label("Website Pitch Phone Script", "FieldLabel"))
+        niche = lead.get("niche") or "service"
+        area = lead.get("area") or "your area"
+        script_text = (
+            f"\"Hi, I was researching top {niche.lower()} businesses in {area} and found {company}. "
+            f"You have great reviews on Google Maps, but I noticed you don't have an official website yet for local clients.\n\n"
+            f"Over 75% of local clients look for a website before booking. We build fast, mobile-friendly websites that turn searches into booked jobs.\n\n"
+            f"Would you be open to a 5-minute call this Thursday to see a sample concept we put together for {company}?\""
+        )
+        script_box = label(script_text, "Meta", wrap=True, selectable=True)
+        script_box.setStyleSheet("background: #F3F3F3; padding: 10px; border-radius: 8px; border: 1px solid #E4E4E4;")
+        fl.addWidget(script_box)
+
+        self.body.addLayout(fl)
+        self.add_buttons("Save call log")
+        self.primary.clicked.connect(self._save)
+
+    def _copy(self, val):
+        from PySide6.QtGui import QGuiApplication
+        from seo_audit_pro.widgets.feedback import toast
+        QGuiApplication.clipboard().setText(val)
+        toast(self, "Phone copied to clipboard.", "success")
+
+    def _save(self):
+        st = self.status_combo.currentData()
+        notes = self.notes_edit.toPlainText().strip()
+        self.primary.busy(True, "Saving…")
+
+        def done(res):
+            self.primary.busy(False)
+            self.result_lead = res.get("lead") or self.lead
+            self.accept()
+
+        def fail(err):
+            self.primary.busy(False)
+            self.show_error(err)
+
+        tasks.run(api.post, f"/api/leads/{self.lead['id']}/call", {"status": st, "notes": notes},
+                  on_done=done, on_error=fail, owner=self)

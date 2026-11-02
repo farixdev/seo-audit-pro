@@ -126,10 +126,12 @@ class AddToLeadBankDialog(Dialog):
             mapping = preview.get("mapping") or {}
 
             # 2. Start batch with mapping and assignment
+            map_copy = dict(mapping or {})
+            map_copy["__allow_no_website__"] = True
             api.post(f"/api/lead-batches/{batch_id}/start", {
                 "niche": niche,
                 "area": area,
-                "mapping": mapping,
+                "mapping": map_copy,
                 "team_id": team_id,
                 "agent_id": agent_id,
             }, idempotency_key=api.new_idempotency_key())

@@ -22,15 +22,8 @@ def _store():
 
 
 def mode():
-    """"local" (this computer runs the server), "remote" (a team server), or
-    None before the first-run choice. The person's choice is remembered and
-    always respected (it is only changed when they pick another one)."""
-    value = _store().value("mode")
-    if value in (LOCAL, REMOTE):
-        return value
-    if TEAM_SERVER_URL:  # this build connects to the team server
-        return REMOTE
-    return None  # first run on this computer: show the choice
+    """Runs solely on this computer (offline local mode)."""
+    return LOCAL
 
 
 def start_in():

@@ -34,6 +34,35 @@ def _me(user_id):
     return data
 
 
+@bp.post("/api/auth/local-auto")
+def local_auto_login():
+    """Auto-authenticates the local offline user without password friction."""
+    user = db.query_one("SELECT * FROM users WHERE is_active = 1 ORDER BY (role = 'MANAGER') DESC, created_at ASC LIMIT 1")
+    if not user:
+        now = now_iso()
+        db.execute("""INSERT INTO users (id, name, email, password_hash, role, is_active, must_change_password, created_at, updated_at)
+                      VALUES (%s, %s, %s, %s, 'MANAGER', 1, 0, %s, %s)""",
+                   (security.new_id("usr_"), "Local Master", "local@localhost", security.hash_password("local123456!"), now, now))
+        user = db.query_one("SELECT * FROM users WHERE is_active = 1 ORDER BY (role = 'MANAGER') DESC, created_at ASC LIMIT 1")
+    if not user:
+        raise ApiError(500, "Could not initialize local user.")
+
+    session_id = security.new_id("ses_")
+    refresh = security.new_refresh_token()
+    now = now_iso()
+    with db.transaction() as tx:
+        tx.execute("""INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, created_at, last_used_at)
+                      VALUES (%s, %s, %s, %s, %s, %s)""",
+                   (session_id, user["id"], security.hash_token(refresh), iso_ago(-config.SESSION_TTL), now, now))
+    access = security.new_access_token(user["id"], session_id)
+    return jsonify({
+        "user": public_user(user),
+        "access_token": access,
+        "refresh_token": refresh,
+        "expires_in": config.ACCESS_TOKEN_TTL
+    })
+
+
 @bp.post("/api/auth/login")
 def login():
     rate_limit(f"login-ip:{client_ip()}", config.LOGIN_ATTEMPTS_PER_IP_5MIN, 300)

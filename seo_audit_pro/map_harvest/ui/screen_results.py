@@ -662,10 +662,9 @@ class ResultsScreen(QWidget):
     def _on_leads_imported(self, batch):
         imported = batch.get("imported", 0)
         duplicates = batch.get("duplicates", 0)
-        no_site = batch.get("no_website", 0)
         msg = f"Successfully added {imported:,} lead{'s' if imported != 1 else ''} to the Lead Bank!"
-        if duplicates or no_site:
-            msg += f" ({duplicates:,} duplicates, {no_site:,} without website skipped)"
+        if duplicates:
+            msg += f" ({duplicates:,} duplicates skipped)"
         self._show_toast(msg)
 
     def _on_action_clicked(self):

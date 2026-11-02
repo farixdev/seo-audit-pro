@@ -112,6 +112,108 @@ def test_smtp():
     return jsonify(payload), (200 if ok else 422)
 
 
+@bp.post("/api/outreach/smtp/send-test")
+@require()
+def send_test_email_route():
+    data = body()
+    to_email = email_value(data, "to_email", required=True, label="Test Recipient Email")
+    include_attachment = bool(data.get("include_attachment"))
+
+    if data.get("host") or data.get("provider") == "brevo":
+        try:
+            stored = mailer.smtp_config() if not data.get("password") else None
+        except mailer.MailError:
+            stored = None
+        cfg = _smtp_from_body(data, require_password=stored is None)
+        if not cfg["password"] and stored:
+            cfg["password"] = stored["password"]
+    else:
+        try:
+            cfg = mailer.smtp_config()
+        except mailer.MailError as e:
+            raise ApiError(422, str(e))
+        if not cfg:
+            raise ApiError(422, "SMTP is not configured yet. Fill in email settings first.")
+
+    try:
+        ok, msg = mailer.send_test_email(cfg, to_email, include_attachment=include_attachment)
+        events.audit(g.user, "SMTP_TEST_SENT", "settings", "smtp", {"to": to_email, "ok": ok})
+        return jsonify({"ok": True, "message": msg})
+    except mailer.MailError as e:
+        raise ApiError(422, str(e), code="smtp_send_failed")
+
+
+@bp.post("/api/outreach/analyze-spam")
+@require()
+def analyze_spam_route():
+    data = body()
+    sub = data.get("subject") or ""
+    bdy = data.get("body") or ""
+    result = mailer.analyze_spam_risk(sub, bdy)
+    return jsonify(result)
+
+
+@bp.get("/api/outreach/agency-settings")
+@require()
+def get_agency_settings_route():
+    from backend.service_audit import get_agency_settings
+    return jsonify(get_agency_settings())
+
+
+@bp.put("/api/outreach/agency-settings")
+@require()
+def save_agency_settings_route():
+    data = body()
+    from backend.service_audit import save_agency_settings
+    res = save_agency_settings(
+        services=data.get("services"),
+        pitch_prompt=data.get("pitch_prompt"),
+        custom_instructions=data.get("custom_instructions"),
+        llm_provider=data.get("llm_provider"),
+        llm_model=data.get("llm_model"),
+    )
+    return jsonify(res)
+
+
+@bp.post("/api/outreach/send-direct")
+@require()
+def send_direct_route():
+    me = g.user
+    data = body()
+    lead_id = text(data, "lead_id", required=True, max_len=64, label="Lead ID")
+    lead = load_lead(me, lead_id)
+    to_email, subject, body_text = _email_fields(data)
+    _require_smtp()
+
+    # Optional report attachment
+    attachments = []
+    report_id = data.get("report_id")
+    if report_id:
+        rep = reports.ensure_file(db.query_one("SELECT * FROM reports WHERE id = %s", (report_id,)))
+        if rep:
+            mime = "application/pdf" if rep["format"] == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            label = "SEO-Audit-Report" if rep["kind"] == "client" else "SEO-Technical-Audit"
+            attachments.append((f"{label}.{rep['format']}", mime, reports.report_path(rep)))
+
+    try:
+        mailer.send_now(to_email, subject, body_text, attachments=attachments, reply_to=me.get("email"))
+    except mailer.MailError as e:
+        raise ApiError(422, str(e), code="email_send_failed")
+
+    now = now_iso()
+    eid = security.new_id("eml_")
+    with db.transaction() as tx:
+        tx.execute("""INSERT INTO emails (id, lead_id, sender_id, team_id, to_email, subject, body,
+                      status, sent_at, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, 'sent', %s, %s, %s)""",
+                   (eid, lead["id"], me["id"], lead.get("assigned_team_id"), to_email, subject, body_text, now, now, now))
+        tx.execute("UPDATE leads SET last_contact_at = %s, outreach_method = 'email', outreach_contact = %s, updated_at = %s WHERE id = %s",
+                   (now, to_email, now, lead["id"]))
+        events.audit(me, "EMAIL_SENT_DIRECT", "email", eid, {"lead_id": lead["id"], "to": to_email}, tx=tx)
+
+    return jsonify({"ok": True, "message": f"Email delivered to {to_email} successfully!", "email_id": eid})
+
+
+
 @bp.get("/api/outreach/status")
 @require()
 def outreach_status():
@@ -171,8 +273,87 @@ def build_draft(lead, audit_row, sender):
 def generate():
     data = body()
     lead = load_lead(g.user, text(data, "lead_id", required=True, max_len=64, label="Lead"))
+    campaign = data.get("campaign") or "seo_audit"
+
+    # Campaign 2: Leads with No Website (pitching a new website)
+    if campaign == "website_pitch" or not lead.get("website") or (lead.get("normalized_domain") or "").startswith("no_site_"):
+        contact = lead.get("contact_name") or ""
+        greeting = f"Hi {contact.split()[0]}," if contact else "Hello,"
+        company = lead.get("company") or "your business"
+        area = lead.get("area") or "your area"
+        niche = lead.get("niche") or "services"
+        sub = f"Quick question regarding {company}'s website"
+        lines = [
+            greeting,
+            "",
+            f"I was recently researching {niche.lower() if niche else 'businesses'} in {area} and came across {company}. "
+            f"You have great local feedback and presence, but I noticed you don't currently have an active, modern website for customers to view your services and book directly.",
+            "",
+            f"In {area}, over 75% of high-intent customers check a business's website before calling or requesting a quote.",
+            "",
+            f"We specialize in building fast, mobile-friendly websites that turn local searches into paying customers. "
+            f"I put together a quick preliminary concept for what a dedicated site for {company} could look like.",
+            "",
+            f"Would you be open to a 5-minute call this week so I can share the preview with you?",
+            "",
+            "Best regards,",
+            g.user["name"],
+            "",
+            "PS: If you prefer not to hear from me, simply reply 'no' and I will not contact you again."
+        ]
+        return jsonify({
+            "subject": sub,
+            "body": "\n".join(lines),
+            "to_email": lead.get("email") or "",
+            "campaign": "website_pitch",
+            "report_id": None
+        })
+
+    # Campaign 3: Service Audit & LLM Pitch
+    if campaign == "service_pitch":
+        from backend import service_audit
+        s_data = None
+        if lead.get("services_extracted"):
+            try:
+                s_data = json.loads(lead["services_extracted"])
+            except Exception:
+                pass
+        if not s_data:
+            s_data = service_audit.extract_website_services(lead.get("website"))
+            now = now_iso()
+            db.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s WHERE id = %s",
+                       (json.dumps(s_data, ensure_ascii=False), now, lead["id"]))
+
+        pitch = service_audit.compare_and_generate_pitch(lead, s_data, sender_name=g.user["name"])
+        db.execute("UPDATE leads SET service_match_score = %s, service_pitch_notes = %s WHERE id = %s",
+                   (pitch["score"], pitch["pitch_notes"], lead["id"]))
+        return jsonify({
+            "subject": pitch["subject"],
+            "body": pitch["body"],
+            "to_email": lead.get("email") or "",
+            "campaign": "service_pitch",
+            "score": pitch["score"],
+            "grade": pitch["grade"],
+            "services_found": pitch["services_extracted"],
+            "digital_gaps": pitch["digital_gaps"],
+            "report_id": None
+        })
+
+    # Campaign 1: SEO Audit Report Email
     audit_row = _latest_completed_audit(lead["id"], data.get("audit_id") or None)
-    return jsonify(build_draft(lead, audit_row, g.user))
+    draft = build_draft(lead, audit_row, g.user)
+
+    # Check if a client PDF report exists to attach
+    client_rep = None
+    if audit_row:
+        client_rep = db.query_one(
+            "SELECT id, kind, format FROM reports WHERE audit_id = %s AND kind = 'client' AND format = 'pdf'",
+            (audit_row["id"],)
+        )
+    draft["report_id"] = client_rep["id"] if client_rep else None
+    draft["has_pdf_attachment"] = bool(client_rep)
+    draft["campaign"] = "seo_audit"
+    return jsonify(draft)
 
 
 # ---------------------------------------------------------------------------

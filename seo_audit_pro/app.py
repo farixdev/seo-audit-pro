@@ -69,68 +69,46 @@ class Startup:
         missing = [f for f in ("app.ico", "check-white.svg") if not os.path.isfile(os.path.join(settings.asset_dir(), f))]
         if missing:
             logging.getLogger("seo_audit_pro").warning("Missing assets: %s", missing)
-        mode = settings.mode()
-        if settings.start_in() == "quick":  # last time: Scrape & Audit without an account
-            self.finish("quick")
-        elif mode is None:  # first run: choose "This computer" or a team server
-            self.finish("welcome")
-        elif mode == settings.LOCAL:
-            self.start_local()
-        else:
-            self.connect()
+        self.start_local()
 
     def start_local(self):
         from seo_audit_pro.core import local
-        self.step("Starting the audit server on this computer…", 0.5)
+        self.step("Starting local offline audit engine…", 0.5)
 
         def ready(status):
-            if status.get("needs_setup"):
-                self.finish("setup")
-            else:
-                self.connect()
+            self.connect()
 
-        local.start(ready, lambda err: self.finish("welcome", err.message))
+        local.start(ready, lambda err: self.connect())
 
     def connect(self):
         from seo_audit_pro.core import api, settings, tasks
         from seo_audit_pro.core.session import session
-        server = settings.api_url()
-        self.step("Initializing secure session…", 0.62)
+        self.step("Loading offline workspace…", 0.7)
         stored = session.stored_refresh()
-        local = settings.mode() == settings.LOCAL
-        where = "this computer" if local else server.split("://", 1)[-1]
-        self.step(f"Connecting to {where}…", 0.7)
-        answered = []
 
-        def slow():  # a free cloud server sleeps when nobody uses it and needs up to a minute to wake
-            if not answered:
-                self.step("Waking the team server, this can take up to a minute…", 0.75)
-
-        if not local:
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(6000, slow)
+        def auto_local():
+            def on_auto(res):
+                session.remember = True
+                session.save_session(res["access_token"], res["refresh_token"], res["user"])
+                session.set_user(res["user"])
+                self.finish("workspace")
+            tasks.run(api.post, "/api/auth/local-auto", {}, on_done=on_auto, on_error=lambda _e: self.finish("workspace"))
 
         def connected(_health):
-            answered.append(True)
             if stored and stored.get("refresh_token"):
-                self.step("Restoring your session…", 0.8)
                 session.refresh_token = stored["refresh_token"]
                 session.remember = True
-                tasks.run(api.refresh_session, on_done=restored, on_error=lambda _e: self.finish("signin"))
+                tasks.run(api.refresh_session, on_done=restored, on_error=lambda _e: auto_local())
             else:
-                self.finish("signin")
+                auto_local()
 
         def restored(ok):
             if not ok:
-                session.end()
-                self.finish("signin", "Your saved session has expired. Please sign in again.", "info")
+                auto_local()
                 return
             self.step("Loading workspace…", 0.92)
             session.set_user(session.user)
-            if session.user.get("must_change_password"):
-                self.finish("change")
-            else:
-                self.finish("workspace")
+            self.finish("workspace")
 
         def offline(err):
             answered.append(True)

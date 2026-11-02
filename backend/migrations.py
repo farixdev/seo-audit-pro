@@ -524,6 +524,38 @@ def _m009_manual_outreach():
     ]
 
 
+def _m010_campaigns_and_calls():
+    return [
+        "ALTER TABLE leads ADD COLUMN call_status TEXT DEFAULT 'not_called'",
+        "ALTER TABLE leads ADD COLUMN call_notes TEXT DEFAULT ''",
+        "ALTER TABLE leads ADD COLUMN call_count INTEGER DEFAULT 0",
+        "ALTER TABLE leads ADD COLUMN last_called_at TEXT",
+        "ALTER TABLE leads ADD COLUMN services_extracted TEXT DEFAULT ''",
+        "ALTER TABLE leads ADD COLUMN services_audit_date TEXT DEFAULT ''",
+        "ALTER TABLE leads ADD COLUMN service_pitch_notes TEXT DEFAULT ''",
+        "ALTER TABLE leads ADD COLUMN service_match_score INTEGER",
+        """CREATE TABLE IF NOT EXISTS agency_settings (
+            id TEXT PRIMARY KEY,
+            services TEXT NOT NULL DEFAULT '',
+            pitch_prompt TEXT NOT NULL DEFAULT '',
+            custom_instructions TEXT NOT NULL DEFAULT '',
+            llm_provider TEXT NOT NULL DEFAULT '',
+            llm_model TEXT NOT NULL DEFAULT '',
+            llm_api_key_enc TEXT,
+            updated_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS call_logs (
+            id TEXT PRIMARY KEY,
+            lead_id TEXT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+            user_id TEXT REFERENCES users(id),
+            status TEXT NOT NULL,
+            notes TEXT,
+            created_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_call_logs_lead ON call_logs(lead_id, created_at)",
+    ]
+
+
 MIGRATIONS = [
     (1, "initial schema", _m001_initial),
     (2, "lead bank", _m002_lead_bank),
@@ -534,6 +566,7 @@ MIGRATIONS = [
     (7, "audit log tail", _m007_audit_log_tail),
     (8, "email provider", _m008_email_provider),
     (9, "manual outreach", _m009_manual_outreach),
+    (10, "campaigns and calls", _m010_campaigns_and_calls),
 ]
 
 # Best-effort performance objects (run outside migrations; failures are logged,

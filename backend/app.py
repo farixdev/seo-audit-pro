@@ -39,7 +39,7 @@ def bootstrap_manager():
         return
     now = now_iso()
     db.execute("""INSERT INTO users (id, name, email, password_hash, role, is_active, must_change_password, created_at, updated_at)
-                  VALUES (%s, %s, %s, %s, 'MANAGER', 1, 1, %s, %s)""",
+                  VALUES (%s, %s, %s, %s, 'MANAGER', 1, 0, %s, %s)""",
                (security.new_id("usr_"), config.BOOTSTRAP_MANAGER_NAME, email, security.hash_password(password), now, now))
 
 

@@ -36,7 +36,7 @@ _FROM = """FROM leads l LEFT JOIN teams t ON t.id = l.assigned_team_id
            LEFT JOIN users u ON u.id = l.assigned_agent_id"""
 BULK_LIMIT = 200_000
 FILTER_KEYS = ("search", "status", "team_id", "agent_id", "assigned", "audited", "outreach", "niche", "area",
-               "batch_id", "has_email")
+               "batch_id", "has_email", "has_website", "call_status")
 
 
 def lead_out(row):
@@ -44,8 +44,19 @@ def lead_out(row):
             "country", "address", "category", "rating", "review_count", "maps_url", "source", "notes", "status",
             "assigned_team_id", "assigned_agent_id", "team_name", "agent_name", "batch_id", "batch_name",
             "last_audit_id", "last_audit_score", "last_audit_at", "last_contact_at", "outreach_method",
-            "outreach_contact", "version", "created_at", "updated_at")
+            "outreach_contact", "version", "created_at", "updated_at",
+            "call_status", "call_notes", "call_count", "last_called_at",
+            "services_extracted", "services_audit_date", "service_pitch_notes", "service_match_score")
     out = {k: row.get(k) for k in keys}
+    dom = row.get("normalized_domain") or ""
+    if dom.startswith("no_site_"):
+        out["normalized_domain"] = ""
+        out["has_website"] = False
+    else:
+        out["has_website"] = bool(row.get("website"))
+    out["call_status"] = row.get("call_status") or "not_called"
+    out["call_count"] = int(row.get("call_count") or 0)
+    out["call_notes"] = row.get("call_notes") or ""
     try:
         out["extra"] = json.loads(row["extra"]) if row.get("extra") else {}
     except (TypeError, ValueError):
@@ -107,6 +118,13 @@ def lead_filter(me, args):
         params.append(arg("batch_id"))
     if arg("has_email") in ("1", "true", "True"):
         where.append("l.email IS NOT NULL AND l.email <> ''")
+    if arg("has_website") == "no":
+        where.append("(l.website IS NULL OR l.website = '' OR l.normalized_domain LIKE 'no_site_%')")
+    elif arg("has_website") == "yes":
+        where.append("(l.website IS NOT NULL AND l.website <> '' AND l.normalized_domain NOT LIKE 'no_site_%')")
+    if arg("call_status"):
+        where.append("l.call_status = %s")
+        params.append(arg("call_status"))
     q = arg("search").lower()
     if q:
         term = f"%{db.like_escape(q)}%"
@@ -139,12 +157,17 @@ def _lead_fields(data, partial=False):
     if not partial or "company" in data:
         out["company"] = text(data, "company", required=True, max_len=200, label="Company")
     if not partial or "website" in data:
-        website = text(data, "website", required=True, max_len=500, label="Website")
-        domain = normalize_domain(website)
-        if not domain:
-            raise ApiError(422, "Enter a valid website address, for example example.com.", field="website")
-        out["website"] = website if website.lower().startswith(("http://", "https://")) else f"https://{domain}"
-        out["normalized_domain"] = domain
+        raw_web = (data.get("website") or "").strip()
+        if raw_web:
+            website = text(data, "website", required=False, max_len=500, label="Website")
+            domain = normalize_domain(website)
+            if not domain:
+                raise ApiError(422, "Enter a valid website address, for example example.com.", field="website")
+            out["website"] = website if website.lower().startswith(("http://", "https://")) else f"https://{domain}"
+            out["normalized_domain"] = domain
+        else:
+            out["website"] = ""
+            out["normalized_domain"] = ""
     for key, max_len in (("contact_name", 120), ("phone", 40), ("niche", 80), ("country", 80), ("area", 120),
                          ("address", 300), ("source", 80), ("notes", 4000)):
         if not partial or key in data:
@@ -313,6 +336,8 @@ def create_lead():
     fields = _lead_fields(data)
     fields.update(_derived(fields))
     lid = security.new_id("lead_")
+    if not fields.get("normalized_domain"):
+        fields["normalized_domain"] = f"no_site_{lid}"
     now = now_iso()
     with db.transaction() as tx:
         dup = _dup_domain_error(tx, fields["normalized_domain"])
@@ -769,8 +794,12 @@ def start_import(batch_id):
     data = body()
     headers = json.loads(batch["headers"] or "[]")
     mapping = data.get("mapping") if isinstance(data.get("mapping"), dict) else json.loads(batch["mapping"] or "{}")
+    allow_no_site = bool(data.get("mapping", {}).get("__allow_no_website__") or data.get("allow_no_website"))
+    raw_m = data.get("mapping") or {}
     mapping = {f: (mapping.get(f) if mapping.get(f) in headers else None) for f in lead_import.FIELDS}
-    if not mapping["website"]:
+    if allow_no_site:
+        mapping["__allow_no_website__"] = True
+    if not mapping["website"] and not allow_no_site:
         raise ApiError(422, f"{batch['file_name']}: choose the column that contains the website.", field="mapping")
     niche = text(data, "niche", required=True, max_len=80, label="Niche")
     area = text(data, "area", required=True, max_len=120, label="Area")
@@ -880,3 +909,115 @@ def batch_rejects_csv(batch_id):
     name = batch["file_name"].rsplit(".", 1)[0][:80]
     return Response("﻿" + lead_import.rejects_csv(batch_id), mimetype="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="{name} - rejected rows.csv"'})
+
+
+# ---------------------------------------------------------------------------
+# Campaign 2: Call Management & Website Pitch Tracking (No-Website Leads)
+# ---------------------------------------------------------------------------
+@bp.post("/api/leads/<lead_id>/call")
+@require()
+def log_lead_call(lead_id):
+    lead = load_lead(g.user, lead_id)
+    data = body()
+    status = text(data, "status", required=True, max_len=40, label="Call Status")
+    notes = text(data, "notes", max_len=2000, label="Call Notes") or ""
+    now = now_iso()
+    cid = security.new_id("call_")
+
+    with db.transaction() as tx:
+        tx.execute("""INSERT INTO call_logs (id, lead_id, user_id, status, notes, created_at)
+                      VALUES (%s, %s, %s, %s, %s, %s)""",
+                   (cid, lead["id"], g.user["id"], status, notes, now))
+        tx.execute("""UPDATE leads SET call_status = %s,
+                                      call_notes = %s,
+                                      call_count = COALESCE(call_count, 0) + 1,
+                                      last_called_at = %s,
+                                      last_contact_at = %s,
+                                      outreach_method = 'call',
+                                      updated_at = %s
+                      WHERE id = %s""",
+                   (status, notes, now, now, now, lead["id"]))
+        events.audit(g.user, "LEAD_CALLED", "lead", lead["id"], {"status": status, "notes": notes}, tx=tx)
+
+    updated = db.query_one(_LEAD_SELECT + " WHERE l.id = %s", (lead["id"],))
+    return jsonify({"lead": lead_out(updated), "ok": True})
+
+
+@bp.get("/api/leads/<lead_id>/call-logs")
+@require()
+def get_lead_call_logs(lead_id):
+    lead = load_lead(g.user, lead_id)
+    rows = db.query("""SELECT c.*, u.name as user_name
+                       FROM call_logs c LEFT JOIN users u ON u.id = c.user_id
+                       WHERE c.lead_id = %s ORDER BY c.created_at DESC""", (lead["id"],))
+    return jsonify({"call_logs": [dict(r) for r in rows]})
+
+
+# ---------------------------------------------------------------------------
+# Campaign 3: Service Auditing & LLM Pitch Generation
+# ---------------------------------------------------------------------------
+@bp.post("/api/leads/<lead_id>/service-audit")
+@require()
+def audit_lead_services(lead_id):
+    lead = load_lead(g.user, lead_id)
+    web = lead.get("website")
+    if not web or (lead.get("normalized_domain") or "").startswith("no_site_"):
+        raise ApiError(422, "This lead does not have a website to audit.")
+    from backend import service_audit
+    s_data = service_audit.extract_website_services(web)
+    now = now_iso()
+    with db.transaction() as tx:
+        tx.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s, updated_at = %s WHERE id = %s",
+                   (json.dumps(s_data, ensure_ascii=False), now, now, lead["id"]))
+    updated = db.query_one(_LEAD_SELECT + " WHERE l.id = %s", (lead["id"],))
+    return jsonify({"lead": lead_out(updated), "service_audit": s_data})
+
+
+@bp.post("/api/leads/mass-service-audit")
+@require()
+def mass_service_audit():
+    data = body()
+    lead_ids = data.get("lead_ids") or []
+    if not lead_ids or not isinstance(lead_ids, list):
+        raise ApiError(422, "Provide an array of lead_ids to audit.")
+    from backend import service_audit
+    results_list = []
+    now = now_iso()
+    for lid in lead_ids[:50]:
+        row = db.query_one("SELECT * FROM leads WHERE id = %s", (lid,))
+        if row and row.get("website") and not (row.get("normalized_domain") or "").startswith("no_site_"):
+            try:
+                s_data = service_audit.extract_website_services(row["website"])
+                db.execute("UPDATE leads SET services_extracted = %s, services_audit_date = %s, updated_at = %s WHERE id = %s",
+                           (json.dumps(s_data, ensure_ascii=False), now, now, lid))
+                results_list.append({"id": lid, "ok": True, "services_count": len(s_data.get("services", []))})
+            except Exception as e:
+                results_list.append({"id": lid, "ok": False, "error": str(e)})
+    return jsonify({"results": results_list, "total": len(results_list)})
+
+
+@bp.post("/api/leads/mass-service-pitch")
+@require()
+def mass_service_pitch():
+    data = body()
+    lead_ids = data.get("lead_ids") or []
+    if not lead_ids or not isinstance(lead_ids, list):
+        raise ApiError(422, "Provide an array of lead_ids.")
+    from backend import service_audit
+    results_list = []
+    for lid in lead_ids[:50]:
+        row = db.query_one("SELECT * FROM leads WHERE id = %s", (lid,))
+        if not row:
+            continue
+        try:
+            s_data = json.loads(row["services_extracted"]) if row.get("services_extracted") else None
+            if not s_data and row.get("website") and not (row.get("normalized_domain") or "").startswith("no_site_"):
+                s_data = service_audit.extract_website_services(row["website"])
+            if s_data:
+                pitch = service_audit.compare_and_generate_pitch(row, s_data, sender_name=g.user["name"])
+                db.execute("UPDATE leads SET service_match_score = %s, service_pitch_notes = %s WHERE id = %s",
+                           (pitch["score"], pitch["pitch_notes"], lid))
+                results_list.append({"id": lid, "ok": True, "score": pitch["score"], "grade": pitch["grade"]})
+        except Exception as e:
+            results_list.append({"id": lid, "ok": False, "error": str(e)})
+    return jsonify({"results": results_list, "total": len(results_list)})

@@ -38,7 +38,8 @@ STATUS_FILTER = [("Any status", ""), ("New", "new"), ("Assigned", "assigned"), (
                  ("Contacted", "contacted"), ("Qualified", "qualified"), ("Won", "won"), ("Lost", "lost"),
                  ("Archived", "archived")]
 QUICK_VIEWS = {"": {}, "everyone": {}, "unassigned": {"assigned": "unassigned"}, "not_audited": {"audited": "no"},
-               "audited": {"audited": "yes"}, "contacted": {"outreach": "yes"}, "not_contacted": {"outreach": "no"}}
+               "audited": {"audited": "yes"}, "no_website": {"has_website": "no"}, "services_audited": {"has_website": "yes"},
+               "contacted": {"outreach": "yes"}, "not_contacted": {"outreach": "no"}}
 REASONS = {"no_website": "No website", "invalid_website": "Website not usable",
            "duplicate_in_file": "Duplicate within file", "duplicate_existing": "Already in lead bank"}
 FILTER_KEYS = ("search", "status", "team_id", "agent_id", "assigned", "audited", "outreach", "niche", "area", "batch_id")
@@ -419,8 +420,8 @@ class LeadsPage(Page):
             self.agent.currentIndexChanged.connect(lambda _i: self._set(agent_id=self.agent.currentData()))
             bar.addWidget(self.agent)
         ml.addLayout(bar)
-        views = [("All", ""), ("Unassigned", "unassigned"), ("Not audited", "not_audited"), ("Audited", "audited"),
-                 ("Contacted", "contacted"), ("Not contacted", "not_contacted")]
+        views = [("All Leads", ""), ("SEO Audited (C1)", "audited"), ("No Website / Calls (C2)", "no_website"),
+                 ("Services (C3)", "services_audited"), ("Contacted", "contacted"), ("Not audited", "not_audited")]
         if not self.manage:
             # "Mine" is the agent's own leads; "All visible" adds the leads a Manager shared with everyone.
             views = [("Mine", ""), ("All visible", "everyone")] + [v for v in views[2:]]
@@ -464,7 +465,8 @@ class LeadsPage(Page):
         bl.addWidget(self.select_all_btn)
         bl.addStretch(1)
         self.bulk_buttons = {}
-        for key, text in (("audit", "Audit"), ("assign", "Assign"), ("archive", "Archive"), ("restore", "Restore")):
+        for key, text in (("audit", "Audit SEO (C1)"), ("service_audit", "Audit Services (C3)"),
+                          ("pitch", "Generate Pitches"), ("archive", "Archive"), ("restore", "Restore")):
             b = button(text, "ghost", size="sm")
             b.setStyleSheet("QPushButton { color: #FFFFFF; } QPushButton:hover { background: #3F3F46; color: #FFFFFF; }"
                             "QPushButton:disabled { color: #71717A; }")
@@ -487,14 +489,13 @@ class LeadsPage(Page):
             Column("rating", "Google", "text", 110, sort="rating", optional=True,
                    render=lambda r: f"{r['rating']:.1f} rating" if r.get("rating") is not None else "—",
                    secondary=lambda r: f"{r['review_count']:,} reviews" if r.get("review_count") is not None else ""),
-            Column("status", "Status", "status", 110, sort="status"),
-        ]
-        if self.manage:
-            cols.append(Column("agent_name", "Assigned to", "text", 160, sort="agent",
-                               render=lambda r: r.get("agent_name") or "Unassigned",
-                               secondary=lambda r: r.get("team_name") or "No team"))
-        cols += [
-            Column("last_audit_score", "SEO score", "score", 110, sort="score"),
+            Column("status", "Status", "status", 100, sort="status"),
+            Column("call_status", "Call Status (C2)", "text", 130, optional=True,
+                   render=lambda r: (r.get("call_status") or "not_called").replace("_", " ").title(),
+                   secondary=lambda r: r.get("phone") or "No phone"),
+            Column("last_audit_score", "SEO score (C1)", "score", 110, sort="score"),
+            Column("service_match_score", "C3 Pitch", "text", 100, optional=True,
+                   render=lambda r: f"{r['service_match_score']}/100" if r.get("service_match_score") is not None else "—"),
             Column("last_contact_at", "Outreach", "text", 120, sort="last_contact", optional=True,
                    render=lambda r: "Contacted" if r.get("last_contact_at") else "Not contacted",
                    secondary=lambda r: fmt.relative(r["last_contact_at"]) if r.get("last_contact_at") else ""),
@@ -824,6 +825,11 @@ class LeadsPage(Page):
                         lambda: start_audit(self, row, lambda _a: self.load()))
             m.addAction(icons.icon("mail", C["text_2"]), "Write email",
                         lambda: self.ws.navigate("outreach", lead_id=row["id"]))
+            m.addAction(icons.icon("check", C["text_2"]), "Log Call & Pitch (C2)",
+                        lambda: self._log_call(row))
+            if row.get("website"):
+                m.addAction(icons.icon("zap", C["text_2"]), "Audit Services & Pitch (C3)",
+                            lambda: self._audit_services(row))
             m.addAction(icons.icon("check", C["text_2"]),
                         "Update outreach…" if row.get("last_contact_at") else "Mark outreached…",
                         lambda: self._mark_outreach(row))
@@ -846,3 +852,46 @@ class LeadsPage(Page):
                 self.load()
         elif kind == "audit_progress" and ev.get("status") == "completed" and self.isVisible():
             self.load()
+
+
+    def _log_call(self, row):
+        from seo_audit_pro.ui.pages.lead_dialogs import CallLogDialog
+        dlg = CallLogDialog(self, row)
+        if dlg.exec():
+            self.load()
+            toast(self, "Call log and pitch saved.", "success")
+
+    def _audit_services(self, row):
+        if not row.get("website"):
+            toast(self, "This lead does not have a website to audit.", "warning")
+            return
+        toast(self, "Auditing website services & detecting opportunities…", "info", 4000)
+        def on_done(res):
+            toast(self, "Services audited! Opening outreach pitch…", "success")
+            self.ws.navigate("outreach", lead_id=row["id"], campaign="service_pitch")
+        tasks.run(api.post, f"/api/leads/{row['id']}/service-audit", {},
+                  on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
+
+    def bulk_service_audit(self):
+        ids = self.table.selected_ids()
+        if not ids:
+            return
+        toast(self, f"Auditing services for {len(ids)} selected lead(s)…", "info", 5000)
+        def on_done(res):
+            toast(self, f"Completed service audits for {res.get('total', len(ids))} leads!", "success")
+            self.clear_selection()
+            self.load()
+        tasks.run(api.post, "/api/leads/mass-service-audit", {"lead_ids": ids},
+                  on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
+
+    def bulk_pitch(self):
+        ids = self.table.selected_ids()
+        if not ids:
+            return
+        toast(self, f"Comparing services & generating pitches for {len(ids)} lead(s)…", "info", 5000)
+        def on_done(res):
+            toast(self, f"Generated service pitches for {res.get('total', len(ids))} leads!", "success")
+            self.clear_selection()
+            self.load()
+        tasks.run(api.post, "/api/leads/mass-service-pitch", {"lead_ids": ids},
+                  on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)

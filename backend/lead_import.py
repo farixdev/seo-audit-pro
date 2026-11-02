@@ -363,12 +363,32 @@ def _prepare(raw, mapping, batch, now):
     """Turn a file row into a lead tuple, or (None, reason)."""
     get = lambda f: raw.get(mapping[f]) if mapping.get(f) else None  # noqa: E731
     website = (get("website") or "").strip()
+    lid = security.new_id("lead_")
+    allow_no_website = bool(batch.get("allow_no_website") or (batch.get("mapping") and batch["mapping"].get("__allow_no_website__")))
     if not website:
-        return None, "no_website"
-    domain = normalize_domain(website.split()[0])
-    if not domain or domain.endswith(("google.com", "facebook.com", "instagram.com", "goo.gl", "g.page")):
-        return None, "invalid_website"
-    company = _text(get("company"), 200) or domain
+        if not allow_no_website:
+            return None, "no_website"
+        company = _text(get("company"), 200)
+        phone = _text(get("phone"), 40)
+        if not company and not phone:
+            return None, "no_website"
+        domain = f"no_site_{lid}"
+        website = ""
+        company = company or f"Lead {phone or lid[-6:]}"
+    else:
+        domain = normalize_domain(website.split()[0])
+        if not domain or domain.endswith(("google.com", "facebook.com", "instagram.com", "goo.gl", "g.page")):
+            if allow_no_website:
+                company = _text(get("company"), 200)
+                if company:
+                    domain = f"no_site_{lid}"
+                    website = ""
+                else:
+                    return None, "invalid_website"
+            else:
+                return None, "invalid_website"
+        else:
+            company = _text(get("company"), 200) or domain
     email = (get("email") or "").split(",")[0].strip().lower()[:254] or None
     if email and "@" not in email:
         email = None
@@ -377,8 +397,8 @@ def _prepare(raw, mapping, batch, now):
     extra = {k: v for k, v in raw.items() if k not in known and v}
     area = batch["area"] or _text(get("city"), 120)
     lead = {
-        "id": security.new_id("lead_"), "company": company,
-        "website": website if website.lower().startswith(("http://", "https://")) else f"https://{domain}",
+        "id": lid, "company": company,
+        "website": (website if website.lower().startswith(("http://", "https://")) else f"https://{domain}") if website else "",
         "normalized_domain": domain, "contact_name": _text(get("contact_name"), 120), "email": email,
         "email_key": email, "phone": phone, "phone_key": normalize_phone(phone) or None,
         "company_key": normalize_company(company), "niche": batch["niche"] or _text(get("category"), 80),

@@ -4,7 +4,7 @@ computer (data folder, sharing the workspace on the local network)."""
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QGridLayout, QSpinBox, QWidget
+from PySide6.QtWidgets import QCheckBox, QGridLayout, QPlainTextEdit, QSpinBox, QWidget
 
 from seo_audit_pro import APP_VERSION, icons, local_server
 from seo_audit_pro.core import api, local, settings, tasks
@@ -28,6 +28,8 @@ class SettingsPage(Page):
         content = QWidget()
         cl = vbox(content, spacing=20)
         self.has_password = False
+        cl.addWidget(self._smtp_card())
+        cl.addWidget(self._agency_services_card())
         cl.addWidget(self._audit_card())
         cl.addWidget(self._pagespeed_card())
         cl.addWidget(self._client_card())
@@ -119,6 +121,27 @@ class SettingsPage(Page):
         actions.addWidget(self.test_btn)
         actions.addWidget(self.save_btn)
         card.body.addLayout(actions)
+
+        # Live Test Email with attachment
+        test_frame = QFrame()
+        test_frame.setStyleSheet("background: #F9F9FB; padding: 12px; border-radius: 8px; border: 1px solid #E4E4E7;")
+        tl = vbox(test_frame, spacing=8)
+        tl.addWidget(label("Send a Real Test Email", "SectionTitle"))
+        tl.addWidget(label("Deliver a test email directly through your configured Gmail or SMTP account with an optional sample attachment to verify complete inbox delivery.", "Meta", wrap=True))
+        trow = hbox(spacing=8)
+        self.test_email_input = line_edit("Recipient email address (e.g. your@email.com)")
+        trow.addWidget(self.test_email_input, 1)
+        self.test_attach_cb = QCheckBox("Include test attachment")
+        self.test_attach_cb.setChecked(True)
+        trow.addWidget(self.test_attach_cb)
+        self.send_test_btn = BusyButton("Send test email", None, icon_name="mail")
+        self.send_test_btn.clicked.connect(self._send_test_email)
+        trow.addWidget(self.send_test_btn)
+        tl.addLayout(trow)
+        self.send_test_result = label("", wrap=True)
+        tl.addWidget(self.send_test_result)
+        card.body.addWidget(test_frame)
+
         return card
 
     def _gmail(self):
@@ -444,13 +467,17 @@ class SettingsPage(Page):
     def load(self):
         if not getattr(self, "_loaded", False):
             self.area.loading("Loading settings…")
-        state = {"smtp": {}, "settings": None}  # the app does not send email: no email settings
+        state = {"smtp": None, "settings": None, "agency": None}
 
         def maybe_ready():
-            if state["settings"] is not None:
+            if state["settings"] is not None and state["smtp"] is not None:
                 self._loaded = True
+                self._fill_smtp(state["smtp"])
                 self._fill_audit(state["settings"])
                 self._fill_psi(state["settings"])
+                if state.get("agency"):
+                    self.agency_services_edit.setPlainText(state["agency"].get("services") or "")
+                    self.agency_instructions_edit.setText(state["agency"].get("custom_instructions") or "")
                 self.area.ready()
 
         def got_smtp(res):
@@ -461,4 +488,80 @@ class SettingsPage(Page):
             state["settings"] = res
             maybe_ready()
 
+        def got_agency(res):
+            state["agency"] = res
+            maybe_ready()
+
+        self.fetch("smtp", api.get, "/api/outreach/smtp", on_done=got_smtp, on_error=lambda _e: got_smtp({}))
+        self.fetch("agency", api.get, "/api/outreach/agency-settings", on_done=got_agency, on_error=lambda _e: got_agency({}))
         self.fetch("settings", api.get, "/api/settings", on_done=got_settings, on_error=self.area.error)
+
+
+    def _send_test_email(self):
+        to_email = self.test_email_input.text().strip() or self.from_email.text().strip()
+        if not to_email or "@" not in to_email:
+            self.send_test_result.setText("Enter a valid recipient email address.")
+            self.send_test_result.setStyleSheet("color: " + C["danger"] + ";")
+            return
+        data = self._validate_smtp()
+        if data is None:
+            return
+        data["to_email"] = to_email
+        data["include_attachment"] = self.test_attach_cb.isChecked()
+        self.send_test_btn.busy(True, "Sending test…")
+        self.send_test_result.setText("")
+
+        def done(res):
+            self.send_test_btn.busy(False)
+            self.send_test_result.setText("✔ " + (res.get("message") or "Test email delivered successfully!"))
+            self.send_test_result.setStyleSheet("color: " + C["success"] + "; font-weight: 600;")
+            toast(self, "Test email delivered!", "success")
+
+        def fail(err):
+            self.send_test_btn.busy(False)
+            self.send_test_result.setText("✘ " + (err.data.get("message") if hasattr(err, "data") else err.message))
+            self.send_test_result.setStyleSheet("color: " + C["danger"] + ";")
+
+        tasks.run(api.post, "/api/outreach/smtp/send-test", data, timeout=40, on_done=done, on_error=fail, owner=self)
+
+    def _agency_services_card(self):
+        card = Card(padding=24, spacing=16)
+        card.body.addWidget(label("Campaign 3: Agency Services & Pitching (LLM Comparison)", "SectionTitle"))
+        card.body.addWidget(label(
+            "Define your agency's service capabilities. When running Campaign 3, our auditing engine inspects each prospect's website "
+            "to extract what services they offer, then uses AI to identify missing capabilities and generate custom high-converting pitch proposals.",
+            "Meta", wrap=True))
+
+        card.body.addWidget(label("Our Agency Services & Offerings", "FieldLabel"))
+        self.agency_services_edit = QPlainTextEdit()
+        self.agency_services_edit.setPlaceholderText("List your agency services here...")
+        self.agency_services_edit.setMinimumHeight(120)
+        card.body.addWidget(self.agency_services_edit)
+
+        card.body.addWidget(label("Custom Pitch Guidance / Call-to-Action", "FieldLabel"))
+        self.agency_instructions_edit = line_edit("e.g. Emphasize fast turnaround, zero upfront cost, and automated appointment booking.")
+        card.body.addWidget(self.agency_instructions_edit)
+
+        act = hbox(spacing=8)
+        act.addStretch(1)
+        self.save_agency_btn = BusyButton("Save agency offerings", "primary")
+        self.save_agency_btn.clicked.connect(self._save_agency_settings)
+        act.addWidget(self.save_agency_btn)
+        card.body.addLayout(act)
+        return card
+
+    def _save_agency_settings(self):
+        services = self.agency_services_edit.toPlainText().strip()
+        custom = self.agency_instructions_edit.text().strip()
+        self.save_agency_btn.busy(True, "Saving…")
+
+        def done(_res):
+            self.save_agency_btn.busy(False)
+            toast(self, "Agency services saved.", "success")
+
+        def fail(err):
+            self.save_agency_btn.busy(False)
+            show_error(self, err)
+
+        tasks.run(api.put, "/api/outreach/agency-settings", {"services": services, "custom_instructions": custom},
+                  on_done=done, on_error=fail, owner=self)

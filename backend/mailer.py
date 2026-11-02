@@ -232,6 +232,123 @@ def send_password_reset(user, code):
         log.warning("Password reset email not sent for user %s: %s", user["id"], e)
 
 
+_SPAM_TRIGGERS = [
+    "100% free", "free money", "risk free", "risk-free", "act now", "urgent",
+    "congratulations", "winner", "earn cash", "extra income", "buy direct",
+    "clearance", "order now", "special promotion", "click here", "no catch",
+    "no hidden", "million dollars", "fast cash", "guaranteed income", "unlimited",
+    "miracle", "satisfaction guaranteed", "pure profit", "apply now"
+]
+
+
+def analyze_spam_risk(subject, body_text):
+    """Analyze email content against standard spam filters and return deliverability score."""
+    text = ((subject or "") + " " + (body_text or "")).lower()
+    issues = []
+    suggestions = []
+    penalty = 0
+
+    triggers_found = [w for w in _SPAM_TRIGGERS if w in text]
+    if triggers_found:
+        penalty += len(triggers_found) * 15
+        issues.append(f"Contains high-risk spam keywords: {', '.join(triggers_found)}")
+        suggestions.append("Remove aggressive marketing phrases and use natural conversational language.")
+
+    sub = (subject or "").strip()
+    if len(sub) > 70:
+        penalty += 10
+        issues.append("Subject line is too long (> 70 characters).")
+        suggestions.append("Keep subject between 20-50 characters for higher open rates.")
+    elif len(sub) < 10 and sub:
+        penalty += 10
+        issues.append("Subject line is very short (< 10 characters).")
+
+    if sub and sub.isupper():
+        penalty += 25
+        issues.append("Subject line is ALL CAPS.")
+        suggestions.append("Use standard sentence or title case for subject.")
+
+    if any(p in sub for p in ("!!!", "$$$", "???")):
+        penalty += 20
+        issues.append("Subject line contains repeated punctuation (!!!, $$$, ???).")
+
+    words = len((body_text or "").split())
+    if words > 300:
+        penalty += 10
+        issues.append("Email is longer than recommended for cold outreach (> 300 words).")
+        suggestions.append("Keep cold emails under 150 words for optimal response rates.")
+    elif words < 25 and words > 0:
+        penalty += 10
+        issues.append("Email is extremely short (< 25 words).")
+
+    if not any(k in text for k in ("opt out", "unsubscribe", "reply 'no'", "reply no", "remove", "not interested", "hear from me")):
+        penalty += 10
+        suggestions.append("Include a polite opt-out or removal statement at the end.")
+
+    score = max(10, min(100, 100 - penalty))
+    grade = "Excellent (Inbox Ready)" if score >= 85 else ("Good (Low Risk)" if score >= 70 else "At Risk (Review Recommended)")
+    return {
+        "spam_score": score,
+        "grade": grade,
+        "passed": score >= 70,
+        "issues": issues,
+        "suggestions": suggestions,
+    }
+
+
+def send_test_email(cfg, to_email, include_attachment=False):
+    """Deliver a real test email with optional attachment to verify live SMTP/Gmail configuration."""
+    import os
+    import tempfile
+    attachments = []
+    tmp_path = None
+    if include_attachment:
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".txt", prefix="SEO_Test_Attachment_")
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write("SEO Audit Pro Test Attachment\n"
+                    "This sample attachment confirms file delivery is working properly via your email configuration.\n")
+        attachments.append(("SEO-Audit-Pro-Test.txt", "text/plain", tmp_path))
+
+    provider_name = "Gmail" if _is_gmail(cfg) else (cfg.get("provider") or "SMTP")
+    subject = "SEO Audit Pro — Test Email Delivery"
+    body = (
+        f"Hello,\n\n"
+        f"This is a confirmation test email sent from SEO Audit Pro on this computer.\n\n"
+        f"Delivery Configuration:\n"
+        f"  Provider: {provider_name}\n"
+        f"  From: {cfg.get('from_name')} <{cfg.get('from_email')}>\n"
+        f"  To: {to_email}\n"
+        f"  Attachment included: {'Yes (SEO-Audit-Pro-Test.txt)' if include_attachment else 'No'}\n\n"
+        f"If you are reading this message, your email outreach system is fully configured and operational!\n\n"
+        f"Best regards,\nSEO Audit Pro\n"
+    )
+
+    try:
+        if is_brevo(cfg):
+            _brevo_send(cfg, to_email, subject, body, attachments)
+        else:
+            server = _connect(cfg, timeout=25)
+            try:
+                server.send_message(_build(cfg, to_email, subject, body, attachments))
+            finally:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
+        return True, f"Test email sent successfully to {to_email}!"
+    except Exception as e:
+        raise MailError(_friendly(e, cfg)) from e
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+
+
+
+
 # ---------------------------------------------------------------------------
 # Outbound queue
 # ---------------------------------------------------------------------------

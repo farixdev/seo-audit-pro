@@ -119,13 +119,17 @@ class LeadDetailPage(Page):
         self.audit_btn.clicked.connect(self._audit_action)
         self.email_btn = button("Write email", icon_name="mail")
         self.email_btn.clicked.connect(lambda: self.ws.navigate("outreach", lead_id=self.lead_id))
+        self.call_btn = button("Call & Pitch", icon_name="check")
+        self.call_btn.clicked.connect(self._log_call)
+        self.service_btn = button("Audit Services (C3)", icon_name="zap")
+        self.service_btn.clicked.connect(self._audit_services)
         self.outreach_btn = button("Mark outreached", icon_name="check")
         self.outreach_btn.clicked.connect(self._mark_outreach)
         self.edit_btn = button("Edit", icon_name="edit")
         self.edit_btn.clicked.connect(self._edit)
         self.more_btn = icon_button("more", "More actions", 18)
         self.more_btn.clicked.connect(self._more_menu)
-        for b in (self.edit_btn, self.outreach_btn, self.email_btn, self.audit_btn):
+        for b in (self.edit_btn, self.call_btn, self.service_btn, self.outreach_btn, self.email_btn, self.audit_btn):
             head.addWidget(b, 0, Qt.AlignmentFlag.AlignTop)
         head.addWidget(self.more_btn, 0, Qt.AlignmentFlag.AlignTop)
         self.more_btn.setVisible(not session.is_agent())
@@ -446,6 +450,31 @@ class LeadDetailPage(Page):
             self.ws.navigate("audit", audit_id=running)
         else:
             start_audit(self, self.lead)
+
+    def _log_call(self):
+        if not self.lead:
+            return
+        from seo_audit_pro.ui.pages.lead_dialogs import CallLogDialog
+        dlg = CallLogDialog(self, self.lead)
+        if dlg.exec():
+            self.lead = getattr(dlg, "result_lead", self.lead)
+            self._fill_lead(self.lead)
+            toast(self, "Call log and pitch saved.", "success")
+
+    def _audit_services(self):
+        if not self.lead:
+            return
+        if not self.lead.get("website"):
+            toast(self, "This lead has no website to audit.", "warning")
+            return
+        toast(self, "Auditing website services & detecting opportunities…", "info", 4000)
+        def on_done(res):
+            self.lead = res.get("lead") or self.lead
+            self._fill_lead(self.lead)
+            toast(self, "Services audited! Opening outreach pitch…", "success")
+            self.ws.navigate("outreach", lead_id=self.lead["id"], campaign="service_pitch")
+        tasks.run(api.post, f"/api/leads/{self.lead['id']}/service-audit", {},
+                  on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
 
     def _edit(self):
         if not self.lead:

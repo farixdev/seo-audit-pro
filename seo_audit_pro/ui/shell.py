@@ -27,26 +27,13 @@ def _esc(text):
 # Navigation model per role (UI convenience only — the API enforces access)
 # ---------------------------------------------------------------------------
 def navigation_for(role):
-    if role == "MANAGER":
-        return [
-            (None, [("dashboard", "Dashboard", "dashboard")]),
-            ("Workspace", [("leads", "Lead Bank", "leads"), ("map_harvest", "Map Harvest", "map_pin"),
-                            ("audits", "Audits", "audit"), ("reports", "Reports", "report")]),
-            ("Organization", [("teams", "Teams", "teams"), ("users", "Users", "user")]),
-            ("Outreach", [("outreach", "Write email", "mail"), ("outreach_activity", "Outreach log", "activity")]),
-            ("Communication", [("chat", "Chat", "chat")]),
-            ("System", [("notifications", "Notifications", "bell"), ("audit_logs", "Audit Logs", "logs"),
-                        ("settings", "Settings", "settings")]),
-        ]
-    if role == "TEAM_LEAD":
-        return [(None, [("dashboard", "Dashboard", "dashboard"), ("leads", "Lead Bank", "leads"),
-                         ("map_harvest", "Map Harvest", "map_pin"), ("audits", "Audits", "audit"),
-                         ("reports", "Reports", "report"), ("team", "Team", "teams"), ("outreach", "Outreach", "mail"),
-                         ("chat", "Chat", "chat"), ("notifications", "Notifications", "bell"), ("profile", "Profile", "user")])]
-    return [(None, [("dashboard", "Dashboard", "dashboard"), ("leads", "My Leads", "leads"),
-                     ("map_harvest", "Map Harvest", "map_pin"), ("audits", "Audits", "audit"),
-                     ("reports", "Reports", "report"), ("outreach", "Outreach", "mail"), ("chat", "Chat", "chat"),
-                     ("notifications", "Notifications", "bell"), ("profile", "Profile", "user")])]
+    return [
+        (None, [("dashboard", "Dashboard", "dashboard")]),
+        ("Workspace", [("leads", "Lead Bank", "leads"), ("map_harvest", "Map Harvest", "map_pin"),
+                        ("audits", "Audits", "audit"), ("reports", "Reports", "report")]),
+        ("Outreach & Campaigns", [("outreach", "Email Outreach", "mail"), ("outreach_activity", "Outreach Log", "activity")]),
+        ("System", [("settings", "Settings", "settings")]),
+    ]
 
 
 class NavItem(QAbstractButton):

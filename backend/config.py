@@ -88,7 +88,7 @@ MAX_CONCURRENT_AUDITS = int(os.environ.get("MAX_CONCURRENT_AUDITS", 2))  # defau
 
 # The app does not send email: it writes the email from the audit, people send it
 # from their own mailbox and record the outreach (email or call) on the lead.
-EMAIL_SENDING = os.environ.get("EMAIL_SENDING") == "1"  # off unless explicitly turned on (tests do)
+EMAIL_SENDING = os.environ.get("EMAIL_SENDING", "1") == "1"  # Enabled by default for direct SMTP & Gmail sending
 
 # Shared hosting (SEO_HOSTING=cpanel, run by Passenger): the server may run as several
 # short-lived processes, cannot keep WebSocket connections open and must not run
@@ -108,12 +108,12 @@ BULK_MAX_RECIPIENTS = int(os.environ.get("BULK_MAX_RECIPIENTS", 200))
 EMAIL_SEND_INTERVAL_SECONDS = float(os.environ.get("EMAIL_SEND_INTERVAL_SECONDS", 4))
 DAILY_EMAIL_LIMIT = int(os.environ.get("DAILY_EMAIL_LIMIT", 500))
 
-# Optional bootstrap of the very first Manager account (empty database only).
+# Local offline manager account default (empty database only).
 BOOTSTRAP_MANAGER_EMAIL = (os.environ.get("BOOTSTRAP_MANAGER_EMAIL") or "").strip().lower()
 BOOTSTRAP_MANAGER_PASSWORD = (os.environ.get("BOOTSTRAP_MANAGER_PASSWORD") or "").strip()
 # Set to 1 (then redeploy) to give the BOOTSTRAP_MANAGER_EMAIL account the BOOTSTRAP_MANAGER_PASSWORD
 # again, as a Manager, unlocked, with a password change at sign-in. Remove it afterwards.
 BOOTSTRAP_MANAGER_RESET = (os.environ.get("BOOTSTRAP_MANAGER_RESET") or "").strip() == "1"
-BOOTSTRAP_MANAGER_NAME = os.environ.get("BOOTSTRAP_MANAGER_NAME") or "Agency Manager"
+BOOTSTRAP_MANAGER_NAME = os.environ.get("BOOTSTRAP_MANAGER_NAME") or "Local Master"
 
 APP_VERSION = "3.0.0"
