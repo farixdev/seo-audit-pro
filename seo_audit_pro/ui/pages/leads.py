@@ -116,6 +116,21 @@ class LeadNavigator(QFrame):
         selected_item = all_item
 
         hierarchy = facets.get("hierarchy") or facets.get("countries_tree") or []
+        if not hierarchy and (facets.get("niches") or facets.get("areas")):
+            legacy_areas = []
+            for a in facets.get("areas", []):
+                legacy_areas.append({
+                    "key": a.get("key", ""),
+                    "label": a.get("label", ""),
+                    "count": a.get("count", 0),
+                    "niches": [{"key": n.get("key", ""), "label": n.get("label", ""), "count": n.get("count", 0)} for n in facets.get("niches", [])]
+                })
+            hierarchy = [{
+                "key": "",
+                "label": "All Locations",
+                "count": facets.get("total", 0),
+                "areas": legacy_areas
+            }]
         total_countries = len(hierarchy)
         total_areas = 0
         total_niches = 0
@@ -160,11 +175,9 @@ class LeadNavigator(QFrame):
                 selected_item = c_item
 
         self.total.setText(f"{total_countries} countries · {total_areas} areas · {total_niches} niches")
+        # Expand all branches so Country -> Area -> Niche is immediately visible
+        self.tree.expandAll()
         self.tree.setCurrentItem(selected_item)
-        p = selected_item.parent()
-        while p:
-            p.setExpanded(True)
-            p = p.parent()
         self.tree.blockSignals(False)
         self._filter(self.search.text())
 

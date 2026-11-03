@@ -1088,7 +1088,7 @@ def update_batch_location(batch_id):
                 b_params.extend([niche, niche.lower()])
             if b_updates:
                 tx.execute(f"UPDATE lead_batches SET {', '.join(b_updates)} WHERE id = %s", b_params + [batch_id])
-        cache.delete_prefix("facets")
+        cache.bump()
 
     return jsonify({"updated": True, "batch_id": batch_id})
 

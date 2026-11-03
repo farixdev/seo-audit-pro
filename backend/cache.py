@@ -44,3 +44,7 @@ def get_or_set(key, compute, ttl=60):
                 _STORE.clear()
             _STORE[key] = (version, time.monotonic() + ttl, value)
     return value
+
+
+def delete_prefix(prefix=""):
+    bump()

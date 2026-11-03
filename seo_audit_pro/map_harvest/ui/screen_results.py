@@ -621,6 +621,14 @@ class ResultsScreen(QWidget):
         from seo_audit_pro.core import api, tasks
         niche = str(domain or (self._domains[0] if self._domains else "General")).strip() or "General"
         city = str(area or (self._areas[0] if self._areas else "Local")).strip() or "Local"
+        country_val = getattr(self, "active_country", "") or ""
+        if country_val and city.lower().endswith(f", {country_val.lower()}"):
+            city = city[:-len(f", {country_val}")].strip()
+        elif "," in city and not country_val:
+            parts = city.split(",")
+            if len(parts) >= 2:
+                city = parts[0].strip()
+                country_val = parts[-1].strip()
 
         def _work():
             country_val = getattr(self, "active_country", "") or ""

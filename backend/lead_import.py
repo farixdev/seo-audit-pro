@@ -418,6 +418,10 @@ def _prepare(raw, mapping, batch, now):
         "maps_url": _text(get("maps_url"), 500), "extra": json.dumps(extra, ensure_ascii=False)[:4000] if extra else None,
         "batch_id": batch["id"],
     }
+    if lead.get("country") and lead.get("area"):
+        c_sfx = f", {lead['country']}".lower()
+        if lead["area"].lower().endswith(c_sfx):
+            lead["area"] = lead["area"][:-len(c_sfx)].strip()
     lead["niche_key"] = (lead["niche"] or "").lower() or None
     lead["area_key"] = (lead["area"] or "").lower() or None
     return lead, None
