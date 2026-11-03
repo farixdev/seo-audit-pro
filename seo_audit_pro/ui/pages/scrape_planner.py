@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Scrape Planner & Matrix (Hierarchical Tree: Country -> Area -> Niche with Scraped/Not Scraped filters)."""
+"""Scrape Planner & Matrix (Hierarchical Tree: Country -> Area -> Niche with instant filtering)."""
 
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QColor, QFont
@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from seo_audit_pro import icons
-from seo_audit_pro.core import api, fmt, tasks
+from seo_audit_pro.core import api, tasks
 from seo_audit_pro.theme import C
 from seo_audit_pro.ui.pages.base import Page
 from seo_audit_pro.widgets.common import Badge, Segmented, button, hbox, label, vbox
@@ -130,7 +130,7 @@ class ScrapePlannerPage(Page):
 
         self.search = SearchBox("Search country, area or niche…")
         self.search.setFixedWidth(240)
-        self.search.search.connect(lambda _t: self.load())
+        self.search.search.connect(lambda _t: self._render_tree())
         toolbar.addWidget(self.search)
 
         self.filter_segmented = Segmented([
@@ -138,7 +138,7 @@ class ScrapePlannerPage(Page):
             ("Not Scraped", "no"),
             ("Scraped", "yes")
         ])
-        self.filter_segmented.changed.connect(lambda _v: self.load())
+        self.filter_segmented.changed.connect(lambda _v: self._render_tree())
         toolbar.addWidget(self.filter_segmented)
 
         toolbar.addSpacing(6)
@@ -191,11 +191,13 @@ class ScrapePlannerPage(Page):
         self.tree.setHeaderLabels(["Country / Area / Niche", "Status", "Leads Harvested", "Quick Scrape", "Actions"])
         self.tree.setAlternatingRowColors(False)
         self.tree.setIndentation(22)
-        self.tree.setAnimated(True)
+        # Disable animation to eliminate choppy jumping/sliding widgets
+        self.tree.setAnimated(False)
+        self.tree.setUniformRowHeights(True)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
 
-        # Style sheet strictly following system theme tokens: light background, high contrast, crisp hover
+        # Style sheet strictly following system theme tokens: light background, high contrast, solid hover
         self.tree.setStyleSheet(f"""
             QTreeWidget {{
                 background: {C['surface']};
@@ -205,8 +207,8 @@ class ScrapePlannerPage(Page):
                 outline: none;
             }}
             QTreeWidget::item {{
-                height: 34px;
-                padding: 2px 4px;
+                height: 36px;
+                padding: 0 4px;
                 border-bottom: 1px solid {C['divider']};
                 color: {C['text']};
             }}
@@ -244,56 +246,88 @@ class ScrapePlannerPage(Page):
         surface_lay.addWidget(self.tree)
         self.body.addWidget(surface, 1)
 
-        self.countries = []
-        self.areas = []
-        self.targets = []
+        self._all_countries = []
+        self._all_areas = []
+        self._all_targets = []
+        self._stats = {}
 
     def activate(self, **params):
         self.load()
 
     def load(self):
-        scraped = self.filter_segmented.value() if hasattr(self, "filter_segmented") else ""
-        q = self.search.text().strip() if hasattr(self, "search") else ""
-
-        params = {}
-        if scraped:
-            params["scraped"] = scraped
-        if q:
-            params["search"] = q
-
-        tasks.run(api.get, "/api/scrape-planner", params=params, on_done=self._render,
+        tasks.run(api.get, "/api/scrape-planner", on_done=self._on_data_loaded,
                   on_error=lambda e: show_error(self, e), owner=self)
 
-    def _render(self, data):
-        self.tree.clear()
-        self.countries = data.get("countries", [])
-        self.areas = data.get("areas", [])
-        self.targets = data.get("targets", [])
-        stats = data.get("stats", {})
+    def _on_data_loaded(self, data):
+        self._all_countries = data.get("countries", [])
+        self._all_areas = data.get("areas", [])
+        self._all_targets = data.get("targets", [])
+        self._stats = data.get("stats", {})
 
         # Update stats badges
-        self.badge_total.setText(f"Total: {stats.get('total', 0)}")
-        self.badge_scraped.setText(f"Scraped: {stats.get('scraped', 0)}")
-        self.badge_not_scraped.setText(f"Not Scraped: {stats.get('not_scraped', 0)}")
+        self.badge_total.setText(f"Total: {self._stats.get('total', len(self._all_targets))}")
+        self.badge_scraped.setText(f"Scraped: {self._stats.get('scraped', 0)}")
+        self.badge_not_scraped.setText(f"Not Scraped: {self._stats.get('not_scraped', 0)}")
 
-        # Build Country -> Area -> Targets hierarchy
-        areas_by_country = {}
-        for a in self.areas:
-            areas_by_country.setdefault(a["country_id"], []).append(a)
+        self._render_tree()
+
+    def _render_tree(self):
+        self.tree.clear()
+
+        filter_mode = self.filter_segmented.value() if hasattr(self, "filter_segmented") else ""
+        search_kw = self.search.text().strip().lower() if hasattr(self, "search") else ""
+        is_filtered = bool(filter_mode or search_kw)
+
+        # Filter targets
+        def _match_target(t):
+            is_scraped = bool(t.get("is_scraped") or t.get("status") == "completed" or (t.get("leads_harvested", 0) > 0))
+            if filter_mode == "yes" and not is_scraped:
+                return False
+            if filter_mode == "no" and is_scraped:
+                return False
+            if search_kw:
+                niche_match = search_kw in (t.get("niche") or "").lower()
+                notes_match = search_kw in (t.get("notes") or "").lower()
+                area_match = search_kw in (t.get("area_name") or "").lower()
+                country_match = search_kw in (t.get("country_name") or "").lower()
+                if not (niche_match or notes_match or area_match or country_match):
+                    return False
+            return True
 
         targets_by_area = {}
-        for t in self.targets:
-            targets_by_area.setdefault(t["area_id"], []).append(t)
+        for t in self._all_targets:
+            if _match_target(t):
+                targets_by_area.setdefault(t["area_id"], []).append(t)
 
-        for country in self.countries:
+        areas_by_country = {}
+        for a in self._all_areas:
+            areas_by_country.setdefault(a["country_id"], []).append(a)
+
+        rendered_countries = 0
+        rendered_targets = 0
+
+        for country in self._all_countries:
             cid = country["id"]
             country_areas = areas_by_country.get(cid, [])
+            c_name_lower = country["name"].lower()
 
-            # Filter check if searching
-            c_targets = [t for a in country_areas for t in targets_by_area.get(a["id"], [])]
-            if self.search.text().strip() and not country_areas and not c_targets:
-                if self.search.text().lower() not in country["name"].lower():
+            # Pre-filter areas that have matching targets or match search
+            matched_areas_for_country = []
+            for area in country_areas:
+                aid = area["id"]
+                a_targets = targets_by_area.get(aid, [])
+                a_name_lower = area["name"].lower()
+                if is_filtered:
+                    if not a_targets and (not search_kw or search_kw not in a_name_lower):
+                        continue
+                matched_areas_for_country.append((area, a_targets))
+
+            # When filtering, hide country if it has no matching areas/targets
+            if is_filtered and not matched_areas_for_country:
+                if not search_kw or search_kw not in c_name_lower:
                     continue
+
+            rendered_countries += 1
 
             # Level 0: Country Item
             c_item = QTreeWidgetItem(self.tree)
@@ -308,6 +342,7 @@ class ScrapePlannerPage(Page):
 
             # Country Actions widget
             c_act_wrap = QWidget()
+            c_act_wrap.setFixedHeight(32)
             c_act_wrap.setStyleSheet("background: transparent;")
             c_act_lay = hbox(c_act_wrap, (0, 0, 0, 0), 4)
 
@@ -329,13 +364,10 @@ class ScrapePlannerPage(Page):
             self.tree.setItemWidget(c_item, 4, c_act_wrap)
 
             # Level 1: Area Items
-            for area in country_areas:
-                aid = area["id"]
-                a_targets = targets_by_area.get(aid, [])
-                if self.search.text().strip() and not a_targets:
-                    if self.search.text().lower() not in area["name"].lower():
-                        continue
+            areas_to_render = matched_areas_for_country if is_filtered else [(a, targets_by_area.get(a["id"], [])) for a in country_areas]
 
+            for area, a_targets in areas_to_render:
+                aid = area["id"]
                 a_item = QTreeWidgetItem(c_item)
                 a_item.setText(0, area["name"])
                 a_item.setIcon(0, icons.icon("map_pin", C["text_3"], 14))
@@ -347,6 +379,7 @@ class ScrapePlannerPage(Page):
 
                 # Area actions widget
                 a_act_wrap = QWidget()
+                a_act_wrap.setFixedHeight(32)
                 a_act_wrap.setStyleSheet("background: transparent;")
                 a_act_lay = hbox(a_act_wrap, (0, 0, 0, 0), 4)
 
@@ -369,6 +402,7 @@ class ScrapePlannerPage(Page):
 
                 # Level 2: Niche Targets
                 for target in a_targets:
+                    rendered_targets += 1
                     t_item = QTreeWidgetItem(a_item)
                     t_item.setText(0, target["niche"])
                     t_item.setIcon(0, icons.icon("target", C["accent"], 14))
@@ -377,8 +411,9 @@ class ScrapePlannerPage(Page):
                     t_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "target", "data": target, "area": area, "country": country})
 
                     # Column 1: Status Pill
-                    is_scraped = target.get("is_scraped", False)
+                    is_scraped = bool(target.get("is_scraped") or target.get("status") == "completed" or (target.get("leads_harvested", 0) > 0))
                     status_widget = QWidget()
+                    status_widget.setFixedHeight(32)
                     status_widget.setStyleSheet("background: transparent;")
                     s_lay = hbox(status_widget, (0, 0, 0, 0), 0)
                     if is_scraped:
@@ -392,6 +427,7 @@ class ScrapePlannerPage(Page):
                     # Column 2: Leads Harvested
                     leads_count = target.get("leads_harvested", 0)
                     leads_wrap = QWidget()
+                    leads_wrap.setFixedHeight(32)
                     leads_wrap.setStyleSheet("background: transparent;")
                     leads_lay = hbox(leads_wrap, (0, 0, 0, 0), 0)
                     leads_lbl = QLabel(f"{leads_count:,} leads" if leads_count else "—")
@@ -422,6 +458,7 @@ class ScrapePlannerPage(Page):
 
                     # Column 4: Actions (Toggle Scraped, Edit, Delete)
                     t_act_wrap = QWidget()
+                    t_act_wrap.setFixedHeight(32)
                     t_act_wrap.setStyleSheet("background: transparent;")
                     t_act_lay = hbox(t_act_wrap, (0, 0, 0, 0), 4)
 
@@ -443,7 +480,17 @@ class ScrapePlannerPage(Page):
                     t_act_lay.addStretch(1)
                     self.tree.setItemWidget(t_item, 4, t_act_wrap)
 
-        # Expand all nodes by default so user immediately sees Country -> Area -> Niche
+        # Empty state when filter or search matches nothing
+        if rendered_countries == 0:
+            empty_item = QTreeWidgetItem(self.tree)
+            msg = "No targets match the current filter." if is_filtered else "No countries added yet. Click 'Add Country' above to start planning."
+            empty_item.setText(0, msg)
+            empty_item.setForeground(0, QColor(C["text_3"]))
+            f = QFont()
+            f.setItalic(True)
+            empty_item.setFont(0, f)
+
+        # Expand all nodes cleanly without animation jitter
         self.tree.expandAll()
 
     # ── Context Menu ──────────────────────────────────────────────────────────
@@ -478,7 +525,7 @@ class ScrapePlannerPage(Page):
             menu.addAction("Edit Area...", lambda: self.edit_area_modal(data))
             menu.addAction("Delete Area...", lambda: self.delete_area(data))
         elif kind == "target":
-            is_scraped = data.get("is_scraped", False)
+            is_scraped = bool(data.get("is_scraped") or data.get("status") == "completed" or (data.get("leads_harvested", 0) > 0))
             menu.addAction("Scrape in Map Harvest", lambda: self._launch_in_map_harvest(data))
             menu.addAction("Mark as Not Scraped" if is_scraped else "Mark as Scraped", lambda: self._toggle_target_scraped(data, not is_scraped))
             menu.addSeparator()
@@ -545,14 +592,14 @@ class ScrapePlannerPage(Page):
         if not confirm(self, f"Delete country '{country['name']}'?", "This will also remove all cities and niche targets within this country.", "Delete"):
             return
         tasks.run(api.delete, f"/api/scrape-planner/countries/{country['id']}",
-                      on_done=lambda _r: (toast(self, "Country deleted.", "success"), self.load()),
-                      on_error=lambda e: show_error(self, e), owner=self)
+                  on_done=lambda _r: (toast(self, "Country deleted.", "success"), self.load()),
+                  on_error=lambda e: show_error(self, e), owner=self)
 
     def create_area_modal(self, default_country_id=None):
-        if not self.countries:
+        if not self._all_countries:
             toast(self, "Add at least one country before creating areas.", "warning")
             return
-        dlg = AreaDialog(self, self.countries, default_country_id=default_country_id)
+        dlg = AreaDialog(self, self._all_countries, default_country_id=default_country_id)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             vals = dlg.values()
             if not vals.get("name"):
@@ -562,7 +609,7 @@ class ScrapePlannerPage(Page):
                       on_error=lambda e: show_error(self, e), owner=self)
 
     def edit_area_modal(self, area):
-        dlg = AreaDialog(self, self.countries, area=area)
+        dlg = AreaDialog(self, self._all_countries, area=area)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             vals = dlg.values()
             tasks.run(api.patch, f"/api/scrape-planner/areas/{area['id']}", vals,
@@ -577,13 +624,13 @@ class ScrapePlannerPage(Page):
                   on_error=lambda e: show_error(self, e), owner=self)
 
     def create_target_modal(self, default_area_id=None, default_country_id=None):
-        if not self.countries:
+        if not self._all_countries:
             toast(self, "Add a country and area first.", "warning")
             return
-        if not self.areas:
+        if not self._all_areas:
             toast(self, "Add an area first before creating niche targets.", "warning")
             return
-        dlg = TargetDialog(self, self.countries, self.areas, default_country_id=default_country_id, default_area_id=default_area_id)
+        dlg = TargetDialog(self, self._all_countries, self._all_areas, default_country_id=default_country_id, default_area_id=default_area_id)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             vals = dlg.values()
             if not vals.get("niche"):
@@ -593,7 +640,7 @@ class ScrapePlannerPage(Page):
                       on_error=lambda e: show_error(self, e), owner=self)
 
     def edit_target_modal(self, target):
-        dlg = TargetDialog(self, self.countries, self.areas, target=target)
+        dlg = TargetDialog(self, self._all_countries, self._all_areas, target=target)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             vals = dlg.values()
             tasks.run(api.patch, f"/api/scrape-planner/targets/{target['id']}", vals,

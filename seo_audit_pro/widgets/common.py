@@ -211,6 +211,7 @@ class MarqueePushButton(QPushButton):
             p.drawPixmap(int(cur_x), int((h - ih) / 2), pix)
             cur_x += iw + 6
 
+        content_rect = self.style().subElementRect(QStyle.SubElement.SE_PushButtonContents, opt, self)
         avail_w = max(10, self.width() - cur_x - pad_x)
         clip_rect = QRectF(cur_x, 0, avail_w, h)
         p.save()
@@ -231,7 +232,7 @@ class MarqueePushButton(QPushButton):
             fg = C["text"]
         p.setPen(QColor(fg))
         tw = self._text_width()
-        draw_rect = QRectF(cur_x - self._offset, 0, tw + 20, h)
+        draw_rect = QRectF(cur_x - self._offset, content_rect.top(), tw + 20, content_rect.height())
         p.drawText(draw_rect, int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), full_text)
         p.restore()
         p.end()
@@ -689,7 +690,7 @@ class Segmented(QWidget):
         self.group.setExclusive(True)
         self.buttons = {}
         for text, value in options:
-            b = MarqueePushButton(text)
+            b = QPushButton(text)
             b.setCheckable(True)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda _c=False, v=value: self.changed.emit(v))

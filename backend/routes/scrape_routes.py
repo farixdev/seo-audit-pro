@@ -55,10 +55,15 @@ def get_scrape_planner():
     query += "ORDER BY t.created_at DESC"
     targets = db.query(query, params)
 
-    # Compute overall stats
-    total = len(targets)
-    scraped_count = sum(1 for t in targets if t["status"] == "completed" or t["leads_harvested"] > 0)
-    not_scraped_count = total - scraped_count
+    # Compute overall stats across all targets in database
+    stats_row = db.query_one(
+        "SELECT COUNT(*) AS total, "
+        "SUM(CASE WHEN status = 'completed' OR leads_harvested > 0 THEN 1 ELSE 0 END) AS scraped "
+        "FROM scrape_targets"
+    )
+    total_stat = (stats_row["total"] or 0) if stats_row else len(targets)
+    scraped_count = int(stats_row["scraped"] or 0) if stats_row else 0
+    not_scraped_count = total_stat - scraped_count
 
     target_dicts = []
     for t in targets:
@@ -71,7 +76,7 @@ def get_scrape_planner():
         "areas": [dict(a) for a in areas],
         "targets": target_dicts,
         "stats": {
-            "total": total,
+            "total": total_stat,
             "scraped": scraped_count,
             "not_scraped": not_scraped_count,
         }
