@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 
 from seo_audit_pro import icons
 from seo_audit_pro.core import api, tasks
+from seo_audit_pro.core.settings import _store
 from seo_audit_pro.theme import C
 from seo_audit_pro.ui.pages.base import Page
 from seo_audit_pro.widgets.common import Badge, Segmented, button, hbox, label, vbox
@@ -66,6 +67,12 @@ class TargetDialog(Dialog):
         self.countries = countries
         self.areas = areas
 
+        if default_area_id and not default_country_id:
+            for a in areas:
+                if str(a.get("id")) == str(default_area_id):
+                    default_country_id = a.get("country_id")
+                    break
+
         c_items = [(c["name"], c["id"]) for c in countries]
         sel_cid = self.target.get("country_id") or default_country_id or (c_items[0][1] if c_items else "")
         self.c_combo = combo(c_items, sel_cid)
@@ -91,13 +98,14 @@ class TargetDialog(Dialog):
 
     def _populate_areas(self, cid, select_aid=None):
         self.a_combo.clear()
-        matching = [a for a in self.areas if not cid or a["country_id"] == cid]
+        matching = [a for a in self.areas if not cid or str(a.get("country_id")) == str(cid)]
         for a in matching:
             self.a_combo.addItem(a["name"], a["id"])
-        if select_aid:
-            idx = self.a_combo.findData(select_aid)
-            if idx >= 0:
-                self.a_combo.setCurrentIndex(idx)
+        if select_aid is not None:
+            for i in range(self.a_combo.count()):
+                if str(self.a_combo.itemData(i)) == str(select_aid):
+                    self.a_combo.setCurrentIndex(i)
+                    break
 
     def values(self):
         is_scraped = (self.scraped_combo.currentData() == "yes")
@@ -149,11 +157,11 @@ class ScrapePlannerPage(Page):
         row_top.addWidget(self.add_target_btn)
 
         self.expand_btn = button("Expand All", "ghost", size="sm")
-        self.expand_btn.clicked.connect(lambda: self.tree.expandAll())
+        self.expand_btn.clicked.connect(self._expand_all_items)
         row_top.addWidget(self.expand_btn)
 
         self.collapse_btn = button("Collapse All", "ghost", size="sm")
-        self.collapse_btn.clicked.connect(lambda: self.tree.collapseAll())
+        self.collapse_btn.clicked.connect(self._collapse_all_items)
         row_top.addWidget(self.collapse_btn)
 
         self.refresh_btn = button("", "ghost", icon_name="refresh", size="sm", tooltip="Refresh tree")
@@ -250,6 +258,8 @@ class ScrapePlannerPage(Page):
         self.tree.setColumnWidth(4, 130)
 
         self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.tree.itemExpanded.connect(self._on_item_expanded)
+        self.tree.itemCollapsed.connect(self._on_item_collapsed)
         surface_lay.addWidget(self.tree)
         self.body.addWidget(surface, 1)
 
@@ -257,6 +267,74 @@ class ScrapePlannerPage(Page):
         self._all_areas = []
         self._all_targets = []
         self._stats = {}
+
+        self._expanded_countries = set()
+        self._expanded_areas = set()
+        self._ensure_expanded_countries = set()
+        self._ensure_expanded_areas = set()
+        self._has_rendered_once = False
+        self._is_rendering = False
+
+        store = _store()
+        self._last_country_id = store.value("planner/last_country_id", "") or None
+        self._last_area_id = store.value("planner/last_area_id", "") or None
+
+    def _remember_last_choice(self, country_id, area_id):
+        store = _store()
+        if country_id:
+            self._last_country_id = str(country_id)
+            store.setValue("planner/last_country_id", str(country_id))
+        if area_id:
+            self._last_area_id = str(area_id)
+            store.setValue("planner/last_area_id", str(area_id))
+
+    def _on_item_expanded(self, item):
+        if self._is_rendering:
+            return
+        node = item.data(0, Qt.ItemDataRole.UserRole) or {}
+        kind = node.get("type")
+        data = node.get("data", {})
+        item_id = data.get("id")
+        if not item_id:
+            return
+        if kind == "country":
+            self._expanded_countries.add(str(item_id))
+        elif kind == "area":
+            self._expanded_areas.add(str(item_id))
+
+    def _on_item_collapsed(self, item):
+        if self._is_rendering:
+            return
+        node = item.data(0, Qt.ItemDataRole.UserRole) or {}
+        kind = node.get("type")
+        data = node.get("data", {})
+        item_id = data.get("id")
+        if not item_id:
+            return
+        if kind == "country":
+            self._expanded_countries.discard(str(item_id))
+        elif kind == "area":
+            self._expanded_areas.discard(str(item_id))
+
+    def _expand_all_items(self):
+        self._is_rendering = True
+        try:
+            self.tree.expandAll()
+            for c in self._all_countries:
+                self._expanded_countries.add(str(c["id"]))
+            for a in self._all_areas:
+                self._expanded_areas.add(str(a["id"]))
+        finally:
+            self._is_rendering = False
+
+    def _collapse_all_items(self):
+        self._is_rendering = True
+        try:
+            self.tree.collapseAll()
+            self._expanded_countries.clear()
+            self._expanded_areas.clear()
+        finally:
+            self._is_rendering = False
 
     def activate(self, **params):
         self.load()
@@ -279,226 +357,277 @@ class ScrapePlannerPage(Page):
         self._render_tree()
 
     def _render_tree(self):
-        self.tree.clear()
+        self._is_rendering = True
+        try:
+            # Capture current expanded states from existing tree items before clearing
+            if self._has_rendered_once:
+                for i in range(self.tree.topLevelItemCount()):
+                    c_item = self.tree.topLevelItem(i)
+                    c_data = c_item.data(0, Qt.ItemDataRole.UserRole) or {}
+                    cid = c_data.get("data", {}).get("id")
+                    if cid:
+                        if c_item.isExpanded():
+                            self._expanded_countries.add(str(cid))
+                        else:
+                            self._expanded_countries.discard(str(cid))
+                    for j in range(c_item.childCount()):
+                        a_item = c_item.child(j)
+                        a_data = a_item.data(0, Qt.ItemDataRole.UserRole) or {}
+                        aid = a_data.get("data", {}).get("id")
+                        if aid:
+                            if a_item.isExpanded():
+                                self._expanded_areas.add(str(aid))
+                            else:
+                                self._expanded_areas.discard(str(aid))
 
-        filter_mode = self.filter_segmented.value() if hasattr(self, "filter_segmented") else ""
-        search_kw = self.search.text().strip().lower() if hasattr(self, "search") else ""
-        is_filtered = bool(filter_mode or search_kw)
+            # Apply any programmatic expansions (e.g. newly added niche or area)
+            if self._ensure_expanded_countries:
+                self._expanded_countries.update(str(x) for x in self._ensure_expanded_countries)
+                self._ensure_expanded_countries.clear()
+            if self._ensure_expanded_areas:
+                self._expanded_areas.update(str(x) for x in self._ensure_expanded_areas)
+                self._ensure_expanded_areas.clear()
 
-        # Filter targets
-        def _match_target(t):
-            is_scraped = bool(t.get("is_scraped") or t.get("status") == "completed" or (t.get("leads_harvested", 0) > 0))
-            if filter_mode == "yes" and not is_scraped:
-                return False
-            if filter_mode == "no" and is_scraped:
-                return False
-            if search_kw:
-                niche_match = search_kw in (t.get("niche") or "").lower()
-                notes_match = search_kw in (t.get("notes") or "").lower()
-                area_match = search_kw in (t.get("area_name") or "").lower()
-                country_match = search_kw in (t.get("country_name") or "").lower()
-                if not (niche_match or notes_match or area_match or country_match):
+            # Default to fully expanded on first render so user sees initial tree structure
+            if not self._has_rendered_once:
+                for c in self._all_countries:
+                    self._expanded_countries.add(str(c["id"]))
+                for a in self._all_areas:
+                    self._expanded_areas.add(str(a["id"]))
+
+            self.tree.clear()
+
+            filter_mode = self.filter_segmented.value() if hasattr(self, "filter_segmented") else ""
+            search_kw = self.search.text().strip().lower() if hasattr(self, "search") else ""
+            is_filtered = bool(filter_mode or search_kw)
+
+            # Filter targets
+            def _match_target(t):
+                is_scraped = bool(t.get("is_scraped") or t.get("status") == "completed" or (t.get("leads_harvested", 0) > 0))
+                if filter_mode == "yes" and not is_scraped:
                     return False
-            return True
+                if filter_mode == "no" and is_scraped:
+                    return False
+                if search_kw:
+                    niche_match = search_kw in (t.get("niche") or "").lower()
+                    notes_match = search_kw in (t.get("notes") or "").lower()
+                    area_match = search_kw in (t.get("area_name") or "").lower()
+                    country_match = search_kw in (t.get("country_name") or "").lower()
+                    if not (niche_match or notes_match or area_match or country_match):
+                        return False
+                return True
 
-        targets_by_area = {}
-        for t in self._all_targets:
-            if _match_target(t):
-                targets_by_area.setdefault(t["area_id"], []).append(t)
+            targets_by_area = {}
+            for t in self._all_targets:
+                if _match_target(t):
+                    targets_by_area.setdefault(t["area_id"], []).append(t)
 
-        areas_by_country = {}
-        for a in self._all_areas:
-            areas_by_country.setdefault(a["country_id"], []).append(a)
+            areas_by_country = {}
+            for a in self._all_areas:
+                areas_by_country.setdefault(a["country_id"], []).append(a)
 
-        rendered_countries = 0
-        rendered_targets = 0
+            rendered_countries = 0
+            rendered_targets = 0
 
-        for country in self._all_countries:
-            cid = country["id"]
-            country_areas = areas_by_country.get(cid, [])
-            c_name_lower = country["name"].lower()
+            for country in self._all_countries:
+                cid = str(country["id"])
+                country_areas = areas_by_country.get(country["id"], [])
+                c_name_lower = country["name"].lower()
 
-            # Pre-filter areas that have matching targets or match search
-            matched_areas_for_country = []
-            for area in country_areas:
-                aid = area["id"]
-                a_targets = targets_by_area.get(aid, [])
-                a_name_lower = area["name"].lower()
-                if is_filtered:
-                    if not a_targets and (not search_kw or search_kw not in a_name_lower):
+                # Pre-filter areas that have matching targets or match search
+                matched_areas_for_country = []
+                for area in country_areas:
+                    aid = str(area["id"])
+                    a_targets = targets_by_area.get(area["id"], [])
+                    a_name_lower = area["name"].lower()
+                    if is_filtered:
+                        if not a_targets and (not search_kw or search_kw not in a_name_lower):
+                            continue
+                    matched_areas_for_country.append((area, a_targets))
+
+                # When filtering, hide country if it has no matching areas/targets
+                if is_filtered and not matched_areas_for_country:
+                    if not search_kw or search_kw not in c_name_lower:
                         continue
-                matched_areas_for_country.append((area, a_targets))
 
-            # When filtering, hide country if it has no matching areas/targets
-            if is_filtered and not matched_areas_for_country:
-                if not search_kw or search_kw not in c_name_lower:
-                    continue
+                rendered_countries += 1
 
-            rendered_countries += 1
+                # Level 0: Country Item
+                c_item = QTreeWidgetItem(self.tree)
+                c_text = country["name"] + (f" ({country['code']})" if country.get("code") else "")
+                c_item.setText(0, c_text)
+                c_item.setIcon(0, icons.icon("globe", C["text_2"], 15))
+                c_font = QFont()
+                c_font.setPointSize(11)
+                c_font.setWeight(QFont.Weight.DemiBold)
+                c_item.setFont(0, c_font)
+                c_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "country", "data": country})
 
-            # Level 0: Country Item
-            c_item = QTreeWidgetItem(self.tree)
-            c_text = country["name"] + (f" ({country['code']})" if country.get("code") else "")
-            c_item.setText(0, c_text)
-            c_item.setIcon(0, icons.icon("globe", C["text_2"], 15))
-            c_font = QFont()
-            c_font.setPointSize(11)
-            c_font.setWeight(QFont.Weight.DemiBold)
-            c_item.setFont(0, c_font)
-            c_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "country", "data": country})
+                # Country Actions widget
+                c_act_wrap = QWidget()
+                c_act_wrap.setFixedHeight(32)
+                c_act_wrap.setStyleSheet("background: transparent;")
+                c_act_lay = hbox(c_act_wrap, (0, 0, 0, 0), 4)
 
-            # Country Actions widget
-            c_act_wrap = QWidget()
-            c_act_wrap.setFixedHeight(32)
-            c_act_wrap.setStyleSheet("background: transparent;")
-            c_act_lay = hbox(c_act_wrap, (0, 0, 0, 0), 4)
+                add_a_btn = button("+ Area", "ghost", size="sm")
+                add_a_btn.setFixedHeight(24)
+                add_a_btn.clicked.connect(lambda _c=False, _cid=country["id"]: self.create_area_modal(default_country_id=_cid))
+                c_act_lay.addWidget(add_a_btn)
 
-            add_a_btn = button("+ Area", "ghost", size="sm")
-            add_a_btn.setFixedHeight(24)
-            add_a_btn.clicked.connect(lambda _c=False, _cid=cid: self.create_area_modal(default_country_id=_cid))
-            c_act_lay.addWidget(add_a_btn)
+                edit_c_btn = button("", "ghost", icon_name="edit", size="sm", tooltip="Edit Country")
+                edit_c_btn.setFixedSize(24, 24)
+                edit_c_btn.clicked.connect(lambda _c=False, _ct=country: self.edit_country_modal(_ct))
+                c_act_lay.addWidget(edit_c_btn)
 
-            edit_c_btn = button("", "ghost", icon_name="edit", size="sm", tooltip="Edit Country")
-            edit_c_btn.setFixedSize(24, 24)
-            edit_c_btn.clicked.connect(lambda _c=False, _ct=country: self.edit_country_modal(_ct))
-            c_act_lay.addWidget(edit_c_btn)
+                del_c_btn = button("", "ghost", icon_name="trash", size="sm", tooltip="Delete Country")
+                del_c_btn.setFixedSize(24, 24)
+                del_c_btn.clicked.connect(lambda _c=False, _ct=country: self.delete_country(_ct))
+                c_act_lay.addWidget(del_c_btn)
+                c_act_lay.addStretch(1)
+                self.tree.setItemWidget(c_item, 4, c_act_wrap)
 
-            del_c_btn = button("", "ghost", icon_name="trash", size="sm", tooltip="Delete Country")
-            del_c_btn.setFixedSize(24, 24)
-            del_c_btn.clicked.connect(lambda _c=False, _ct=country: self.delete_country(_ct))
-            c_act_lay.addWidget(del_c_btn)
-            c_act_lay.addStretch(1)
-            self.tree.setItemWidget(c_item, 4, c_act_wrap)
+                # Level 1: Area Items
+                areas_to_render = matched_areas_for_country if is_filtered else [(a, targets_by_area.get(a["id"], [])) for a in country_areas]
 
-            # Level 1: Area Items
-            areas_to_render = matched_areas_for_country if is_filtered else [(a, targets_by_area.get(a["id"], [])) for a in country_areas]
+                for area, a_targets in areas_to_render:
+                    aid = str(area["id"])
+                    a_item = QTreeWidgetItem(c_item)
+                    a_item.setText(0, area["name"])
+                    a_item.setIcon(0, icons.icon("map_pin", C["text_3"], 14))
+                    a_font = QFont()
+                    a_font.setPointSize(10)
+                    a_font.setWeight(QFont.Weight.DemiBold)
+                    a_item.setFont(0, a_font)
+                    a_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "area", "data": area, "country": country})
 
-            for area, a_targets in areas_to_render:
-                aid = area["id"]
-                a_item = QTreeWidgetItem(c_item)
-                a_item.setText(0, area["name"])
-                a_item.setIcon(0, icons.icon("map_pin", C["text_3"], 14))
-                a_font = QFont()
-                a_font.setPointSize(10)
-                a_font.setWeight(QFont.Weight.DemiBold)
-                a_item.setFont(0, a_font)
-                a_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "area", "data": area, "country": country})
+                    # Area actions widget
+                    a_act_wrap = QWidget()
+                    a_act_wrap.setFixedHeight(32)
+                    a_act_wrap.setStyleSheet("background: transparent;")
+                    a_act_lay = hbox(a_act_wrap, (0, 0, 0, 0), 4)
 
-                # Area actions widget
-                a_act_wrap = QWidget()
-                a_act_wrap.setFixedHeight(32)
-                a_act_wrap.setStyleSheet("background: transparent;")
-                a_act_lay = hbox(a_act_wrap, (0, 0, 0, 0), 4)
+                    add_n_btn = button("+ Niche", "ghost", size="sm")
+                    add_n_btn.setFixedHeight(24)
+                    add_n_btn.clicked.connect(lambda _c=False, _aid=area["id"], _cid=country["id"]: self.create_target_modal(default_area_id=_aid, default_country_id=_cid))
+                    a_act_lay.addWidget(add_n_btn)
 
-                add_n_btn = button("+ Niche", "ghost", size="sm")
-                add_n_btn.setFixedHeight(24)
-                add_n_btn.clicked.connect(lambda _c=False, _aid=aid, _cid=cid: self.create_target_modal(default_area_id=_aid, default_country_id=_cid))
-                a_act_lay.addWidget(add_n_btn)
+                    edit_a_btn = button("", "ghost", icon_name="edit", size="sm", tooltip="Edit Area")
+                    edit_a_btn.setFixedSize(24, 24)
+                    edit_a_btn.clicked.connect(lambda _c=False, _ar=area: self.edit_area_modal(_ar))
+                    a_act_lay.addWidget(edit_a_btn)
 
-                edit_a_btn = button("", "ghost", icon_name="edit", size="sm", tooltip="Edit Area")
-                edit_a_btn.setFixedSize(24, 24)
-                edit_a_btn.clicked.connect(lambda _c=False, _ar=area: self.edit_area_modal(_ar))
-                a_act_lay.addWidget(edit_a_btn)
+                    del_a_btn = button("", "ghost", icon_name="trash", size="sm", tooltip="Delete Area")
+                    del_a_btn.setFixedSize(24, 24)
+                    del_a_btn.clicked.connect(lambda _c=False, _ar=area: self.delete_area(_ar))
+                    a_act_lay.addWidget(del_a_btn)
+                    a_act_lay.addStretch(1)
+                    self.tree.setItemWidget(a_item, 4, a_act_wrap)
 
-                del_a_btn = button("", "ghost", icon_name="trash", size="sm", tooltip="Delete Area")
-                del_a_btn.setFixedSize(24, 24)
-                del_a_btn.clicked.connect(lambda _c=False, _ar=area: self.delete_area(_ar))
-                a_act_lay.addWidget(del_a_btn)
-                a_act_lay.addStretch(1)
-                self.tree.setItemWidget(a_item, 4, a_act_wrap)
+                    # Level 2: Niche Targets
+                    for target in a_targets:
+                        rendered_targets += 1
+                        t_item = QTreeWidgetItem(a_item)
+                        t_item.setText(0, target["niche"])
+                        t_item.setIcon(0, icons.icon("target", C["accent"], 14))
+                        if target.get("notes"):
+                            t_item.setToolTip(0, f"Notes: {target['notes']}")
+                        t_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "target", "data": target, "area": area, "country": country})
 
-                # Level 2: Niche Targets
-                for target in a_targets:
-                    rendered_targets += 1
-                    t_item = QTreeWidgetItem(a_item)
-                    t_item.setText(0, target["niche"])
-                    t_item.setIcon(0, icons.icon("target", C["accent"], 14))
-                    if target.get("notes"):
-                        t_item.setToolTip(0, f"Notes: {target['notes']}")
-                    t_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "target", "data": target, "area": area, "country": country})
+                        # Column 1: Status Pill
+                        is_scraped = bool(target.get("is_scraped") or target.get("status") == "completed" or (target.get("leads_harvested", 0) > 0))
+                        status_widget = QWidget()
+                        status_widget.setFixedHeight(32)
+                        status_widget.setStyleSheet("background: transparent;")
+                        s_lay = hbox(status_widget, (0, 0, 0, 0), 0)
+                        if is_scraped:
+                            pill = Badge("Scraped", C["success"], C["success_bg"])
+                        else:
+                            pill = Badge("Not Scraped", C["warning"], C["warning_bg"])
+                        s_lay.addWidget(pill)
+                        s_lay.addStretch(1)
+                        self.tree.setItemWidget(t_item, 1, status_widget)
 
-                    # Column 1: Status Pill
-                    is_scraped = bool(target.get("is_scraped") or target.get("status") == "completed" or (target.get("leads_harvested", 0) > 0))
-                    status_widget = QWidget()
-                    status_widget.setFixedHeight(32)
-                    status_widget.setStyleSheet("background: transparent;")
-                    s_lay = hbox(status_widget, (0, 0, 0, 0), 0)
-                    if is_scraped:
-                        pill = Badge("Scraped", C["success"], C["success_bg"])
-                    else:
-                        pill = Badge("Not Scraped", C["warning"], C["warning_bg"])
-                    s_lay.addWidget(pill)
-                    s_lay.addStretch(1)
-                    self.tree.setItemWidget(t_item, 1, status_widget)
+                        # Column 2: Leads Harvested
+                        leads_count = target.get("leads_harvested", 0)
+                        leads_wrap = QWidget()
+                        leads_wrap.setFixedHeight(32)
+                        leads_wrap.setStyleSheet("background: transparent;")
+                        leads_lay = hbox(leads_wrap, (0, 0, 0, 0), 0)
+                        leads_lbl = QLabel(f"{leads_count:,} leads" if leads_count else "—")
+                        leads_lbl.setStyleSheet(f"color: {C['text_2'] if leads_count else C['muted']}; font-size: 12px; font-weight: {'600' if leads_count else 'normal'}; background: transparent;")
+                        leads_lay.addWidget(leads_lbl)
+                        leads_lay.addStretch(1)
+                        self.tree.setItemWidget(t_item, 2, leads_wrap)
 
-                    # Column 2: Leads Harvested
-                    leads_count = target.get("leads_harvested", 0)
-                    leads_wrap = QWidget()
-                    leads_wrap.setFixedHeight(32)
-                    leads_wrap.setStyleSheet("background: transparent;")
-                    leads_lay = hbox(leads_wrap, (0, 0, 0, 0), 0)
-                    leads_lbl = QLabel(f"{leads_count:,} leads" if leads_count else "—")
-                    leads_lbl.setStyleSheet(f"color: {C['text_2'] if leads_count else C['muted']}; font-size: 12px; font-weight: {'600' if leads_count else 'normal'}; background: transparent;")
-                    leads_lay.addWidget(leads_lbl)
-                    leads_lay.addStretch(1)
-                    self.tree.setItemWidget(t_item, 2, leads_wrap)
+                        # Column 3: Quick Action Launch in Map Harvest
+                        scrape_b = button("Scrape in Maps", "primary", icon_name="map_pin", size="sm")
+                        scrape_b.setFixedHeight(26)
+                        scrape_b.setStyleSheet(f"""
+                            QPushButton {{
+                                background: {C['ink']};
+                                color: #FFFFFF;
+                                font-size: 11px;
+                                font-weight: 600;
+                                border-radius: 4px;
+                                padding: 2px 10px;
+                                border: none;
+                            }}
+                            QPushButton:hover {{
+                                background: {C['ink_hover']};
+                            }}
+                        """)
+                        scrape_b.clicked.connect(lambda _c=False, _t=target: self._launch_in_map_harvest(_t))
+                        self.tree.setItemWidget(t_item, 3, scrape_b)
 
-                    # Column 3: Quick Action Launch in Map Harvest
-                    scrape_b = button("Scrape in Maps", "primary", icon_name="map_pin", size="sm")
-                    scrape_b.setFixedHeight(26)
-                    scrape_b.setStyleSheet(f"""
-                        QPushButton {{
-                            background: {C['ink']};
-                            color: #FFFFFF;
-                            font-size: 11px;
-                            font-weight: 600;
-                            border-radius: 4px;
-                            padding: 2px 10px;
-                            border: none;
-                        }}
-                        QPushButton:hover {{
-                            background: {C['ink_hover']};
-                        }}
-                    """)
-                    scrape_b.clicked.connect(lambda _c=False, _t=target: self._launch_in_map_harvest(_t))
-                    self.tree.setItemWidget(t_item, 3, scrape_b)
+                        # Column 4: Actions (Toggle Scraped, Edit, Delete)
+                        t_act_wrap = QWidget()
+                        t_act_wrap.setFixedHeight(32)
+                        t_act_wrap.setStyleSheet("background: transparent;")
+                        t_act_lay = hbox(t_act_wrap, (0, 0, 0, 0), 4)
 
-                    # Column 4: Actions (Toggle Scraped, Edit, Delete)
-                    t_act_wrap = QWidget()
-                    t_act_wrap.setFixedHeight(32)
-                    t_act_wrap.setStyleSheet("background: transparent;")
-                    t_act_lay = hbox(t_act_wrap, (0, 0, 0, 0), 4)
+                        toggle_btn = button("", "ghost", icon_name="check" if not is_scraped else "refresh", size="sm")
+                        toggle_btn.setFixedSize(24, 24)
+                        toggle_btn.setToolTip("Mark as Scraped" if not is_scraped else "Mark as Not Scraped")
+                        toggle_btn.clicked.connect(lambda _c=False, _t=target, _val=not is_scraped: self._toggle_target_scraped(_t, _val))
+                        t_act_lay.addWidget(toggle_btn)
 
-                    toggle_btn = button("", "ghost", icon_name="check" if not is_scraped else "refresh", size="sm")
-                    toggle_btn.setFixedSize(24, 24)
-                    toggle_btn.setToolTip("Mark as Scraped" if not is_scraped else "Mark as Not Scraped")
-                    toggle_btn.clicked.connect(lambda _c=False, _t=target, _val=not is_scraped: self._toggle_target_scraped(_t, _val))
-                    t_act_lay.addWidget(toggle_btn)
+                        edit_t_btn = button("", "ghost", icon_name="edit", size="sm", tooltip="Edit Niche Target")
+                        edit_t_btn.setFixedSize(24, 24)
+                        edit_t_btn.clicked.connect(lambda _c=False, _t=target: self.edit_target_modal(_t))
+                        t_act_lay.addWidget(edit_t_btn)
 
-                    edit_t_btn = button("", "ghost", icon_name="edit", size="sm", tooltip="Edit Niche Target")
-                    edit_t_btn.setFixedSize(24, 24)
-                    edit_t_btn.clicked.connect(lambda _c=False, _t=target: self.edit_target_modal(_t))
-                    t_act_lay.addWidget(edit_t_btn)
+                        del_t_btn = button("", "ghost", icon_name="trash", size="sm", tooltip="Delete Target")
+                        del_t_btn.setFixedSize(24, 24)
+                        del_t_btn.clicked.connect(lambda _c=False, _t=target: self.delete_target(_t))
+                        t_act_lay.addWidget(del_t_btn)
+                        t_act_lay.addStretch(1)
+                        self.tree.setItemWidget(t_item, 4, t_act_wrap)
 
-                    del_t_btn = button("", "ghost", icon_name="trash", size="sm", tooltip="Delete Target")
-                    del_t_btn.setFixedSize(24, 24)
-                    del_t_btn.clicked.connect(lambda _c=False, _t=target: self.delete_target(_t))
-                    t_act_lay.addWidget(del_t_btn)
-                    t_act_lay.addStretch(1)
-                    self.tree.setItemWidget(t_item, 4, t_act_wrap)
+                    # Preserve Area expanded/collapsed state (only expand if it was open or filter active)
+                    expand_a = is_filtered or (str(aid) in self._expanded_areas)
+                    a_item.setExpanded(bool(expand_a))
 
-        # Empty state when filter or search matches nothing
-        if rendered_countries == 0:
-            empty_item = QTreeWidgetItem(self.tree)
-            msg = "No targets match the current filter." if is_filtered else "No countries added yet. Click 'Add Country' above to start planning."
-            empty_item.setText(0, msg)
-            empty_item.setForeground(0, QColor(C["text_3"]))
-            f = QFont()
-            f.setItalic(True)
-            empty_item.setFont(0, f)
+                # Preserve Country expanded/collapsed state
+                expand_c = (
+                    is_filtered
+                    or (str(cid) in self._expanded_countries)
+                    or any(str(a["id"]) in self._expanded_areas for a, _ in areas_to_render)
+                )
+                c_item.setExpanded(bool(expand_c))
 
-        # Expand all nodes cleanly without animation jitter
-        self.tree.expandAll()
+            # Empty state when filter or search matches nothing
+            if rendered_countries == 0:
+                empty_item = QTreeWidgetItem(self.tree)
+                msg = "No targets match the current filter." if is_filtered else "No countries added yet. Click 'Add Country' above to start planning."
+                empty_item.setText(0, msg)
+                empty_item.setForeground(0, QColor(C["text_3"]))
+                f = QFont()
+                f.setItalic(True)
+                empty_item.setFont(0, f)
+
+            self._has_rendered_once = True
+        finally:
+            self._is_rendering = False
 
     # ── Context Menu ──────────────────────────────────────────────────────────
 
@@ -508,8 +637,8 @@ class ScrapePlannerPage(Page):
         if not item:
             menu.addAction("Add Country...", self.create_country_modal)
             menu.addSeparator()
-            menu.addAction("Expand All", self.tree.expandAll)
-            menu.addAction("Collapse All", self.tree.collapseAll)
+            menu.addAction("Expand All", self._expand_all_items)
+            menu.addAction("Collapse All", self._collapse_all_items)
             menu.addAction("Refresh", self.load)
             menu.exec(self.tree.viewport().mapToGlobal(pos))
             return
@@ -540,8 +669,8 @@ class ScrapePlannerPage(Page):
             menu.addAction("Delete Target...", lambda: self.delete_target(data))
 
         menu.addSeparator()
-        menu.addAction("Expand All", self.tree.expandAll)
-        menu.addAction("Collapse All", self.tree.collapseAll)
+        menu.addAction("Expand All", self._expand_all_items)
+        menu.addAction("Collapse All", self._collapse_all_items)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     # ── Map Harvest Integration ───────────────────────────────────────────────
@@ -583,8 +712,18 @@ class ScrapePlannerPage(Page):
             vals = dlg.values()
             if not vals.get("name"):
                 return
+
+            def _on_country_added(res):
+                cid = res.get("id") if isinstance(res, dict) else None
+                if cid:
+                    self._expanded_countries.add(str(cid))
+                    self._ensure_expanded_countries.add(str(cid))
+                    self._remember_last_choice(cid, None)
+                toast(self, "Country added successfully!", "success")
+                self.load()
+
             tasks.run(api.post, "/api/scrape-planner/countries", vals,
-                      on_done=lambda _r: (toast(self, "Country added successfully!", "success"), self.load()),
+                      on_done=_on_country_added,
                       on_error=lambda e: show_error(self, e), owner=self)
 
     def edit_country_modal(self, country):
@@ -599,20 +738,39 @@ class ScrapePlannerPage(Page):
         if not confirm(self, f"Delete country '{country['name']}'?", "This will also remove all cities and niche targets within this country.", "Delete"):
             return
         tasks.run(api.delete, f"/api/scrape-planner/countries/{country['id']}",
-                  on_done=lambda _r: (toast(self, "Country deleted.", "success"), self.load()),
-                  on_error=lambda e: show_error(self, e), owner=self)
+                      on_done=lambda _r: (toast(self, "Country deleted.", "success"), self.load()),
+                      on_error=lambda e: show_error(self, e), owner=self)
 
     def create_area_modal(self, default_country_id=None):
         if not self._all_countries:
             toast(self, "Add at least one country before creating areas.", "warning")
             return
+        if not default_country_id and self._last_country_id:
+            if any(str(c.get("id")) == str(self._last_country_id) for c in self._all_countries):
+                default_country_id = self._last_country_id
         dlg = AreaDialog(self, self._all_countries, default_country_id=default_country_id)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             vals = dlg.values()
             if not vals.get("name"):
                 return
+            chosen_cid = vals.get("country_id")
+            if chosen_cid:
+                self._expanded_countries.add(str(chosen_cid))
+                self._ensure_expanded_countries.add(str(chosen_cid))
+                self._remember_last_choice(chosen_cid, None)
+
+            def _on_area_added(res):
+                aid = res.get("id") if isinstance(res, dict) else None
+                if aid:
+                    self._expanded_areas.add(str(aid))
+                    self._ensure_expanded_areas.add(str(aid))
+                    if chosen_cid:
+                        self._remember_last_choice(chosen_cid, aid)
+                toast(self, "Area added successfully!", "success")
+                self.load()
+
             tasks.run(api.post, "/api/scrape-planner/areas", vals,
-                      on_done=lambda _r: (toast(self, "Area added successfully!", "success"), self.load()),
+                      on_done=_on_area_added,
                       on_error=lambda e: show_error(self, e), owner=self)
 
     def edit_area_modal(self, area):
@@ -637,11 +795,54 @@ class ScrapePlannerPage(Page):
         if not self._all_areas:
             toast(self, "Add an area first before creating niche targets.", "warning")
             return
-        dlg = TargetDialog(self, self._all_countries, self._all_areas, default_country_id=default_country_id, default_area_id=default_area_id)
+
+        # Pre-select last chosen area if opening from header button without explicit defaults
+        if not default_area_id and self._last_area_id:
+            if any(str(a.get("id")) == str(self._last_area_id) for a in self._all_areas):
+                default_area_id = self._last_area_id
+                if not default_country_id:
+                    default_country_id = self._last_country_id
+
+        if default_area_id and not default_country_id:
+            for a in self._all_areas:
+                if str(a.get("id")) == str(default_area_id):
+                    default_country_id = a.get("country_id")
+                    break
+
+        if not default_country_id and self._last_country_id:
+            if any(str(c.get("id")) == str(self._last_country_id) for c in self._all_countries):
+                default_country_id = self._last_country_id
+
+        dlg = TargetDialog(
+            self,
+            self._all_countries,
+            self._all_areas,
+            default_country_id=default_country_id,
+            default_area_id=default_area_id
+        )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             vals = dlg.values()
             if not vals.get("niche"):
                 return
+
+            target_area_id = vals.get("area_id")
+            target_country_id = None
+            for a in self._all_areas:
+                if str(a.get("id")) == str(target_area_id):
+                    target_country_id = a.get("country_id")
+                    break
+
+            # Store last choice so subsequent clicks on header "Add Niche Target" button pre-select this area
+            self._remember_last_choice(target_country_id, target_area_id)
+
+            # Ensure ONLY the country and area whose niche is being added will be expanded; all others stay intact
+            if target_country_id:
+                self._expanded_countries.add(str(target_country_id))
+                self._ensure_expanded_countries.add(str(target_country_id))
+            if target_area_id:
+                self._expanded_areas.add(str(target_area_id))
+                self._ensure_expanded_areas.add(str(target_area_id))
+
             tasks.run(api.post, "/api/scrape-planner/targets", vals,
                       on_done=lambda _r: (toast(self, "Niche target added to tree!", "success"), self.load()),
                       on_error=lambda e: show_error(self, e), owner=self)
@@ -650,6 +851,19 @@ class ScrapePlannerPage(Page):
         dlg = TargetDialog(self, self._all_countries, self._all_areas, target=target)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             vals = dlg.values()
+            target_area_id = vals.get("area_id") or target.get("area_id")
+            target_country_id = None
+            for a in self._all_areas:
+                if str(a.get("id")) == str(target_area_id):
+                    target_country_id = a.get("country_id")
+                    break
+            if target_country_id:
+                self._expanded_countries.add(str(target_country_id))
+                self._ensure_expanded_countries.add(str(target_country_id))
+            if target_area_id:
+                self._expanded_areas.add(str(target_area_id))
+                self._ensure_expanded_areas.add(str(target_area_id))
+
             tasks.run(api.patch, f"/api/scrape-planner/targets/{target['id']}", vals,
                       on_done=lambda _r: (toast(self, "Target updated.", "success"), self.load()),
                       on_error=lambda e: show_error(self, e), owner=self)
