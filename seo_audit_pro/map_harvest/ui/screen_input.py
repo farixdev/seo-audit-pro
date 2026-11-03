@@ -155,10 +155,10 @@ class InputScreen(QWidget):
         limit_header = QHBoxLayout()
         limit_header.addWidget(self._section_label("Max Results"))
         limit_header.addStretch()
-        self.max_results_label = QLabel("50")
+        self.max_results_label = QLabel("100")
         self.max_results_label.setObjectName("muted")
         self.all_results_cb = QCheckBox("Scrape all results (no limit)")
-        self.all_results_cb.setChecked(True)
+        self.all_results_cb.setChecked(False)
         self.all_results_cb.toggled.connect(self._on_all_results_toggled)
         limit_header.addWidget(self.all_results_cb)
         limit_header.addSpacing(10)
@@ -170,7 +170,7 @@ class InputScreen(QWidget):
         self.max_results_slider.setObjectName("limit_slider")
         self.max_results_slider.setMinimum(5)
         self.max_results_slider.setMaximum(500)
-        self.max_results_slider.setValue(500)
+        self.max_results_slider.setValue(100)
         self.max_results_slider.setTickPosition(QSlider.TicksBelow)
         self.max_results_slider.setTickInterval(25)
         self.max_results_slider.valueChanged.connect(self._on_max_slider_changed)
@@ -333,14 +333,6 @@ class InputScreen(QWidget):
         self.min_reviews_spin.setFixedWidth(90)
         grid.addWidget(self.min_reviews_spin, 1, 1)
 
-        grid.addWidget(QLabel("Maximum reviews"), 2, 0)
-        self.max_reviews_spin = QSpinBox()
-        self.max_reviews_spin.setObjectName("spin")
-        self.max_reviews_spin.setRange(0, 1000000)
-        self.max_reviews_spin.setSingleStep(10)
-        self.max_reviews_spin.setSpecialValueText("No cap")
-        self.max_reviews_spin.setFixedWidth(90)
-        grid.addWidget(self.max_reviews_spin, 2, 1)
         grid.setColumnStretch(2, 1)
         layout.addLayout(grid)
         rev_hint = QLabel("Review filters open each listing to read the exact count (slower).")
@@ -495,7 +487,6 @@ class InputScreen(QWidget):
     def _reset_filters(self):
         self.min_rating_spin.setValue(0.0)
         self.min_reviews_spin.setValue(0)
-        self.max_reviews_spin.setValue(0)
         self.website_combo.setCurrentIndex(0)
         self.claim_combo.setCurrentIndex(0)
         self.require_phone_cb.setChecked(False)
@@ -507,12 +498,12 @@ class InputScreen(QWidget):
     # ── Settings glue ────────────────────────────────────────────────────────
     def _apply_settings_to_ui(self):
         cap = max(int(self.settings.get("max_limit_cap", 500)), 500)
-        scrape_all = bool(self.settings.get("scrape_all", True))
+        scrape_all = bool(self.settings.get("scrape_all", False))
         self.all_results_cb.blockSignals(True)
         self.all_results_cb.setChecked(scrape_all)
         self.all_results_cb.blockSignals(False)
         self.max_results_slider.setEnabled(not scrape_all)
-        default_max = int(self.settings.get("default_max_results", 50))
+        default_max = int(self.settings.get("default_max_results", 100))
         self.limit_cap_spin.blockSignals(True)
         self.limit_cap_spin.setValue(cap)
         self.limit_cap_spin.blockSignals(False)
@@ -672,7 +663,7 @@ class InputScreen(QWidget):
         return {
             "min_rating": self.min_rating_spin.value(),
             "min_reviews": self.min_reviews_spin.value(),
-            "max_reviews": self.max_reviews_spin.value(),
+            "max_reviews": 0,
             "require_phone": self.require_phone_cb.isChecked(),
             "require_website": self.website_combo.currentIndex() == 1,
             "require_no_website": self.website_combo.currentIndex() == 2,

@@ -394,7 +394,7 @@ def _scroll_for_more(driver, timeout: float = 8.0) -> bool:
     step = 0
     start = time.time()
     while time.time() - start < timeout:
-        time.sleep(0.4)
+        time.sleep(0.22)
         if _feed_card_count(driver) > before:
             return True
         if _is_end_of_list(driver):

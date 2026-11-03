@@ -326,7 +326,7 @@ def _guess_contact_url(html: str, base_url: str) -> str:
     return urls[0] if urls else ""
 
 
-def enrich_website(url: str, timeout: float = 8.0, fields: tuple = ENRICH_KEYS) -> dict:
+def enrich_website(url: str, timeout: float = 4.5, fields: tuple = ENRICH_KEYS) -> dict:
     """Fetch a business website (home + Contact Us / About pages) and extract contacts.
 
     Returns only the requested `fields`. Never raises — failures yield "".
@@ -348,7 +348,7 @@ def enrich_website(url: str, timeout: float = 8.0, fields: tuple = ENRICH_KEYS) 
     if not contacts.get("email"):
         for contact_url in _guess_contact_urls(html, url)[:2]:
             try:
-                chtml = _fetch(contact_url, timeout=min(timeout, 6.0))
+                chtml = _fetch(contact_url, timeout=min(timeout, 3.2))
                 if not chtml:
                     continue
                 extra = extract_contacts(chtml, url)

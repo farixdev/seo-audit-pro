@@ -20,7 +20,7 @@ import os
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import (QFileDialog, QFrame, QMenu, QSplitter, QStackedWidget, QTreeWidget, QTreeWidgetItem,
+from PySide6.QtWidgets import (QDialog, QFileDialog, QFrame, QMenu, QSplitter, QStackedWidget, QTreeWidget, QTreeWidgetItem,
                                QWidget)
 
 from seo_audit_pro import icons
@@ -31,8 +31,22 @@ from seo_audit_pro.theme import C
 from seo_audit_pro.ui.pages.base import Page
 from seo_audit_pro.ui.pages.lead_dialogs import AssignDialog, LeadFormDialog, delete_leads, load_assignees, set_archived, start_audit
 from seo_audit_pro.widgets.common import Badge, MetricStrip, Segmented, StatefulArea, button, hbox, label, vbox
-from seo_audit_pro.widgets.feedback import Drawer, SearchBox, combo, show_error, toast
+from seo_audit_pro.widgets.feedback import Dialog, Drawer, Field, SearchBox, combo, line_edit, show_error, toast
 from seo_audit_pro.widgets.table import Column, DataTable
+
+class QuickEditDialog(Dialog):
+    """In-place modal to edit domain or area with Enter-key and Esc support."""
+    def __init__(self, parent, title, label_text, current_val, placeholder=""):
+        super().__init__(parent, title, "", 460)
+        self.edit = line_edit(placeholder, current_val or "")
+        self.body.addWidget(Field(label_text, self.edit))
+        self.add_button("Cancel")
+        save_btn = self.add_button("Save Changes", "primary")
+        save_btn.clicked.connect(self.accept)
+        self.edit.returnPressed.connect(self.accept)
+
+    def value(self):
+        return self.edit.text().strip()
 
 STATUS_FILTER = [("Any status", ""), ("New", "new"), ("Assigned", "assigned"), ("Audited", "audited"),
                  ("Contacted", "contacted"), ("Qualified", "qualified"), ("Won", "won"), ("Lost", "lost"),
@@ -416,11 +430,7 @@ class LeadsPage(Page):
         self.area_filter = combo([("All areas", "")])
         self.area_filter.currentIndexChanged.connect(lambda _i: self._set(area=self.area_filter.currentData()))
         bar.addWidget(self.area_filter)
-        self.team = combo([("All teams", "")])
         self.agent = combo([("Anyone", "")])
-        if session.is_manager():
-            self.team.currentIndexChanged.connect(lambda _i: self._set(team_id=self.team.currentData()))
-            bar.addWidget(self.team)
         if self.manage:
             self.agent.currentIndexChanged.connect(lambda _i: self._set(agent_id=self.agent.currentData()))
             bar.addWidget(self.agent)
@@ -497,11 +507,14 @@ class LeadsPage(Page):
 
         cols = [Column("_check", "", "check", 40)]
         cols += [
-            Column("company", "Company · Website", "strong", 260, sort="company", stretch=True,
-                   secondary=lambda r: r.get("normalized_domain") or r.get("website") or "No website (Campaign 2 — Phone Pitch)"),
-            Column("niche", "Niche · Area", "text", 160, sort="niche", render=lambda r: r.get("niche") or "No niche",
-                   secondary=lambda r: r.get("area") or "No area"),
-            Column("rating", "Google", "text", 110, sort="rating", optional=True,
+            Column("company", "Company", "strong", 180, sort="company"),
+            Column("website", "Domain / Website (Double-click to Edit)", "text", 210, sort="website",
+                   render=lambda r: r.get("normalized_domain") or r.get("website") or "—",
+                   secondary=lambda r: "Double-click to edit domain" if (r.get("normalized_domain") or r.get("website")) else "Double-click to add domain"),
+            Column("niche", "Niche", "text", 130, sort="niche", render=lambda r: r.get("niche") or "—"),
+            Column("area", "Area / City (Double-click to Edit)", "text", 150, sort="area", render=lambda r: r.get("area") or "—",
+                   secondary=lambda r: "Double-click to edit area" if r.get("area") else ""),
+            Column("rating", "Google", "text", 95, sort="rating", optional=True,
                    render=lambda r: f"{r['rating']:.1f} rating" if r.get("rating") is not None else "—",
                    secondary=lambda r: f"{r['review_count']:,} reviews" if r.get("review_count") is not None else ""),
             Column("status", "Status", "status", 100, sort="status"),
@@ -522,7 +535,7 @@ class LeadsPage(Page):
         self.table.sort_changed.connect(lambda k, o: self._set(sort=k, order=o))
         self.table.page_changed.connect(lambda p: self._set(page=p, keep_page=True))
         self.table.page_size_changed.connect(lambda s: self._set(page_size=s))
-        self.table.activated.connect(lambda r: self.ws.navigate("lead", lead_id=r["id"]))
+        self.table.cell_double_clicked.connect(self._on_cell_double_clicked)
         self.table.context_requested.connect(self.row_menu)
         self.table.selection_changed.connect(self._selection)
         self.area = StatefulArea(_surface(self.table))
@@ -570,18 +583,10 @@ class LeadsPage(Page):
 
     def _options_loaded(self, opts):
         self.options = opts
-        if session.is_manager():
-            self.team.blockSignals(True)
-            self.team.clear()
-            self.team.addItem("All teams", "")
-            self.team.addItem("No team", "none")
-            for t in opts["teams"]:
-                self.team.addItem(t["name"], t["id"])
-            self.team.blockSignals(False)
         self.agent.blockSignals(True)
         self.agent.clear()
         self.agent.addItem("Anyone", "")
-        for p in opts["people"]:
+        for p in opts.get("people", []):
             self.agent.addItem(p["name"], p["id"])
         self.agent.blockSignals(False)
 
@@ -631,7 +636,7 @@ class LeadsPage(Page):
         self.search.blockSignals(True)
         self.search.clear()
         self.search.blockSignals(False)
-        for box in (self.status, self.area_filter, self.team, self.agent):
+        for box in (self.status, self.area_filter, self.agent):
             box.blockSignals(True)
             box.setCurrentIndex(0)
             box.blockSignals(False)
@@ -840,9 +845,46 @@ class LeadsPage(Page):
         set_archived(self, archived, lambda: (self.clear_selection(), self.load()),
                      leads=None if sel else self.table.selected_rows(), selection=sel)
 
+    def _on_cell_double_clicked(self, row, col_key):
+        if col_key in ("website", "normalized_domain"):
+            self._quick_edit_field(row, "website", "Edit Domain / Website", "Website or Domain URL:", "example.com")
+        elif col_key in ("area", "location"):
+            self._quick_edit_field(row, "area", "Edit Area / City", "Area, City or Region:", "e.g. Chicago IL")
+        else:
+            self.ws.navigate("lead", lead_id=row["id"])
+
+    def _quick_edit_field(self, row, field, title, label_text, placeholder=""):
+        cur_val = row.get(field) or ""
+        dlg = QuickEditDialog(self, title, label_text, cur_val, placeholder)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_val = dlg.value()
+        if new_val == cur_val:
+            return
+        payload = {field: new_val}
+        if "version" in row:
+            payload["version"] = row["version"]
+
+        def _on_done(res):
+            lead_data = res.get("lead", {})
+            row.update(lead_data)
+            row[field] = new_val
+            if field == "website":
+                row["normalized_domain"] = lead_data.get("normalized_domain") or new_val
+                row["has_website"] = bool(new_val)
+            self.table.model.layoutChanged.emit()
+            toast(self, f"Updated {title.lower()} successfully!", "success")
+
+        tasks.run(api.patch, f"/api/leads/{row['id']}", payload,
+                  on_done=_on_done, on_error=lambda e: show_error(self, e), owner=self)
+
     def row_menu(self, row, pos):
         m = QMenu(self)
         m.addAction(icons.icon("external", C["text_2"]), "Open", lambda: self.ws.navigate("lead", lead_id=row["id"]))
+        m.addAction(icons.icon("globe", C["text_2"]), "Edit Domain / Website",
+                    lambda: self._quick_edit_field(row, "website", "Edit Domain / Website", "Website or Domain URL:", "example.com"))
+        m.addAction(icons.icon("map_pin", C["text_2"]), "Edit Area / City",
+                    lambda: self._quick_edit_field(row, "area", "Edit Area / City", "Area, City or Region:", "e.g. Chicago IL"))
         if row["status"] != "archived":
             if row.get("last_audit_id"):
                 m.addAction(icons.icon("report", C["text_2"]), "Audit 1: View latest SEO audit (C1)",
@@ -915,19 +957,13 @@ class LeadsPage(Page):
             return
         toast(self, f"Auditing services for {len(ids)} selected lead(s)…", "info", 5000)
         def on_done(res):
-            toast(self, f"Completed service audits for {res.get('total', len(ids))} leads!", "success")
+            succeeded = res.get("succeeded", sum(1 for r in res.get("results", []) if r.get("ok")))
+            total = res.get("total", len(ids))
+            toast(self, f"Service audits completed: {succeeded}/{total} website(s) analyzed!", "success")
             self.clear_selection()
             self.load()
         payload = {"filter": self._filter_params()} if self.all_matching else {"lead_ids": ids}
         tasks.run(api.post, "/api/leads/mass-service-audit", payload, timeout=180, on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
-
-
-    def clean_duplicates(self):
-        def _done(res):
-            n = int(res.get("deleted") or 0)
-            toast(self, f"Removed {n:,} duplicate lead(s)." if n else "No duplicate leads found.", "success")
-            self.load()
-        tasks.run(api.post, "/api/leads/deduplicate", {}, on_done=_done, on_error=lambda e: show_error(self, e), owner=self)
 
     def bulk_pitch(self):
         ids = self.table.selected_ids()
@@ -935,16 +971,10 @@ class LeadsPage(Page):
             return
         toast(self, f"Comparing services & generating pitches for {len(ids)} lead(s)…", "info", 5000)
         def on_done(res):
-            toast(self, f"Generated service pitches for {res.get('total', len(ids))} leads!", "success")
+            succeeded = res.get("succeeded", sum(1 for r in res.get("results", []) if r.get("ok")))
+            total = res.get("total", len(ids))
+            toast(self, f"Service pitches generated: {succeeded}/{total} lead(s)!", "success")
             self.clear_selection()
             self.load()
         payload = {"filter": self._filter_params()} if self.all_matching else {"lead_ids": ids}
         tasks.run(api.post, "/api/leads/mass-service-pitch", payload, timeout=180, on_done=on_done, on_error=lambda err: show_error(self, err), owner=self)
-
-
-    def clean_duplicates(self):
-        def _done(res):
-            n = int(res.get("deleted") or 0)
-            toast(self, f"Removed {n:,} duplicate lead(s)." if n else "No duplicate leads found.", "success")
-            self.load()
-        tasks.run(api.post, "/api/leads/deduplicate", {}, on_done=_done, on_error=lambda e: show_error(self, e), owner=self)

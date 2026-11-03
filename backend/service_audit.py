@@ -194,10 +194,20 @@ def extract_website_services(url):
     schema_services = []
     base_domain = urlparse(url).netloc.lower().lstrip("www.")
 
+    resp = None
     try:
-        resp = session.get(url, timeout=8, verify=False)
-        if resp.status_code < 400 and resp.text:
-            raw_html_blobs.append(resp.text)
+        resp = session.get(url, timeout=6, verify=False)
+    except Exception as e:
+        if url.startswith("https://"):
+            try:
+                resp = session.get("http://" + url[8:], timeout=5, verify=False)
+            except Exception:
+                resp = None
+        log.info("Homepage fetch attempt on %s: %s", url, e)
+
+    if resp and resp.status_code < 400 and resp.text:
+        raw_html_blobs.append(resp.text)
+        try:
             soup = BeautifulSoup(resp.text, "html.parser")
             title = soup.title.string.strip() if soup.title and soup.title.string else ""
             h1s = [h.get_text(" ", strip=True) for h in soup.find_all("h1") if h.get_text(strip=True)]
@@ -248,12 +258,12 @@ def extract_website_services(url):
                 f"Headings: {' | '.join(h2s + h3s)}\nNav Services: {' | '.join(nav_service_candidates[:10])}\n"
                 f"Bullets: {' | '.join(li_items[:12])}\nExcerpt: {body_snippet}"
             )
-    except Exception as e:
-        log.warning("Could not fetch homepage %s: %s", url, e)
+        except Exception as e:
+            log.warning("Error parsing homepage for %s: %s", url, e)
 
     def _fetch_sub(s_url):
         try:
-            r = session.get(s_url, timeout=6, verify=False)
+            r = session.get(s_url, timeout=3.5, verify=False)
             if r.status_code < 400 and r.text:
                 s_soup = BeautifulSoup(r.text, "html.parser")
                 s_h1 = [h.get_text(" ", strip=True) for h in s_soup.find_all("h1") if h.get_text(strip=True)]
@@ -264,13 +274,41 @@ def extract_website_services(url):
             pass
         return None, None
 
-    if service_links[:3]:
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            for sub_html, sub_txt in pool.map(_fetch_sub, service_links[:3]):
-                if sub_html:
-                    raw_html_blobs.append(sub_html)
-                if sub_txt:
-                    pages_text.append(sub_txt)
+    # Fetch subpages sequentially to prevent thread pool deadlocks and connection exhaustion
+    for s_url in service_links[:2]:
+        sub_html, sub_txt = _fetch_sub(s_url)
+        if sub_html:
+            raw_html_blobs.append(sub_html)
+        if sub_txt:
+            pages_text.append(sub_txt)
+
+    if not raw_html_blobs:
+        return {
+            "website": url,
+            "services": ["Local Business & Professional Services"],
+            "what_we_can_provide": [
+                "Website Restoration & Modernization",
+                "High-Speed Cloud Hosting & SSL Security",
+                "Mobile-First Responsive Website Redesign",
+                "Local SEO & Google Business Profile Optimization"
+            ],
+            "digital_gaps": [
+                "Website is unreachable, slow or experiencing server downtime",
+                "Missing reliable SSL certificate and modern cloud infrastructure",
+                "Losing potential customer inquiries due to website loading failure"
+            ],
+            "unreachable": True,
+            "has_online_booking": False,
+            "has_live_chat": False,
+            "has_lead_form": False,
+            "has_ad_pixels": False,
+            "has_schema_markup": False,
+            "has_testimonials": False,
+            "scanned_pages": 0,
+            "raw_context": "Website connection failed or timed out.",
+            "summary_text": "Website is offline or unresponsive. Opportunity: Website Restoration, Modern Hosting & Redesign.",
+            "audited_at": now_iso(),
+        }
 
     combined_text = "\n\n".join(pages_text)
     combined_html = "\n".join(raw_html_blobs)
@@ -361,7 +399,7 @@ def extract_website_services(url):
     return summary
 
 
-def compare_and_generate_pitch(lead, service_data, agency_services=None, sender_name="Our Team"):
+def compare_and_generate_pitch(lead, service_data, agency_services=None, sender_name="Our Team", llm_creds=None, custom_instructions=None):
     """
     Compare lead's scraped website & conversion gaps against the user's Agency Services.
     Uses the configured LLM to:
@@ -378,23 +416,38 @@ def compare_and_generate_pitch(lead, service_data, agency_services=None, sender_
     area = lead.get("area") or ""
 
     if not sender_name or sender_name.lower() in ("mindcob", "mindcob team", "faris@mindcob.com"):
-        smtp_row = db.query_one("SELECT from_name FROM smtp_settings WHERE id = 'default'")
-        sender_name = (smtp_row.get("from_name") if smtp_row and smtp_row.get("from_name") else None) or "Outreach Team"
+        try:
+            smtp_row = db.query_one("SELECT from_name FROM smtp_settings WHERE id = 'default'")
+            sender_name = (smtp_row.get("from_name") if smtp_row and smtp_row.get("from_name") else None) or "Outreach Team"
+        except Exception:
+            sender_name = "Outreach Team"
 
     services_list = list(service_data.get("services") or [])
     gaps_list = list(service_data.get("digital_gaps") or [])
     we_can_provide = list(service_data.get("what_we_can_provide") or [])
     raw_context = (service_data.get("raw_context") or "")[:1800]
 
-    cfg = get_agency_settings()
-    if not agency_services:
-        agency_services = cfg.get("services") or DEFAULT_AGENCY_SERVICES
-    custom_instructions = (cfg.get("custom_instructions") or "").strip()
+    if agency_services is None:
+        try:
+            cfg = get_agency_settings()
+            agency_services = cfg.get("services") or DEFAULT_AGENCY_SERVICES
+            if custom_instructions is None:
+                custom_instructions = (cfg.get("custom_instructions") or "").strip()
+        except Exception:
+            agency_services = DEFAULT_AGENCY_SERVICES
+            custom_instructions = custom_instructions or ""
+
+    if custom_instructions is None:
+        custom_instructions = ""
 
     llm_result = None
     try:
-        api_key, provider, model = get_llm_credentials()
-        if api_key:
+        if llm_creds:
+            api_key, provider, model = llm_creds
+        else:
+            api_key, provider, model = get_llm_credentials()
+
+        if api_key and not service_data.get("unreachable"):
             sys_prompt = (
                 "You are an elite B2B website auditor and agency growth strategist. "
                 "Your job is to inspect a business's scraped website signals, identify the exact services "

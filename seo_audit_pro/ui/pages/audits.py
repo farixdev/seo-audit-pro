@@ -610,9 +610,26 @@ class ServiceAuditsView(QWidget):
             toast(self, "No leads available to audit.", "warning")
             return
         toast(self, f"Auditing website services & scoring {len(ids)} lead(s)…", "info", 5000)
+        self.audit_sel_btn.setEnabled(False)
+        orig_text = self.audit_sel_btn.text()
+        self.audit_sel_btn.setText("Auditing Services…")
+
+        def _on_done(res):
+            self.audit_sel_btn.setEnabled(True)
+            self.audit_sel_btn.setText(orig_text)
+            succeeded = res.get("succeeded", sum(1 for r in res.get("results", []) if r.get("ok")))
+            total = res.get("total", len(ids))
+            toast(self, f"Service Audits: {succeeded}/{total} analyzed successfully!", "success")
+            self.table.clear_selection()
+            self.load()
+
+        def _on_err(e):
+            self.audit_sel_btn.setEnabled(True)
+            self.audit_sel_btn.setText(orig_text)
+            show_error(self, e)
+
         tasks.run(api.post, "/api/leads/mass-service-audit", {"lead_ids": ids},
-                  on_done=lambda res: (toast(self, f"Audited & scored {res.get('total', len(ids))} website(s)!", "success"), self.table.clear_selection(), self.load()),
-                  on_error=lambda e: show_error(self, e), owner=self)
+                  on_done=_on_done, on_error=_on_err, owner=self)
 
     def run_selected_pitch(self):
         ids = self.table.selected_ids() or [r["id"] for r in self.table.model.rows[:25]]
@@ -620,9 +637,26 @@ class ServiceAuditsView(QWidget):
             toast(self, "No leads available to score.", "warning")
             return
         toast(self, f"Comparing {len(ids)} lead(s) against your Agency Services…", "info", 5000)
+        self.pitch_sel_btn.setEnabled(False)
+        orig_text = self.pitch_sel_btn.text()
+        self.pitch_sel_btn.setText("Scoring Pitches…")
+
+        def _on_done(res):
+            self.pitch_sel_btn.setEnabled(True)
+            self.pitch_sel_btn.setText(orig_text)
+            succeeded = res.get("succeeded", sum(1 for r in res.get("results", []) if r.get("ok")))
+            total = res.get("total", len(ids))
+            toast(self, f"Updated pitches for {succeeded}/{total} lead(s)!", "success")
+            self.table.clear_selection()
+            self.load()
+
+        def _on_err(e):
+            self.pitch_sel_btn.setEnabled(True)
+            self.pitch_sel_btn.setText(orig_text)
+            show_error(self, e)
+
         tasks.run(api.post, "/api/leads/mass-service-pitch", {"lead_ids": ids},
-                  on_done=lambda res: (toast(self, f"Updated match scores & pitches for {res.get('total', len(ids))} lead(s)!", "success"), self.table.clear_selection(), self.load()),
-                  on_error=lambda e: show_error(self, e), owner=self)
+                  on_done=_on_done, on_error=_on_err, owner=self)
 
 
 class AuditsPage(Page):

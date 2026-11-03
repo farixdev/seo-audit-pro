@@ -126,7 +126,7 @@ class LeadPickerDialog(Dialog):
         self._gen += 1
         gen = self._gen
         self.status.setText("Searching…")
-        params = {"page_size": 25, "sort": "company", "order": "asc"}
+        params = {"page_size": 25, "sort": "company", "order": "asc", "has_website": "yes"}
         if text:
             params["search"] = text
 
@@ -249,11 +249,10 @@ class ComposePanel(QWidget):
         camp_row = hbox(spacing=10)
         camp_row.addWidget(label("Outreach Campaign:", "FieldLabel"))
         self.campaign_picker = Segmented([
-            ("Campaign 1: SEO Report", "seo_audit"),
-            ("Campaign 2: Website Pitch (No Site)", "website_pitch"),
+            ("Campaign 1: SEO Report Pitch", "seo_audit"),
             ("Campaign 3: Service Comparison Pitch", "service_pitch")
         ])
-        self.campaign_picker.changed.connect(lambda _v: self.generate())
+        self.campaign_picker.changed.connect(lambda v: (self.attach_pdf_cb.setChecked(v == "seo_audit"), self.generate()))
         camp_row.addWidget(self.campaign_picker, 1)
         outer.addLayout(camp_row)
 
@@ -344,12 +343,12 @@ class ComposePanel(QWidget):
             self.subject.clear()
             self.body_edit.clear()
             self.notice.clear()
-        if campaign in ("seo_audit", "website_pitch", "service_pitch"):
+        if campaign in ("seo_audit", "service_pitch"):
             self.campaign_picker.set_value(campaign)
             self.attach_pdf_cb.setChecked(campaign == "seo_audit")
             self.generate()
         elif changed:
-            auto_camp = "website_pitch" if not lead.get("has_website", bool(lead.get("website"))) else ("service_pitch" if lead.get("services_audit_date") and not lead.get("last_audit_id") else "seo_audit")
+            auto_camp = "service_pitch" if lead.get("services_audit_date") and not lead.get("last_audit_id") else "seo_audit"
             self.campaign_picker.set_value(auto_camp)
             self.attach_pdf_cb.setChecked(auto_camp == "seo_audit")
         self._update_state()

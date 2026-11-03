@@ -424,9 +424,9 @@ def update_lead(lead_id):
         fields["status"] = status
     if not fields:
         raise ApiError(422, "Nothing to update.")
-    version = data.get("version")
+    version = data.get("version", lead.get("version", 1))
     if not isinstance(version, int):
-        raise ApiError(422, "The lead version is required to save changes.", field="version")
+        version = lead.get("version", 1)
     logged = dict(fields)
     fields.update(_derived(fields))
     with db.transaction() as tx:
@@ -1132,22 +1132,33 @@ def mass_service_audit():
         raise ApiError(422, "Select one or more leads to audit.")
     from backend import service_audit
     sender_name = g.user["name"]
+    cfg = service_audit.get_agency_settings()
+    agency_services = cfg.get("services") or service_audit.DEFAULT_AGENCY_SERVICES
+    custom_instructions = (cfg.get("custom_instructions") or "").strip()
+    llm_creds = service_audit.get_llm_credentials()
+
     rows = [db.query_one("SELECT * FROM leads WHERE id = %s", (lid,)) for lid in lead_ids[:50]]
     valid_rows = [r for r in rows if r and r.get("website") and not (r.get("normalized_domain") or "").startswith("no_site_")]
+    results_list = []
+    for r in rows:
+        if r and not (r.get("website") and not (r.get("normalized_domain") or "").startswith("no_site_")):
+            results_list.append({"id": r["id"], "ok": False, "error": "No website (Campaign 2 — Phone Only)"})
 
     def _work(row):
         lid = row["id"]
         try:
             s_data = service_audit.extract_website_services(row["website"])
-            pitch = service_audit.compare_and_generate_pitch(row, s_data, sender_name=sender_name)
+            pitch = service_audit.compare_and_generate_pitch(
+                row, s_data, agency_services=agency_services, sender_name=sender_name,
+                llm_creds=llm_creds, custom_instructions=custom_instructions
+            )
             return (lid, True, s_data, pitch, None)
         except Exception as e:
             return (lid, False, None, None, str(e))
 
-    results_list = []
     now = now_iso()
     if valid_rows:
-        with ThreadPoolExecutor(max_workers=min(6, len(valid_rows))) as pool:
+        with ThreadPoolExecutor(max_workers=min(3, len(valid_rows))) as pool:
             outcomes = list(pool.map(_work, valid_rows))
         with db.transaction() as tx:
             for lid, ok, s_data, pitch, err in outcomes:
@@ -1158,7 +1169,8 @@ def mass_service_audit():
                 else:
                     results_list.append({"id": lid, "ok": False, "error": err})
     cache.bump()
-    return jsonify({"results": results_list, "total": len(results_list)})
+    succeeded = sum(1 for r in results_list if r.get("ok"))
+    return jsonify({"results": results_list, "total": len(results_list), "succeeded": succeeded})
 
 
 @bp.post("/api/leads/mass-service-pitch")
@@ -1171,6 +1183,11 @@ def mass_service_pitch():
         raise ApiError(422, "Provide an array of lead_ids.")
     from backend import service_audit
     sender_name = g.user["name"]
+    cfg = service_audit.get_agency_settings()
+    agency_services = cfg.get("services") or service_audit.DEFAULT_AGENCY_SERVICES
+    custom_instructions = (cfg.get("custom_instructions") or "").strip()
+    llm_creds = service_audit.get_llm_credentials()
+
     rows = [db.query_one("SELECT * FROM leads WHERE id = %s", (lid,)) for lid in lead_ids[:50]]
     valid_rows = [r for r in rows if r]
 
@@ -1181,7 +1198,10 @@ def mass_service_pitch():
             if not s_data and row.get("website") and not (row.get("normalized_domain") or "").startswith("no_site_"):
                 s_data = service_audit.extract_website_services(row["website"])
             if s_data:
-                pitch = service_audit.compare_and_generate_pitch(row, s_data, sender_name=sender_name)
+                pitch = service_audit.compare_and_generate_pitch(
+                    row, s_data, agency_services=agency_services, sender_name=sender_name,
+                    llm_creds=llm_creds, custom_instructions=custom_instructions
+                )
                 return (lid, True, s_data, pitch, None)
             return (lid, False, None, None, "No website")
         except Exception as e:
@@ -1190,7 +1210,7 @@ def mass_service_pitch():
     results_list = []
     now = now_iso()
     if valid_rows:
-        with ThreadPoolExecutor(max_workers=min(6, len(valid_rows))) as pool:
+        with ThreadPoolExecutor(max_workers=min(3, len(valid_rows))) as pool:
             outcomes = list(pool.map(_work, valid_rows))
         with db.transaction() as tx:
             for lid, ok, s_data, pitch, err in outcomes:
@@ -1201,5 +1221,6 @@ def mass_service_pitch():
                 else:
                     results_list.append({"id": lid, "ok": False, "error": err})
     cache.bump()
-    return jsonify({"results": results_list, "total": len(results_list)})
+    succeeded = sum(1 for r in results_list if r.get("ok"))
+    return jsonify({"results": results_list, "total": len(results_list), "succeeded": succeeded})
 

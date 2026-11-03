@@ -212,6 +212,7 @@ class DataTable(QWidget):
     page_changed = Signal(int)
     page_size_changed = Signal(int)
     activated = Signal(dict)
+    cell_double_clicked = Signal(dict, str)
     selection_changed = Signal(list)
     context_requested = Signal(dict, object)  # row, global QPoint
 
@@ -394,7 +395,10 @@ class DataTable(QWidget):
 
     def _double(self, index):
         if index.isValid() and self.columns[index.column()].kind not in ("check", "actions"):
-            self.activated.emit(index.data(ROW_ROLE))
+            row = index.data(ROW_ROLE)
+            col_key = self.columns[index.column()].key
+            self.cell_double_clicked.emit(row, col_key)
+            self.activated.emit(row)
 
     def _context(self, pos):
         idx = self.view.indexAt(pos)
