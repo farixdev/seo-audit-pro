@@ -724,6 +724,7 @@ class InputScreen(QWidget):
     # ── Domain / area lists ──────────────────────────────────────────────────
     def prefill(self, niche=None, area=None, country=None, target_id=None):
         self.active_target_id = target_id
+        self.active_country = country or ""
         if niche:
             text = str(niche).strip()
             self.domain_input.setText(text)

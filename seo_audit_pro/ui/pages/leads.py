@@ -55,7 +55,7 @@ QUICK_VIEWS = {"": {}, "everyone": {}, "unassigned": {"assigned": "unassigned"},
                "contacted": {"outreach": "yes"}, "not_contacted": {"outreach": "no"}}
 REASONS = {"no_website": "No website", "invalid_website": "Website not usable",
            "duplicate_in_file": "Duplicate within file", "duplicate_existing": "Already in lead bank"}
-FILTER_KEYS = ("search", "status", "team_id", "agent_id", "assigned", "audited", "outreach", "niche", "area", "batch_id", "has_website", "call_status", "service_audited")
+FILTER_KEYS = ("search", "status", "team_id", "agent_id", "assigned", "audited", "outreach", "niche", "area", "batch_id", "has_website", "call_status", "service_audited", "country")
 
 
 def _surface(widget):
@@ -69,20 +69,20 @@ def _surface(widget):
 # Niche → area navigator
 # ---------------------------------------------------------------------------
 class LeadNavigator(QFrame):
-    """Tree of niches and their areas with counts; calls on_select(niche_key, area_key)."""
+    """Tree of Country -> Area -> Niche with counts; calls on_select(country_key, area_key, niche_key)."""
 
     def __init__(self, on_select):
         super().__init__()
         self.setObjectName("Surface")
         self.on_select = on_select
-        self.setMinimumWidth(230)
+        self.setMinimumWidth(240)
         lay = vbox(self, (12, 14, 12, 8), 10)
         head = hbox(spacing=6)
-        head.addWidget(label("Niches & areas", "SectionTitle"), 1)
+        head.addWidget(label("Country ➔ Area ➔ Niche", "SectionTitle"), 1)
         lay.addLayout(head)
         self.total = label("", "Meta")
         lay.addWidget(self.total)
-        self.search = SearchBox("Find a niche or area", delay=150)
+        self.search = SearchBox("Find country, area or niche", delay=150)
         self.search.search.connect(self._filter)
         lay.addWidget(self.search)
         self.tree = QTreeWidget()
@@ -101,7 +101,7 @@ class LeadNavigator(QFrame):
         hdr.setSectionResizeMode(1, hdr.ResizeMode.ResizeToContents)
         self.tree.itemClicked.connect(self._clicked)
         lay.addWidget(self.tree, 1)
-        self._selected = ("", "")
+        self._selected = ("", "", "")
 
     def set_data(self, facets):
         self.tree.blockSignals(True)
@@ -109,89 +109,142 @@ class LeadNavigator(QFrame):
         bold = QFont(self.font())
         bold.setWeight(QFont.Weight.DemiBold)
         all_item = QTreeWidgetItem(["All leads", fmt.number(facets.get("total", 0))])
-        all_item.setData(0, Qt.ItemDataRole.UserRole, ("", ""))
+        all_item.setData(0, Qt.ItemDataRole.UserRole, ("", "", ""))
         all_item.setFont(0, bold)
         all_item.setIcon(0, icons.icon("layers", C["text_2"], 15))
         self.tree.addTopLevelItem(all_item)
         selected_item = all_item
-        for n in facets.get("niches", []):
-            item = QTreeWidgetItem([n["label"], fmt.number(n["count"])])
-            item.setData(0, Qt.ItemDataRole.UserRole, (n["key"], ""))
-            item.setFont(0, bold)
-            item.setToolTip(0, f"{n['label']}: {n['count']:,} leads, {n['unassigned']:,} unassigned, "
-                               f"{len(n['areas'])} area(s)")
-            item.setForeground(1, QColor(C["text_3"]))
-            for a in n["areas"]:
-                child = QTreeWidgetItem([a["label"], fmt.number(a["count"])])
-                child.setData(0, Qt.ItemDataRole.UserRole, (n["key"], a["key"]))
-                child.setIcon(0, icons.icon("map_pin", C["text_3"], 13))
-                child.setToolTip(0, f"{n['label']} in {a['label']}: {a['count']:,} leads, "
-                                    f"{a['unassigned']:,} unassigned")
-                child.setForeground(1, QColor(C["text_3"]))
-                item.addChild(child)
-                if (n["key"], a["key"]) == self._selected:
-                    selected_item = child
-            self.tree.addTopLevelItem(item)
-            if (n["key"], "") == self._selected:
-                selected_item = item
-        self.total.setText(f"{len(facets.get('niches', []))} niches · {len(facets.get('areas', []))} areas")
+
+        hierarchy = facets.get("hierarchy") or facets.get("countries_tree") or []
+        total_countries = len(hierarchy)
+        total_areas = 0
+        total_niches = 0
+
+        for c in hierarchy:
+            c_item = QTreeWidgetItem([c["label"], fmt.number(c["count"])])
+            c_item.setData(0, Qt.ItemDataRole.UserRole, (c["key"], "", ""))
+            c_font = QFont(self.font())
+            c_font.setWeight(QFont.Weight.DemiBold)
+            c_item.setFont(0, c_font)
+            c_item.setIcon(0, icons.icon("globe", C["text_2"], 14))
+            c_item.setForeground(1, QColor(C["text_3"]))
+            c_item.setToolTip(0, f"Country: {c['label']} ({c['count']:,} leads)")
+
+            areas = c.get("areas", [])
+            total_areas += len(areas)
+            for a in areas:
+                a_item = QTreeWidgetItem([a["label"], fmt.number(a["count"])])
+                a_item.setData(0, Qt.ItemDataRole.UserRole, (c["key"], a["key"], ""))
+                a_item.setIcon(0, icons.icon("map_pin", C["text_3"], 13))
+                a_item.setForeground(1, QColor(C["text_3"]))
+                a_item.setToolTip(0, f"{a['label']} ({a['count']:,} leads)")
+
+                niches = a.get("niches", [])
+                total_niches += len(niches)
+                for n in niches:
+                    n_item = QTreeWidgetItem([n["label"], fmt.number(n["count"])])
+                    n_item.setData(0, Qt.ItemDataRole.UserRole, (c["key"], a["key"], n["key"]))
+                    n_item.setIcon(0, icons.icon("target", C["accent"], 13))
+                    n_item.setForeground(1, QColor(C["text_3"]))
+                    n_item.setToolTip(0, f"{n['label']} in {a['label']}: {n['count']:,} leads")
+                    a_item.addChild(n_item)
+                    if (c["key"], a["key"], n["key"]) == self._selected:
+                        selected_item = n_item
+
+                c_item.addChild(a_item)
+                if (c["key"], a["key"], "") == self._selected:
+                    selected_item = a_item
+
+            self.tree.addTopLevelItem(c_item)
+            if (c["key"], "", "") == self._selected:
+                selected_item = c_item
+
+        self.total.setText(f"{total_countries} countries · {total_areas} areas · {total_niches} niches")
         self.tree.setCurrentItem(selected_item)
-        if selected_item.parent():
-            selected_item.parent().setExpanded(True)
+        p = selected_item.parent()
+        while p:
+            p.setExpanded(True)
+            p = p.parent()
         self.tree.blockSignals(False)
         self._filter(self.search.text())
 
-    def _find(self, niche, area):
+    def _find(self, country, area, niche):
+        country = country or ""
+        area = area or ""
+        niche = niche or ""
         for i in range(self.tree.topLevelItemCount()):
             top = self.tree.topLevelItem(i)
-            if top.data(0, Qt.ItemDataRole.UserRole) == (niche, area):
+            if top.data(0, Qt.ItemDataRole.UserRole) == (country, area, niche):
                 return top
             for j in range(top.childCount()):
-                if top.child(j).data(0, Qt.ItemDataRole.UserRole) == (niche, area):
-                    return top.child(j)
+                mid = top.child(j)
+                if mid.data(0, Qt.ItemDataRole.UserRole) == (country, area, niche):
+                    return mid
+                for k in range(mid.childCount()):
+                    leaf = mid.child(k)
+                    if leaf.data(0, Qt.ItemDataRole.UserRole) == (country, area, niche):
+                        return leaf
         return None
 
-    def select(self, niche, area):
-        self._selected = (niche or "", area or "")
+    def select(self, country, area, niche):
+        self._selected = (country or "", area or "", niche or "")
         item = self._find(*self._selected)
         self.tree.blockSignals(True)
         if item:
             self.tree.setCurrentItem(item)
-            if item.parent():
-                item.parent().setExpanded(True)
+            p = item.parent()
+            while p:
+                p.setExpanded(True)
+                p = p.parent()
         else:
             self.tree.clearSelection()
         self.tree.blockSignals(False)
 
-    def label_for(self, niche, area):
-        item = self._find(niche or "", area or "")
+    def label_for(self, country, area, niche):
+        item = self._find(country or "", area or "", niche or "")
         if item:
-            return item.text(0) if not item.parent() else f"{item.parent().text(0)} › {item.text(0)}"
-        return " › ".join(x for x in (niche, area) if x).title()
+            parts = []
+            curr = item
+            while curr and curr.parent():
+                parts.insert(0, curr.text(0))
+                curr = curr.parent()
+            if curr:
+                parts.insert(0, curr.text(0))
+            return " › ".join(parts)
+        return " › ".join(x for x in (country, area, niche) if x).title()
 
     def _clicked(self, item, _col):
-        niche, area = item.data(0, Qt.ItemDataRole.UserRole)
-        self._selected = (niche, area)
-        if niche and not area:
-            item.setExpanded(True)
-        self.on_select(niche, area)
+        key = item.data(0, Qt.ItemDataRole.UserRole)
+        if key:
+            self._selected = key
+            if item.childCount() > 0:
+                item.setExpanded(True)
+            self.on_select(*key)
 
     def _filter(self, text):
         q = (text or "").strip().lower()
         for i in range(1, self.tree.topLevelItemCount()):
             top = self.tree.topLevelItem(i)
-            niche_hit = q in top.text(0).lower()
-            child_hit = False
+            top_match = q in top.text(0).lower()
+            any_mid_match = False
             for j in range(top.childCount()):
-                child = top.child(j)
-                hit = q in child.text(0).lower()
-                child.setHidden(bool(q) and not (niche_hit or hit))
-                child_hit = child_hit or (bool(q) and hit)
-            top.setHidden(bool(q) and not niche_hit and not child_hit)
-            if q and child_hit:
+                mid = top.child(j)
+                mid_match = q in mid.text(0).lower()
+                any_leaf_match = False
+                for k in range(mid.childCount()):
+                    leaf = mid.child(k)
+                    leaf_match = q in leaf.text(0).lower()
+                    leaf.setHidden(bool(q and not (top_match or mid_match or leaf_match)))
+                    if leaf_match:
+                        any_leaf_match = True
+                mid.setHidden(bool(q and not (top_match or mid_match or any_leaf_match)))
+                if mid_match or any_leaf_match:
+                    any_mid_match = True
+                    if q:
+                        mid.setExpanded(True)
+            top.setHidden(bool(q and not (top_match or any_mid_match)))
+            if q and (top_match or any_mid_match):
                 top.setExpanded(True)
-
-
 # ---------------------------------------------------------------------------
 # Imports tab
 # ---------------------------------------------------------------------------
@@ -510,7 +563,7 @@ class LeadsPage(Page):
             Column("website", "Domain / Website (Double-click to Edit)", "text", 210, sort="website",
                    render=lambda r: r.get("normalized_domain") or r.get("website") or "—",
                    secondary=lambda r: "Double-click to edit domain" if (r.get("normalized_domain") or r.get("website")) else "Double-click to add domain"),
-            Column("niche", "Niche", "text", 130, sort="niche", render=lambda r: r.get("niche") or "—"),
+            Column("niche", "Niche (Double-click to Edit)", "text", 130, sort="niche", render=lambda r: r.get("niche") or "—", secondary=lambda r: "Double-click to edit niche" if r.get("niche") else ""), 
             Column("area", "Area / City (Double-click to Edit)", "text", 150, sort="area", render=lambda r: r.get("area") or "—",
                    secondary=lambda r: "Double-click to edit area" if r.get("area") else ""),
             Column("rating", "Google", "text", 95, sort="rating", optional=True,
@@ -608,19 +661,19 @@ class LeadsPage(Page):
             kv.setdefault("assigned", "mine")
         self._set(**kv)
 
-    def _navigate_tree(self, niche, area):
+    def _navigate_tree(self, country, area, niche):
         self.area_filter.blockSignals(True)
         idx = self.area_filter.findData(area or "")
         self.area_filter.setCurrentIndex(max(0, idx))
         self.area_filter.blockSignals(False)
-        self._set(niche=niche, area=area)
+        self._set(country=country, area=area, niche=niche)
 
     def show_batch_leads(self, batch):
         self.batch_label = batch.get("file_name", "")
         self.tabs.set_value("leads")
         self.views.setCurrentIndex(0)
-        self.params.update(niche="", area="", status="")
-        self.nav.select("", "")
+        self.params.update(country="", niche="", area="", status="")
+        self.nav.select("", "", "")
         self.area_filter.blockSignals(True)
         self.area_filter.setCurrentIndex(0)
         self.area_filter.blockSignals(False)
@@ -640,7 +693,7 @@ class LeadsPage(Page):
             box.setCurrentIndex(0)
             box.blockSignals(False)
         self.quick.set_value("")
-        self.nav.select("", "")
+        self.nav.select("", "", "")
         self._set()
 
     # -- loading -------------------------------------------------------------
@@ -848,7 +901,9 @@ class LeadsPage(Page):
         if col_key in ("website", "normalized_domain"):
             self._quick_edit_field(row, "website", "Edit Domain / Website", "Website or Domain URL:", "example.com")
         elif col_key in ("area", "location"):
-            self._quick_edit_field(row, "area", "Edit Area / City", "Area, City or Region:", "e.g. Chicago IL")
+            self._quick_edit_field(row, "area", "Edit Area / City", "Area, City or Region:", "e.g. Chicago, IL")
+        elif col_key in ("niche", "category"):
+            self._quick_edit_field(row, "niche", "Edit Niche / Category", "Niche / Business Category:", "e.g. Dentists")
         else:
             self.ws.navigate("lead", lead_id=row["id"])
 
@@ -871,8 +926,13 @@ class LeadsPage(Page):
             if field == "website":
                 row["normalized_domain"] = lead_data.get("normalized_domain") or new_val
                 row["has_website"] = bool(new_val)
+            elif field == "niche":
+                row["niche_key"] = lead_data.get("niche_key") or new_val.lower()
+            elif field == "area":
+                row["area_key"] = lead_data.get("area_key") or new_val.lower()
             self.table.model.layoutChanged.emit()
             toast(self, f"Updated {title.lower()} successfully!", "success")
+            self._load_facets()
 
         tasks.run(api.patch, f"/api/leads/{row['id']}", payload,
                   on_done=_on_done, on_error=lambda e: show_error(self, e), owner=self)
@@ -883,7 +943,9 @@ class LeadsPage(Page):
         m.addAction(icons.icon("globe", C["text_2"]), "Edit Domain / Website",
                     lambda: self._quick_edit_field(row, "website", "Edit Domain / Website", "Website or Domain URL:", "example.com"))
         m.addAction(icons.icon("map_pin", C["text_2"]), "Edit Area / City",
-                    lambda: self._quick_edit_field(row, "area", "Edit Area / City", "Area, City or Region:", "e.g. Chicago IL"))
+                    lambda: self._quick_edit_field(row, "area", "Edit Area / City", "Area, City or Region:", "e.g. Chicago, IL"))
+        m.addAction(icons.icon("target", C["text_2"]), "Edit Niche / Category",
+                    lambda: self._quick_edit_field(row, "niche", "Edit Niche / Category", "Niche / Business Category:", "e.g. Dentists"))
         if row["status"] != "archived":
             if row.get("last_audit_id"):
                 m.addAction(icons.icon("report", C["text_2"]), "Audit 1: View latest SEO audit (C1)",

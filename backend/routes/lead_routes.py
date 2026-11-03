@@ -321,32 +321,104 @@ def leads_facets():
         extra, ep = " AND l.assigned_team_id = %s", [request.args["team_id"]]
 
     def compute():
-        rows = db.query(f"""SELECT l.niche_key, MIN(l.niche) AS niche, l.area_key, MIN(l.area) AS area, COUNT(*) AS n,
+        rows = db.query(f"""SELECT COALESCE(l.country, '') AS country,
+                                   l.area_key, MIN(l.area) AS area,
+                                   l.niche_key, MIN(l.niche) AS niche,
+                                   COUNT(*) AS n,
                                    SUM(CASE WHEN l.assigned_agent_id IS NULL THEN 1 ELSE 0 END) AS unassigned
                             FROM leads l WHERE {scope} AND l.status <> 'archived'{extra}
-                            GROUP BY l.niche_key, l.area_key""", list(sp) + ep)
-        niches, areas = {}, {}
+                            GROUP BY LOWER(COALESCE(l.country, '')), l.area_key, l.niche_key""", list(sp) + ep)
+
+        country_dict = {}
+        legacy_niches = {}
+        legacy_areas = {}
+
         for r in rows:
-            nk = r["niche_key"] or "__none__"
-            ak = r["area_key"] or "__none__"
-            n = niches.setdefault(nk, {"key": nk, "label": r["niche"] or "No niche", "count": 0, "unassigned": 0,
-                                       "areas": []})
-            n["count"] += int(r["n"])
-            n["unassigned"] += int(r["unassigned"] or 0)
-            n["areas"].append({"key": ak, "label": r["area"] or "No area", "count": int(r["n"]),
-                               "unassigned": int(r["unassigned"] or 0)})
-            a = areas.setdefault(ak, {"key": ak, "label": r["area"] or "No area", "count": 0})
-            a["count"] += int(r["n"])
-        out = sorted(niches.values(), key=lambda x: (-x["count"], x["label"].lower()))
-        for n in out:
-            n["areas"].sort(key=lambda x: (-x["count"], x["label"].lower()))
+            raw_c = (r["country"] or "").strip()
+            ckey = raw_c.lower() if raw_c else ""
+            clabel = raw_c if raw_c else "Other / Unspecified"
+
+            raw_a = (r["area"] or "").strip()
+            akey = r["area_key"] or (raw_a.lower() if raw_a else "__none__")
+            alabel = raw_a if raw_a else "Unspecified Area"
+
+            raw_n = (r["niche"] or "").strip()
+            nkey = r["niche_key"] or (raw_n.lower() if raw_n else "__none__")
+            nlabel = raw_n if raw_n else "Unspecified Niche"
+
+            cnt = int(r["n"])
+            unassigned = int(r["unassigned"] or 0)
+
+            # Country level
+            c_entry = country_dict.setdefault(ckey, {
+                "key": ckey,
+                "label": clabel,
+                "count": 0,
+                "unassigned": 0,
+                "areas": {}
+            })
+            c_entry["count"] += cnt
+            c_entry["unassigned"] += unassigned
+
+            # Area level under Country
+            a_entry = c_entry["areas"].setdefault(akey, {
+                "key": akey,
+                "label": alabel,
+                "count": 0,
+                "unassigned": 0,
+                "niches": {}
+            })
+            a_entry["count"] += cnt
+            a_entry["unassigned"] += unassigned
+
+            # Niche level under Area
+            n_entry = a_entry["niches"].setdefault(nkey, {
+                "key": nkey,
+                "label": nlabel,
+                "count": 0,
+                "unassigned": 0
+            })
+            n_entry["count"] += cnt
+            n_entry["unassigned"] += unassigned
+
+            # Legacy support
+            ln = legacy_niches.setdefault(nkey, {"key": nkey, "label": nlabel, "count": 0, "unassigned": 0, "areas": []})
+            ln["count"] += cnt
+            ln["unassigned"] += unassigned
+            la = legacy_areas.setdefault(akey, {"key": akey, "label": alabel, "count": 0})
+            la["count"] += cnt
+
+        countries_tree = []
+        for c in sorted(country_dict.values(), key=lambda x: (-x["count"], x["label"].lower())):
+            areas_list = []
+            for a in sorted(c["areas"].values(), key=lambda x: (-x["count"], x["label"].lower())):
+                niches_list = sorted(a["niches"].values(), key=lambda x: (-x["count"], x["label"].lower()))
+                a["niches"] = niches_list
+                areas_list.append(a)
+            c["areas"] = areas_list
+            countries_tree.append(c)
+
+        out_niches = sorted(legacy_niches.values(), key=lambda x: (-x["count"], x["label"].lower()))
+        out_areas = sorted(legacy_areas.values(), key=lambda x: (-x["count"], x["label"].lower()))
+
         c_rows = db.query(f"""SELECT LOWER(COALESCE(l.country, '')) AS ckey, MIN(l.country) AS clabel, COUNT(*) AS n
                               FROM leads l WHERE {scope} AND l.status <> 'archived'{extra} AND l.country IS NOT NULL AND l.country <> ''
                               GROUP BY LOWER(l.country)""", list(sp) + ep)
         countries = sorted([{"key": r["ckey"], "label": r["clabel"], "count": int(r["n"])} for r in c_rows if r.get("ckey")],
                            key=lambda x: (-x["count"], x["label"].lower()))
-        return {"niches": out, "areas": sorted(areas.values(), key=lambda x: (-x["count"], x["label"].lower())), "countries": countries,
-                "total": sum(n["count"] for n in out), "unassigned": sum(n["unassigned"] for n in out)}
+
+        total_cnt = sum(c["count"] for c in countries_tree)
+        unassigned_cnt = sum(c["unassigned"] for c in countries_tree)
+
+        return {
+            "hierarchy": countries_tree,
+            "countries_tree": countries_tree,
+            "niches": out_niches,
+            "areas": out_areas,
+            "countries": countries,
+            "total": total_cnt,
+            "unassigned": unassigned_cnt
+        }
     key = ("facets", me["id"], me["role"], request.args.get("team_id") or "")
     return jsonify(cache.get_or_set(key, compute, ttl=300))
 
@@ -981,6 +1053,44 @@ def discard_import(batch_id):
             pass
     db.execute("DELETE FROM lead_batches WHERE id = %s AND status = 'pending'", (batch_id,))
     return jsonify({"ok": True})
+
+
+@bp.patch("/api/lead-batches/<batch_id>/location")
+@require()
+def update_batch_location(batch_id):
+    data = request.get_json(silent=True) or {}
+    country = (data.get("country") or "").strip()
+    area = (data.get("area") or "").strip()
+    niche = (data.get("niche") or "").strip()
+
+    updates = []
+    params = []
+    if country:
+        updates.append("country = %s")
+        params.append(country)
+    if area:
+        updates.append("area = %s, area_key = %s")
+        params.extend([area, area.lower()])
+    if niche:
+        updates.append("niche = %s, niche_key = %s")
+        params.extend([niche, niche.lower()])
+
+    if updates:
+        with db.transaction() as tx:
+            tx.execute(f"UPDATE leads SET {', '.join(updates)} WHERE batch_id = %s", params + [batch_id])
+            b_updates = []
+            b_params = []
+            if area:
+                b_updates.append("area = %s, area_key = %s")
+                b_params.extend([area, area.lower()])
+            if niche:
+                b_updates.append("niche = %s, niche_key = %s")
+                b_params.extend([niche, niche.lower()])
+            if b_updates:
+                tx.execute(f"UPDATE lead_batches SET {', '.join(b_updates)} WHERE id = %s", b_params + [batch_id])
+        cache.delete_prefix("facets")
+
+    return jsonify({"updated": True, "batch_id": batch_id})
 
 
 @bp.get("/api/lead-batches")

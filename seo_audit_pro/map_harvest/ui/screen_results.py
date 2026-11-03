@@ -1,3 +1,4 @@
+from seo_audit_pro.widgets.feedback import Dialog, Field, line_edit, combo, toast, show_error
 import webbrowser
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
@@ -36,6 +37,49 @@ class SortableItem(QTableWidgetItem):
         except ValueError:
             return None
 
+
+
+class SaveToTrackerDialog(Dialog):
+    def __init__(self, parent, niche, city, countries):
+        super().__init__(parent, "Link Scrape to Tracker & Lead Bank",
+                         "Save this scrape into your Scrape Planner and tag these leads with Country and Area.", 460)
+        self.niche_in = line_edit("e.g. Dentists", niche)
+        self.area_in = line_edit("e.g. Austin, TX", city)
+
+        import re
+        c_names = [c["name"] for c in countries] if countries else ["United States", "United Kingdom", "Canada", "Australia"]
+        default_c = "United States"
+        c_low = city.lower()
+        if re.search(r"\b(uk|gb|england|london|manchester|birmingham|leeds|scotland|wales)\b", c_low):
+            default_c = "United Kingdom"
+        elif re.search(r"\b(canada|ontario|toronto|vancouver|montreal|calgary|ottawa)\b", c_low):
+            default_c = "Canada"
+        elif re.search(r"\b(australia|sydney|melbourne|brisbane|perth|adelaide)\b", c_low):
+            default_c = "Australia"
+        elif re.search(r"\b(us|usa|united states|tx|fl|ny|il|wa|oh|pa|ga|nc|mi|nj|va|az|ma|tn|in|mo|md|wi|co|mn|sc|al|la|ky|or|ok|ct|ut|ia|nv|ar|ms|ks|nm|ne|wv|id|hi|nh|me|ri|mt|de|sd|nd|ak|dc|vt|wy)\b", c_low):
+            default_c = "United States"
+
+        if default_c not in c_names:
+            c_names.insert(0, default_c)
+
+        self.c_combo = combo([(c, c) for c in c_names], default_c)
+        self.c_new = line_edit("Or enter new country name if not in list", "")
+
+        self.body.addWidget(Field("Select Country", self.c_combo))
+        self.body.addWidget(Field("Or Custom Country Name", self.c_new))
+        self.body.addWidget(Field("Area / City", self.area_in))
+        self.body.addWidget(Field("Niche / Category", self.niche_in))
+
+        self.save_btn = self.add_buttons("Save to Tracker & Lead Bank", "Skip")
+        self.save_btn.clicked.connect(self.accept)
+
+    def values(self):
+        c = self.c_new.text().strip() or self.c_combo.currentText().strip() or "United States"
+        return {
+            "country": c,
+            "area": self.area_in.text().strip() or "General Area",
+            "niche": self.niche_in.text().strip() or "General",
+        }
 
 class ResultsScreen(QWidget):
     stop_signal = pyqtSignal()
@@ -579,8 +623,9 @@ class ResultsScreen(QWidget):
         city = str(area or (self._areas[0] if self._areas else "Local")).strip() or "Local"
 
         def _work():
+            country_val = getattr(self, "active_country", "") or ""
             headers = ["company", "website", "phone", "email", "address", "category",
-                       "rating", "review_count", "maps_url", "city"]
+                       "rating", "review_count", "maps_url", "city", "country"]
             formatted_rows = []
             for r in rows:
                 formatted_rows.append({
@@ -594,6 +639,7 @@ class ResultsScreen(QWidget):
                     "review_count": str(r.get("review_count") or "").strip(),
                     "maps_url": str(r.get("maps_link") or "").strip(),
                     "city": str(r.get("area") or city).strip(),
+                    "country": str(r.get("country") or country_val).strip(),
                 })
             preview = api.post("/api/lead-imports/local", {
                 "file_name": f"MapHarvest - {niche} in {city}.csv",
@@ -640,9 +686,12 @@ class ResultsScreen(QWidget):
                 if tid:
                     api.patch(f"/api/scrape-planner/targets/{tid}", {
                         "status": "completed",
+                        "is_scraped": True,
                         "leads_harvested": imported,
                         "last_scraped_at": now_iso()
                     })
+                else:
+                    self._ask_save_to_tracker(batch, niche, city, imported)
             except Exception:
                 pass
 
@@ -768,3 +817,72 @@ class ResultsScreen(QWidget):
             self.stop_signal.emit()
         else:
             self.home_signal.emit()
+
+
+    def _ask_save_to_tracker(self, batch, niche, city, imported):
+        from seo_audit_pro.core import api, tasks
+        from seo_audit_pro.widgets.feedback import toast
+        try:
+            planner_data = api.get("/api/scrape-planner")
+            countries = planner_data.get("countries", [])
+        except Exception:
+            countries = []
+
+        dlg = SaveToTrackerDialog(self, niche, city, countries)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        vals = dlg.values()
+        batch_id = batch.get("id") if batch else None
+
+        def _save_task():
+            from backend.util import now_iso
+            c_name = vals["country"]
+            a_name = vals["area"]
+            n_name = vals["niche"]
+
+            # 1. Match or create Country
+            p_data = api.get("/api/scrape-planner")
+            all_c = p_data.get("countries", [])
+            cid = next((c["id"] for c in all_c if c["name"].lower() == c_name.lower()), None)
+            if not cid:
+                c_res = api.post("/api/scrape-planner/countries", {"name": c_name})
+                cid = c_res.get("country", {}).get("id")
+
+            # 2. Match or create Area
+            all_a = p_data.get("areas", [])
+            aid = next((a["id"] for a in all_a if a["country_id"] == cid and a["name"].lower() == a_name.lower()), None)
+            if not aid:
+                a_res = api.post("/api/scrape-planner/areas", {"country_id": cid, "name": a_name})
+                aid = a_res.get("area", {}).get("id")
+
+            # 3. Match or create Target
+            all_t = p_data.get("targets", [])
+            tid = next((t["id"] for t in all_t if t["area_id"] == aid and t["niche"].lower() == n_name.lower()), None)
+            if tid:
+                api.patch(f"/api/scrape-planner/targets/{tid}", {
+                    "status": "completed",
+                    "is_scraped": True,
+                    "leads_harvested": imported,
+                    "last_scraped_at": now_iso()
+                })
+            else:
+                api.post("/api/scrape-planner/targets", {
+                    "area_id": aid,
+                    "niche": n_name,
+                    "status": "completed",
+                    "is_scraped": True,
+                    "notes": f"Scraped via Map Harvest ({imported} leads)"
+                })
+
+            # 4. Tag location on the leads in Lead Bank
+            if batch_id:
+                api.patch(f"/api/lead-batches/{batch_id}/location", {
+                    "country": c_name,
+                    "area": a_name,
+                    "niche": n_name
+                })
+
+        tasks.run(_save_task,
+                  on_done=lambda _r: toast(self, f"Saved to Scrape Tracker: {vals['niche']} in {vals['area']}, {vals['country']} ({imported:,} leads)!", "success"),
+                  owner=self)

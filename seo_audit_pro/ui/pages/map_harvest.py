@@ -42,6 +42,7 @@ class MapHarvestPage(Page):
     def on_start(self, domains, areas, fields, headless=False, max_results=50, export_dir="", filters=None):
         target_id = getattr(self.input_screen, "active_target_id", None)
         self.results_screen.active_target_id = target_id
+        self.results_screen.active_country = getattr(self.input_screen, "active_country", "")
         self.results_screen.setup(
             domains, areas, fields, headless, max_results, export_dir, filters or {},
         )
