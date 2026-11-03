@@ -125,13 +125,45 @@ class ScrapePlannerPage(Page):
             "Plan and organize Google Maps harvesting hierarchically by Country, Area, and Niche."
         )
 
-        # Toolbar & Filter Bar
-        toolbar = hbox(spacing=10)
+        # Top row: Search on left, Actions on right
+        row_top = hbox(spacing=10)
 
         self.search = SearchBox("Search country, area or niche…")
-        self.search.setFixedWidth(240)
+        self.search.setFixedWidth(300)
         self.search.search.connect(lambda _t: self._render_tree())
-        toolbar.addWidget(self.search)
+        row_top.addWidget(self.search)
+
+        row_top.addStretch(1)
+
+        # Action Buttons in the toolbar (NOT in the header)
+        self.add_country_btn = button("Add Country", "ghost", icon_name="plus", size="sm")
+        self.add_country_btn.clicked.connect(self.create_country_modal)
+        row_top.addWidget(self.add_country_btn)
+
+        self.add_area_btn = button("Add Area", "ghost", icon_name="plus", size="sm")
+        self.add_area_btn.clicked.connect(lambda: self.create_area_modal())
+        row_top.addWidget(self.add_area_btn)
+
+        self.add_target_btn = button("Add Niche Target", "primary", icon_name="plus", size="sm")
+        self.add_target_btn.clicked.connect(lambda: self.create_target_modal())
+        row_top.addWidget(self.add_target_btn)
+
+        self.expand_btn = button("Expand All", "ghost", size="sm")
+        self.expand_btn.clicked.connect(lambda: self.tree.expandAll())
+        row_top.addWidget(self.expand_btn)
+
+        self.collapse_btn = button("Collapse All", "ghost", size="sm")
+        self.collapse_btn.clicked.connect(lambda: self.tree.collapseAll())
+        row_top.addWidget(self.collapse_btn)
+
+        self.refresh_btn = button("", "ghost", icon_name="refresh", size="sm", tooltip="Refresh tree")
+        self.refresh_btn.clicked.connect(self.load)
+        row_top.addWidget(self.refresh_btn)
+
+        self.body.addLayout(row_top)
+
+        # Filter row directly under search: Segmented filter + Badges
+        row_filter = hbox(spacing=10)
 
         self.filter_segmented = Segmented([
             ("All Targets", ""),
@@ -139,46 +171,21 @@ class ScrapePlannerPage(Page):
             ("Scraped", "yes")
         ])
         self.filter_segmented.changed.connect(lambda _v: self._render_tree())
-        toolbar.addWidget(self.filter_segmented)
+        row_filter.addWidget(self.filter_segmented)
 
-        toolbar.addSpacing(6)
+        row_filter.addSpacing(4)
 
         # Stat badges using system theme tokens
         self.badge_total = Badge("Total: 0", C["text_2"], C["neutral_bg"])
         self.badge_not_scraped = Badge("Not Scraped: 0", C["warning"], C["warning_bg"])
         self.badge_scraped = Badge("Scraped: 0", C["success"], C["success_bg"])
-        toolbar.addWidget(self.badge_total)
-        toolbar.addWidget(self.badge_not_scraped)
-        toolbar.addWidget(self.badge_scraped)
+        row_filter.addWidget(self.badge_total)
+        row_filter.addWidget(self.badge_not_scraped)
+        row_filter.addWidget(self.badge_scraped)
 
-        toolbar.addStretch(1)
+        row_filter.addStretch(1)
 
-        # Action Buttons in the toolbar (NOT in the header)
-        self.add_country_btn = button("Add Country", "ghost", icon_name="plus", size="sm")
-        self.add_country_btn.clicked.connect(self.create_country_modal)
-        toolbar.addWidget(self.add_country_btn)
-
-        self.add_area_btn = button("Add Area", "ghost", icon_name="plus", size="sm")
-        self.add_area_btn.clicked.connect(lambda: self.create_area_modal())
-        toolbar.addWidget(self.add_area_btn)
-
-        self.add_target_btn = button("Add Niche Target", "primary", icon_name="plus", size="sm")
-        self.add_target_btn.clicked.connect(lambda: self.create_target_modal())
-        toolbar.addWidget(self.add_target_btn)
-
-        self.expand_btn = button("Expand All", "ghost", size="sm")
-        self.expand_btn.clicked.connect(lambda: self.tree.expandAll())
-        toolbar.addWidget(self.expand_btn)
-
-        self.collapse_btn = button("Collapse All", "ghost", size="sm")
-        self.collapse_btn.clicked.connect(lambda: self.tree.collapseAll())
-        toolbar.addWidget(self.collapse_btn)
-
-        self.refresh_btn = button("", "ghost", icon_name="refresh", size="sm", tooltip="Refresh tree")
-        self.refresh_btn.clicked.connect(self.load)
-        toolbar.addWidget(self.refresh_btn)
-
-        self.body.addLayout(toolbar)
+        self.body.addLayout(row_filter)
 
         # Tree container frame
         surface = QFrame()
