@@ -181,25 +181,37 @@ class LeadNavigator(QFrame):
         self.tree.blockSignals(False)
         self._filter(self.search.text())
 
-    def _find(self, country, area, niche):
+    def _find(self, country="", area="", niche=""):
         country = country or ""
         area = area or ""
         niche = niche or ""
+        c_low = country.lower()
+        a_low = area.lower()
+        n_low = niche.lower()
         for i in range(self.tree.topLevelItemCount()):
             top = self.tree.topLevelItem(i)
-            if top.data(0, Qt.ItemDataRole.UserRole) == (country, area, niche):
+            t_data = top.data(0, Qt.ItemDataRole.UserRole)
+            if t_data and (t_data == (country, area, niche) or (
+                str(t_data[0]).lower() == c_low and str(t_data[1]).lower() == a_low and str(t_data[2]).lower() == n_low
+            )):
                 return top
             for j in range(top.childCount()):
                 mid = top.child(j)
-                if mid.data(0, Qt.ItemDataRole.UserRole) == (country, area, niche):
+                m_data = mid.data(0, Qt.ItemDataRole.UserRole)
+                if m_data and (m_data == (country, area, niche) or (
+                    str(m_data[0]).lower() == c_low and str(m_data[1]).lower() == a_low and str(m_data[2]).lower() == n_low
+                )):
                     return mid
                 for k in range(mid.childCount()):
                     leaf = mid.child(k)
-                    if leaf.data(0, Qt.ItemDataRole.UserRole) == (country, area, niche):
+                    l_data = leaf.data(0, Qt.ItemDataRole.UserRole)
+                    if l_data and (l_data == (country, area, niche) or (
+                        str(l_data[0]).lower() == c_low and str(l_data[1]).lower() == a_low and str(l_data[2]).lower() == n_low
+                    )):
                         return leaf
         return None
 
-    def select(self, country, area, niche):
+    def select(self, country="", area="", niche="", **_):
         self._selected = (country or "", area or "", niche or "")
         item = self._find(*self._selected)
         self.tree.blockSignals(True)
@@ -213,17 +225,18 @@ class LeadNavigator(QFrame):
             self.tree.clearSelection()
         self.tree.blockSignals(False)
 
-    def label_for(self, country, area, niche):
+    def label_for(self, country="", area="", niche="", **_):
         item = self._find(country or "", area or "", niche or "")
         if item:
             parts = []
             curr = item
-            while curr and curr.parent():
-                parts.insert(0, curr.text(0))
+            while curr:
+                t = curr.text(0)
+                if t and t != "All leads":
+                    parts.insert(0, t)
                 curr = curr.parent()
-            if curr:
-                parts.insert(0, curr.text(0))
-            return " › ".join(parts)
+            if parts:
+                return " › ".join(parts)
         return " › ".join(x for x in (country, area, niche) if x).title()
 
     def _clicked(self, item, _col):
@@ -617,12 +630,12 @@ class LeadsPage(Page):
             self.views.addWidget(self.imports)
 
     # -- lifecycle -----------------------------------------------------------
-    def activate(self, create=False, niche=None, area=None, batch_id=None, tab=None, **_):
+    def activate(self, create=False, country=None, niche=None, area=None, batch_id=None, tab=None, **_):
         if self.options is None and self.manage:
             load_assignees(self, self._options_loaded)
-        if niche is not None or area is not None:
-            self.params.update(niche=niche or "", area=area or "", page=1)
-            self.nav.select(niche, area)
+        if country is not None or niche is not None or area is not None:
+            self.params.update(country=country or "", niche=niche or "", area=area or "", page=1)
+            self.nav.select(country or "", area or "", niche or "")
             self.area_filter.blockSignals(True)
             idx = self.area_filter.findData(area or "")
             self.area_filter.setCurrentIndex(max(0, idx))
@@ -770,8 +783,14 @@ class LeadsPage(Page):
         parts = []
         if self.params.get("batch_id"):
             parts.append(f"File: {self.batch_label or 'selected import'}")
-        if self.params.get("niche") or self.params.get("area"):
-            parts.append(self.nav.label_for(self.params.get("niche") or "", self.params.get("area") or ""))
+        if self.params.get("country") or self.params.get("area") or self.params.get("niche"):
+            lbl = self.nav.label_for(
+                self.params.get("country") or "",
+                self.params.get("area") or "",
+                self.params.get("niche") or ""
+            )
+            if lbl:
+                parts.append(lbl)
         self.where.setText(" · ".join(parts) if parts else ("Whole lead bank" if self.manage else "All your leads"))
         self.clear_scope.setVisible(bool(self._filter_params()))
 
