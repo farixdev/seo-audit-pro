@@ -40,6 +40,8 @@ class MapHarvestPage(Page):
         self.results_screen.home_signal.connect(self.on_home)
 
     def on_start(self, domains, areas, fields, headless=False, max_results=50, export_dir="", filters=None):
+        target_id = getattr(self.input_screen, "active_target_id", None)
+        self.results_screen.active_target_id = target_id
         self.results_screen.setup(
             domains, areas, fields, headless, max_results, export_dir, filters or {},
         )
@@ -59,6 +61,16 @@ class MapHarvestPage(Page):
                 self.results_screen.lead_bank_btn.setVisible(True)
             except Exception:
                 pass
+
+        if "niche" in params or "area" in params:
+            self.stack.setCurrentIndex(0)
+            if hasattr(self.input_screen, "prefill"):
+                self.input_screen.prefill(
+                    niche=params.get("niche"),
+                    area=params.get("area"),
+                    country=params.get("country"),
+                    target_id=params.get("target_id")
+                )
 
     def stop(self):
         self.shutdown_worker()

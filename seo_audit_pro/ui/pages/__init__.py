@@ -21,6 +21,7 @@ _REGISTRY = {
     "settings": ("settings_page", "SettingsPage"),
     "profile": ("profile", "ProfilePage"),
     "map_harvest": ("map_harvest", "MapHarvestPage"),
+    "scrape_planner": ("scrape_planner", "ScrapePlannerPage"),
 }
 
 

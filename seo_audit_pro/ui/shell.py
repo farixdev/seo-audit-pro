@@ -30,6 +30,7 @@ def navigation_for(role):
     return [
         (None, [("dashboard", "Dashboard", "dashboard")]),
         ("Workspace", [("leads", "Lead Bank", "leads"), ("map_harvest", "Map Harvest", "map_pin"),
+                        ("scrape_planner", "Scrape Planner", "target"),
                         ("audits", "Audits", "audit"), ("reports", "Reports", "report")]),
         ("Outreach & Campaigns", [("outreach", "Email Outreach", "mail"), ("outreach_activity", "Outreach Log", "activity")]),
         ("System", [("settings", "Settings", "settings")]),

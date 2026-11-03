@@ -7,11 +7,100 @@ from PyQt5.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QFrame,
     QScrollArea, QStackedWidget, QButtonGroup,
     QSlider, QSpinBox, QDoubleSpinBox, QComboBox,
-    QListWidget, QListWidgetItem, QFileDialog,
+    QListWidget, QListWidgetItem, QFileDialog, QDialog,
 )
 
 from seo_audit_pro.map_harvest.core.settings import load_settings, save_settings, add_saved_search
 from seo_audit_pro.map_harvest.ui.domain_list_dialog import DomainListDialog, ListDialog
+
+
+class ScrapeTargetPickerDialog(QDialog):
+    """Modal dialog allowing users to pick a target directly from the Scrape Planner matrix."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pick Target from Scrape Planner")
+        self.setFixedWidth(540)
+        self.setFixedHeight(460)
+        self.selected_target = None
+
+        self.setStyleSheet("""
+            QDialog { background: #18181B; color: #FFFFFF; font-family: -apple-system, Segoe UI, sans-serif; }
+            QLabel { color: #E4E4E7; font-size: 13px; }
+            QComboBox { background: #27272A; border: 1px solid #3F3F46; border-radius: 4px; padding: 6px; color: #FFFFFF; font-size: 12px; }
+            QListWidget { background: #27272A; border: 1px solid #3F3F46; border-radius: 6px; color: #FFFFFF; font-size: 13px; }
+            QListWidget::item { padding: 9px 12px; border-bottom: 1px solid #333338; }
+            QListWidget::item:hover { background: #323238; }
+            QListWidget::item:selected { background: #2563EB; color: #FFFFFF; font-weight: 600; }
+            QPushButton { background: #27272A; border: 1px solid #3F3F46; border-radius: 4px; padding: 7px 14px; color: #FFFFFF; font-size: 12px; }
+            QPushButton#primary { background: #2563EB; font-weight: 600; border: none; }
+            QPushButton#primary:hover { background: #1D4ED8; }
+        """)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+
+        lbl = QLabel("Choose a planned niche to auto-fill Domain & Location (Area + Country):")
+        lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #FFFFFF;")
+        lay.addWidget(lbl)
+
+        f_row = QHBoxLayout()
+        f_row.addWidget(QLabel("Country:"))
+        self.c_filter = QComboBox()
+        self.c_filter.addItem("All Countries", "")
+        self.c_filter.currentIndexChanged.connect(self._apply_filter)
+        f_row.addWidget(self.c_filter, 1)
+        lay.addLayout(f_row)
+
+        self.list_widget = QListWidget()
+        self.list_widget.itemDoubleClicked.connect(self._select)
+        lay.addWidget(self.list_widget, 1)
+
+        btns = QHBoxLayout()
+        btns.addStretch(1)
+        cancel_b = QPushButton("Cancel")
+        cancel_b.clicked.connect(self.reject)
+        btns.addWidget(cancel_b)
+        self.use_b = QPushButton("Use Selected Target")
+        self.use_b.setObjectName("primary")
+        self.use_b.clicked.connect(self._select)
+        btns.addWidget(self.use_b)
+        lay.addLayout(btns)
+
+        self.targets = []
+        self._load()
+
+    def _load(self):
+        try:
+            from seo_audit_pro.core import api
+            res = api.get("/api/scrape-planner")
+            self.targets = res.get("targets", [])
+            for c in res.get("countries", []):
+                self.c_filter.addItem(c["name"], c["id"])
+            self._apply_filter()
+        except Exception:
+            pass
+
+    def _apply_filter(self):
+        cid = self.c_filter.currentData()
+        self.list_widget.clear()
+        for t in self.targets:
+            if cid and t.get("country_id") != cid:
+                continue
+            item = QListWidgetItem()
+            st_text = "Planned" if t.get("status") == "planned" else ("Scraping" if t.get("status") == "scraping" else "Harvested")
+            item.setText(f"{t['niche']}  ·  {t.get('area_name')}, {t.get('country_name')}  [{st_text}]")
+            item.setData(Qt.UserRole, t)
+            self.list_widget.addItem(item)
+        if self.list_widget.count() > 0:
+            self.list_widget.setCurrentRow(0)
+
+    def _select(self):
+        cur = self.list_widget.currentItem()
+        if cur:
+            self.selected_target = cur.data(Qt.UserRole)
+            self.accept()
 
 
 class InputScreen(QWidget):
@@ -103,8 +192,30 @@ class InputScreen(QWidget):
 
         # Domain + list
         domain_header = QHBoxLayout()
-        domain_header.addWidget(self._section_label("Domain"))
+        domain_header.addWidget(self._section_label("Domain / Niche"))
         domain_header.addStretch()
+        self.planner_btn = QPushButton("📋 Pick Target from Planner")
+        self.planner_btn.setObjectName("outlined")
+        self.planner_btn.setFixedHeight(28)
+        self.planner_btn.setStyleSheet("""
+            QPushButton {
+                background: #1E293B;
+                color: #93C5FD;
+                border: 1px solid #3B82F6;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #2563EB;
+                color: #FFFFFF;
+            }
+        """)
+        self.planner_btn.setToolTip("Pick a planned country, area & niche from your Scrape Planner")
+        self.planner_btn.clicked.connect(self._open_planner_picker)
+        domain_header.addWidget(self.planner_btn)
+        domain_header.addSpacing(10)
         self.domain_count_label = QLabel("")
         self.domain_count_label.setObjectName("muted")
         domain_header.addWidget(self.domain_count_label)
@@ -597,6 +708,32 @@ class InputScreen(QWidget):
         self.max_results_slider.setValue(min(limit, cap))
 
     # ── Domain / area lists ──────────────────────────────────────────────────
+    def prefill(self, niche=None, area=None, country=None, target_id=None):
+        self.active_target_id = target_id
+        if niche:
+            text = str(niche).strip()
+            self.domain_input.setText(text)
+            self._extra_domains = []
+            self._update_domain_count_label()
+        if area:
+            area_text = str(area).strip()
+            if country and country.strip().lower() not in area_text.lower():
+                area_text = f"{area_text}, {country.strip()}"
+            self.area_input.setText(area_text)
+            self._extra_areas = []
+            self._update_area_count_label()
+
+    def _open_planner_picker(self):
+        dlg = ScrapeTargetPickerDialog(self)
+        if dlg.exec_() == QDialog.Accepted and dlg.selected_target:
+            t = dlg.selected_target
+            self.prefill(
+                niche=t.get("niche"),
+                area=t.get("area_name"),
+                country=t.get("country_name"),
+                target_id=t.get("id")
+            )
+
     def _open_domain_list(self):
         dialog = DomainListDialog(self._extra_domains, self)
         if dialog.exec_() == DomainListDialog.Accepted:

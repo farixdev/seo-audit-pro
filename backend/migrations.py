@@ -556,6 +556,49 @@ def _m010_campaigns_and_calls():
     ]
 
 
+def _m011_scrape_planner():
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [
+        """CREATE TABLE IF NOT EXISTS scrape_countries (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            code TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS scrape_areas (
+            id TEXT PRIMARY KEY,
+            country_id TEXT NOT NULL REFERENCES scrape_countries(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS scrape_targets (
+            id TEXT PRIMARY KEY,
+            area_id TEXT NOT NULL REFERENCES scrape_areas(id) ON DELETE CASCADE,
+            niche TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'scraping', 'completed')),
+            leads_harvested INTEGER NOT NULL DEFAULT 0,
+            last_scraped_at TEXT,
+            notes TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_scrape_areas_country ON scrape_areas(country_id)",
+        "CREATE INDEX IF NOT EXISTS ix_scrape_targets_area ON scrape_targets(area_id, status)",
+        f"INSERT INTO scrape_countries (id, name, code, created_at) VALUES ('ctry_us', 'United States', 'US', '{now}')",
+        f"INSERT INTO scrape_countries (id, name, code, created_at) VALUES ('ctry_uk', 'United Kingdom', 'GB', '{now}')",
+        f"INSERT INTO scrape_countries (id, name, code, created_at) VALUES ('ctry_ca', 'Canada', 'CA', '{now}')",
+        f"INSERT INTO scrape_countries (id, name, code, created_at) VALUES ('ctry_au', 'Australia', 'AU', '{now}')",
+        f"INSERT INTO scrape_areas (id, country_id, name, created_at) VALUES ('area_us_austin', 'ctry_us', 'Austin, TX', '{now}')",
+        f"INSERT INTO scrape_areas (id, country_id, name, created_at) VALUES ('area_us_chicago', 'ctry_us', 'Chicago, IL', '{now}')",
+        f"INSERT INTO scrape_areas (id, country_id, name, created_at) VALUES ('area_uk_london', 'ctry_uk', 'London', '{now}')",
+        f"INSERT INTO scrape_areas (id, country_id, name, created_at) VALUES ('area_ca_toronto', 'ctry_ca', 'Toronto, ON', '{now}')",
+        f"INSERT INTO scrape_targets (id, area_id, niche, status, leads_harvested, notes, created_at, updated_at) VALUES ('tgt_1', 'area_us_austin', 'Dentists', 'planned', 0, 'Cosmetic dental clinics and orthodontists', '{now}', '{now}')",
+        f"INSERT INTO scrape_targets (id, area_id, niche, status, leads_harvested, notes, created_at, updated_at) VALUES ('tgt_2', 'area_us_austin', 'Roofing Contractors', 'planned', 0, 'Residential and commercial roofers', '{now}', '{now}')",
+        f"INSERT INTO scrape_targets (id, area_id, niche, status, leads_harvested, notes, created_at, updated_at) VALUES ('tgt_3', 'area_us_chicago', 'Plumbing Companies', 'planned', 0, '24/7 emergency plumbers', '{now}', '{now}')",
+        f"INSERT INTO scrape_targets (id, area_id, niche, status, leads_harvested, notes, created_at, updated_at) VALUES ('tgt_4', 'area_uk_london', 'Estate Agents', 'planned', 0, 'Independent local real estate brokers', '{now}', '{now}')",
+    ]
+
+
 MIGRATIONS = [
     (1, "initial schema", _m001_initial),
     (2, "lead bank", _m002_lead_bank),
@@ -567,6 +610,7 @@ MIGRATIONS = [
     (8, "email provider", _m008_email_provider),
     (9, "manual outreach", _m009_manual_outreach),
     (10, "campaigns and calls", _m010_campaigns_and_calls),
+    (11, "scrape planner", _m011_scrape_planner),
 ]
 
 # Best-effort performance objects (run outside migrations; failures are logged,

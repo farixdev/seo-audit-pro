@@ -69,7 +69,7 @@ def create_app(start_workers=True):
     _configure_logging()
     from backend import audit_runner, errors, mailer, migrations, realtime
     from backend.routes import (admin_routes, audit_routes, auth_routes, chat_routes, lead_routes, org_routes,
-                                outreach_routes, workspace_routes)
+                                outreach_routes, scrape_routes, workspace_routes)
 
     migrations.migrate()
     bootstrap_manager()
@@ -91,7 +91,7 @@ def create_app(start_workers=True):
     app.json.ensure_ascii = False
 
     for mod in (auth_routes, org_routes, lead_routes, audit_routes, outreach_routes, chat_routes,
-                workspace_routes, admin_routes):
+                workspace_routes, admin_routes, scrape_routes):
         app.register_blueprint(mod.bp)
     errors.register(app)
     if config.REALTIME:

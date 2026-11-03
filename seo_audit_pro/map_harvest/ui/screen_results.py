@@ -628,6 +628,23 @@ class ResultsScreen(QWidget):
                 msg += f" ({dups:,} duplicates skipped)"
             self.export_path_label.setText(f"✔ Synced {imported:,} lead(s) from '{niche} in {city}' directly into Lead Bank.")
             self._show_toast(msg, None)
+            try:
+                from backend.util import now_iso
+                tid = getattr(self, "active_target_id", None)
+                if not tid:
+                    t_res = api.get("/api/scrape-planner", params={"search": niche})
+                    for t in t_res.get("targets", []):
+                        if t["niche"].lower() == niche.lower():
+                            tid = t["id"]
+                            break
+                if tid:
+                    api.patch(f"/api/scrape-planner/targets/{tid}", {
+                        "status": "completed",
+                        "leads_harvested": imported,
+                        "last_scraped_at": now_iso()
+                    })
+            except Exception:
+                pass
 
         def _fail(err):
             err_txt = getattr(err, "message", str(err))
