@@ -17,6 +17,7 @@ def get_scrape_planner():
     country_id = request.args.get("country_id", "").strip()
     area_id = request.args.get("area_id", "").strip()
     status = request.args.get("status", "").strip()
+    scraped = request.args.get("scraped", "").strip().lower()
     search = request.args.get("search", "").strip()
 
     countries = db.query("SELECT * FROM scrape_countries ORDER BY name ASC")
@@ -42,6 +43,10 @@ def get_scrape_planner():
     if status and status in ("planned", "scraping", "completed"):
         query += "AND t.status = %s "
         params.append(status)
+    if scraped in ("yes", "1", "true", "scraped"):
+        query += "AND (t.status = 'completed' OR t.leads_harvested > 0) "
+    elif scraped in ("no", "0", "false", "not_scraped"):
+        query += "AND (t.status != 'completed' AND t.leads_harvested = 0) "
     if search:
         query += "AND (LOWER(t.niche) LIKE %s OR LOWER(a.name) LIKE %s OR LOWER(c.name) LIKE %s) "
         s = f"%{search.lower()}%"
@@ -52,19 +57,23 @@ def get_scrape_planner():
 
     # Compute overall stats
     total = len(targets)
-    planned = sum(1 for t in targets if t["status"] == "planned")
-    scraping = sum(1 for t in targets if t["status"] == "scraping")
-    completed = sum(1 for t in targets if t["status"] == "completed")
+    scraped_count = sum(1 for t in targets if t["status"] == "completed" or t["leads_harvested"] > 0)
+    not_scraped_count = total - scraped_count
+
+    target_dicts = []
+    for t in targets:
+        td = dict(t)
+        td["is_scraped"] = bool(t["status"] == "completed" or t["leads_harvested"] > 0)
+        target_dicts.append(td)
 
     return jsonify({
         "countries": [dict(c) for c in countries],
         "areas": [dict(a) for a in areas],
-        "targets": [dict(t) for t in targets],
+        "targets": target_dicts,
         "stats": {
             "total": total,
-            "planned": planned,
-            "scraping": scraping,
-            "completed": completed,
+            "scraped": scraped_count,
+            "not_scraped": not_scraped_count,
         }
     })
 
@@ -237,6 +246,14 @@ def update_target(tid):
         updates["niche"] = str(data["niche"]).strip()
     if "area_id" in data and str(data["area_id"]).strip():
         updates["area_id"] = str(data["area_id"]).strip()
+    if "is_scraped" in data:
+        if data["is_scraped"]:
+            updates["status"] = "completed"
+            if not row.get("leads_harvested"):
+                updates["leads_harvested"] = 1
+        else:
+            updates["status"] = "planned"
+            updates["leads_harvested"] = 0
     if "status" in data:
         st = str(data["status"]).strip().lower()
         if st in ("planned", "scraping", "completed"):
@@ -273,3 +290,4 @@ def delete_target(tid):
     with db.transaction() as tx:
         tx.execute("DELETE FROM scrape_targets WHERE id = %s", (tid,))
     return jsonify({"deleted": True, "id": tid})
+

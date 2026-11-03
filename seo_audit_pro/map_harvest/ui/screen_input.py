@@ -51,6 +51,12 @@ class ScrapeTargetPickerDialog(QDialog):
         self.c_filter.addItem("All Countries", "")
         self.c_filter.currentIndexChanged.connect(self._apply_filter)
         f_row.addWidget(self.c_filter, 1)
+
+        f_row.addWidget(QLabel("Status:"))
+        self.st_filter = QComboBox()
+        self.st_filter.addItems(["All", "⏳ Not Scraped", "✔ Scraped"])
+        self.st_filter.currentIndexChanged.connect(self._apply_filter)
+        f_row.addWidget(self.st_filter, 1)
         lay.addLayout(f_row)
 
         self.list_widget = QListWidget()
@@ -84,13 +90,21 @@ class ScrapeTargetPickerDialog(QDialog):
 
     def _apply_filter(self):
         cid = self.c_filter.currentData()
+        st_mode = self.st_filter.currentIndex()  # 0: All, 1: Not Scraped, 2: Scraped
         self.list_widget.clear()
         for t in self.targets:
             if cid and t.get("country_id") != cid:
                 continue
+            is_scraped = bool(t.get("is_scraped") or t.get("status") == "completed" or t.get("leads_harvested", 0) > 0)
+            if st_mode == 1 and is_scraped:
+                continue
+            if st_mode == 2 and not is_scraped:
+                continue
             item = QListWidgetItem()
-            st_text = "Planned" if t.get("status") == "planned" else ("Scraping" if t.get("status") == "scraping" else "Harvested")
-            item.setText(f"{t['niche']}  ·  {t.get('area_name')}, {t.get('country_name')}  [{st_text}]")
+            st_text = "✔ Scraped" if is_scraped else "⏳ Not Scraped"
+            leads = t.get("leads_harvested", 0)
+            leads_txt = f" · {leads} leads" if leads else ""
+            item.setText(f"🎯 {t['niche']}   ➔   📍 {t.get('area_name')}, {t.get('country_name')}   [{st_text}{leads_txt}]")
             item.setData(Qt.UserRole, t)
             self.list_widget.addItem(item)
         if self.list_widget.count() > 0:
