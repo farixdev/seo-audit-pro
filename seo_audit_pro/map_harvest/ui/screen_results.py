@@ -623,10 +623,10 @@ class ResultsScreen(QWidget):
         def _done(batch):
             imported = batch.get("imported", len(rows))
             dups = batch.get("duplicates", 0)
-            msg = f"{summary_msg}\n✔ Automatically added {imported:,} lead(s) directly to Lead Bank!"
+            msg = f"{summary_msg}\nAutomatically added {imported:,} lead(s) directly to Lead Bank!"
             if dups:
                 msg += f" ({dups:,} duplicates skipped)"
-            self.export_path_label.setText(f"✔ Synced {imported:,} lead(s) from '{niche} in {city}' directly into Lead Bank.")
+            self.export_path_label.setText(f"Synced {imported:,} lead(s) from '{niche} in {city}' directly into Lead Bank.")
             self._show_toast(msg, None)
             try:
                 from backend.util import now_iso

@@ -557,7 +557,7 @@ class ServiceAuditsView(QWidget):
                    secondary=lambda r: f"Audited {fmt.date(r['services_audit_date'])}" if r.get("services_audit_date") else "Pending service crawl"),
             Column("services_list", "Their Services · What We Can Provide (AI Sniffer)", "text", 310, stretch=True,
                    render=lambda r: ("Their Services: " + ", ".join((r.get("services_list") or [])[:4])) if r.get("services_list") else ("General offerings" if r.get("services_audit_date") else "—"),
-                   secondary=lambda r: ("✔ We Can Provide: " + ", ".join((r.get("what_we_can_provide") or [])[:3])) if r.get("what_we_can_provide") else ((r.get("service_pitch_notes") or "")[:100])),
+                   secondary=lambda r: ("We Can Provide: " + ", ".join((r.get("what_we_can_provide") or [])[:3])) if r.get("what_we_can_provide") else ((r.get("service_pitch_notes") or "")[:100])),
             Column("last_audit_score", "Audit 1: SEO Score", "text", 125,
                    render=lambda r: f"{r['last_audit_score']}/100" if r.get("last_audit_score") is not None else "Not SEO audited"),
             Column("_actions", "", "actions", 44),

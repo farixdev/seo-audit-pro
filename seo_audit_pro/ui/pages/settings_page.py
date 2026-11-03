@@ -534,7 +534,7 @@ class SettingsPage(Page):
             self.saved_provider = data["provider"]
             self.smtp_state.setText("Configured" + (" · Brevo" if data["provider"] == "brevo" else ""))
             self.smtp_state.set_colors(C["success"], C["success_bg"])
-            self.send_test_result.setText("✔ " + (res.get("message") or "Test email delivered successfully!"))
+            self.send_test_result.setText(res.get("message") or "Test email delivered successfully!")
             self.send_test_result.setStyleSheet("color: " + C["success"] + "; font-weight: 600;")
             toast(self, "Test email delivered!", "success")
 
@@ -721,7 +721,7 @@ class SettingsPage(Page):
 
         def done(res):
             self.llm_test_btn.busy(False)
-            self.llm_test_result.setText("✔ " + (res.get("message") or "LLM key verified!"))
+            self.llm_test_result.setText(res.get("message") or "LLM key verified!")
             self.llm_test_result.setStyleSheet("color: " + C["success"] + "; font-weight: 600;")
             if res.get("model"):
                 self._set_model_value(res["model"])

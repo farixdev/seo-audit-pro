@@ -40,8 +40,7 @@ class QuickEditDialog(Dialog):
         super().__init__(parent, title, "", 460)
         self.edit = line_edit(placeholder, current_val or "")
         self.body.addWidget(Field(label_text, self.edit))
-        self.add_button("Cancel")
-        save_btn = self.add_button("Save Changes", "primary")
+        save_btn = self.add_buttons("Save Changes", "Cancel")
         save_btn.clicked.connect(self.accept)
         self.edit.returnPressed.connect(self.accept)
 

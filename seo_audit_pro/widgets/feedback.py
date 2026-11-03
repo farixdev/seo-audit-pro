@@ -66,8 +66,8 @@ def toast(parent, text, kind="info", ms=3600):
 
 
 def show_error(parent, err, prefix=None):
-    """Present an ApiError (or any exception) without technical details."""
-    msg = getattr(err, "message", None) or "Something went wrong. We couldn't complete this operation."
+    """Present an ApiError (or any exception) without swallowing technical details."""
+    msg = getattr(err, "message", None) or (str(err) if str(err) else "Something went wrong. We couldn't complete this operation.")
     toast(parent, f"{prefix}: {msg}" if prefix else msg, "error", 5200)
 
 
@@ -99,6 +99,13 @@ class Dialog(QDialog):
         self.footer = hbox(spacing=8)
         self.footer.addStretch(1)
         outer.addLayout(self.footer)
+
+    def add_button(self, text, variant="default"):
+        b = button(text, variant)
+        if text.lower() == "cancel":
+            b.clicked.connect(self.reject)
+        self.footer.addWidget(b)
+        return b
 
     def add_buttons(self, primary_text, cancel_text="Cancel", variant="primary"):
         cancel = button(cancel_text)

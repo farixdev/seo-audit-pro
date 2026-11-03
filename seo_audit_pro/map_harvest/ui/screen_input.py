@@ -54,7 +54,7 @@ class ScrapeTargetPickerDialog(QDialog):
 
         f_row.addWidget(QLabel("Status:"))
         self.st_filter = QComboBox()
-        self.st_filter.addItems(["All", "⏳ Not Scraped", "✔ Scraped"])
+        self.st_filter.addItems(["All", "Not Scraped", "Scraped"])
         self.st_filter.currentIndexChanged.connect(self._apply_filter)
         f_row.addWidget(self.st_filter, 1)
         lay.addLayout(f_row)
@@ -101,10 +101,10 @@ class ScrapeTargetPickerDialog(QDialog):
             if st_mode == 2 and not is_scraped:
                 continue
             item = QListWidgetItem()
-            st_text = "✔ Scraped" if is_scraped else "⏳ Not Scraped"
+            st_text = "Scraped" if is_scraped else "Not Scraped"
             leads = t.get("leads_harvested", 0)
             leads_txt = f" · {leads} leads" if leads else ""
-            item.setText(f"🎯 {t['niche']}   ➔   📍 {t.get('area_name')}, {t.get('country_name')}   [{st_text}{leads_txt}]")
+            item.setText(f"{t['niche']}   —   {t.get('area_name')}, {t.get('country_name')}   [{st_text}{leads_txt}]")
             item.setData(Qt.UserRole, t)
             self.list_widget.addItem(item)
         if self.list_widget.count() > 0:
@@ -305,7 +305,7 @@ class InputScreen(QWidget):
         # Direct Lead Bank flow (Export Folder removed)
         left.addWidget(self._section_label("Destination"))
         left.addSpacing(6)
-        dest_lbl = QLabel("✔ All scraped leads (Website & No-Website) flow directly into your Lead Bank automatically.")
+        dest_lbl = QLabel("All scraped leads (Website & No-Website) flow directly into your Lead Bank automatically.")
         dest_lbl.setObjectName("hint")
         dest_lbl.setWordWrap(True)
         left.addWidget(dest_lbl)
