@@ -1,3 +1,5 @@
+from seo_audit_pro import icons
+from seo_audit_pro.theme import C
 import os
 
 from PyQt5.QtCore import QPoint, QPropertyAnimation, QTimer, pyqtSignal, Qt
@@ -24,17 +26,18 @@ class ScrapeTargetPickerDialog(QDialog):
         self.setFixedHeight(460)
         self.selected_target = None
 
-        self.setStyleSheet("""
-            QDialog { background: #18181B; color: #FFFFFF; font-family: -apple-system, Segoe UI, sans-serif; }
-            QLabel { color: #E4E4E7; font-size: 13px; }
-            QComboBox { background: #27272A; border: 1px solid #3F3F46; border-radius: 4px; padding: 6px; color: #FFFFFF; font-size: 12px; }
-            QListWidget { background: #27272A; border: 1px solid #3F3F46; border-radius: 6px; color: #FFFFFF; font-size: 13px; }
-            QListWidget::item { padding: 9px 12px; border-bottom: 1px solid #333338; }
-            QListWidget::item:hover { background: #323238; }
-            QListWidget::item:selected { background: #2563EB; color: #FFFFFF; font-weight: 600; }
-            QPushButton { background: #27272A; border: 1px solid #3F3F46; border-radius: 4px; padding: 7px 14px; color: #FFFFFF; font-size: 12px; }
-            QPushButton#primary { background: #2563EB; font-weight: 600; border: none; }
-            QPushButton#primary:hover { background: #1D4ED8; }
+        self.setStyleSheet(f"""
+            QDialog {{ background: {C['surface']}; color: {C['text']}; font-family: Segoe UI, sans-serif; }}
+            QLabel {{ color: {C['text']}; font-size: 13px; }}
+            QComboBox {{ background: {C['surface']}; border: 1px solid {C['border_strong']}; border-radius: 6px; padding: 6px 10px; color: {C['text']}; font-size: 12px; }}
+            QListWidget {{ background: {C['surface']}; border: 1px solid {C['border']}; border-radius: 6px; color: {C['text']}; font-size: 13px; outline: none; }}
+            QListWidget::item {{ padding: 8px 12px; border-bottom: 1px solid {C['divider']}; color: {C['text']}; }}
+            QListWidget::item:hover {{ background: #F4F4F6; }}
+            QListWidget::item:selected {{ background: {C['selection']}; color: {C['text']}; font-weight: 600; }}
+            QPushButton {{ background: {C['surface']}; border: 1px solid {C['border_strong']}; border-radius: 6px; padding: 6px 14px; color: {C['text']}; font-size: 12px; font-weight: 500; }}
+            QPushButton:hover {{ background: {C['surface_alt']}; border-color: #A1A1AA; }}
+            QPushButton#primary {{ background: {C['ink']}; color: #FFFFFF; font-weight: 600; border: none; }}
+            QPushButton#primary:hover {{ background: {C['ink_hover']}; }}
         """)
 
         lay = QVBoxLayout(self)
@@ -42,7 +45,7 @@ class ScrapeTargetPickerDialog(QDialog):
         lay.setSpacing(12)
 
         lbl = QLabel("Choose a planned niche to auto-fill Domain & Location (Area + Country):")
-        lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #FFFFFF;")
+        lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {C['text']};")
         lay.addWidget(lbl)
 
         f_row = QHBoxLayout()
@@ -208,23 +211,29 @@ class InputScreen(QWidget):
         domain_header = QHBoxLayout()
         domain_header.addWidget(self._section_label("Domain / Niche"))
         domain_header.addStretch()
-        self.planner_btn = QPushButton("📋 Pick Target from Planner")
+        self.planner_btn = QPushButton("Pick Target from Planner")
+        self.planner_btn.setIcon(icons.icon("target", C["text_2"], 14))
         self.planner_btn.setObjectName("outlined")
         self.planner_btn.setFixedHeight(28)
-        self.planner_btn.setStyleSheet("""
-            QPushButton {
-                background: #1E293B;
-                color: #93C5FD;
-                border: 1px solid #3B82F6;
-                border-radius: 4px;
-                padding: 4px 10px;
-                font-size: 11px;
+        self.planner_btn.setCursor(Qt.PointingHandCursor)
+        self.planner_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {C['surface']};
+                color: {C['text']};
+                border: 1px solid {C['border_strong']};
+                border-radius: 6px;
+                padding: 0 12px;
+                font-size: 12px;
                 font-weight: 600;
-            }
-            QPushButton:hover {
-                background: #2563EB;
-                color: #FFFFFF;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {C['surface_alt']};
+                border-color: #A1A1AA;
+                color: {C['ink']};
+            }}
+            QPushButton:pressed {{
+                background-color: {C['selection']};
+            }}
         """)
         self.planner_btn.setToolTip("Pick a planned country, area & niche from your Scrape Planner")
         self.planner_btn.clicked.connect(self._open_planner_picker)
