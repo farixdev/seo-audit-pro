@@ -630,8 +630,24 @@ class ResultsScreen(QWidget):
                 city = parts[0].strip()
                 country_val = parts[-1].strip()
 
+        resolved_country = country_val
+
         def _work():
-            country_val = getattr(self, "active_country", "") or ""
+            country_name = resolved_country or getattr(self, "active_country", "") or ""
+            if not country_name:
+                try:
+                    p = api.get("/api/scrape-planner")
+                    for c_obj in p.get("countries", []):
+                        for a_obj in c_obj.get("areas", []):
+                            if a_obj.get("name", "").lower() == city.lower():
+                                country_name = c_obj.get("name", "")
+                                break
+                        if country_name:
+                            break
+                except Exception:
+                    pass
+            country_name = country_name or "Australia"
+
             headers = ["company", "website", "phone", "email", "address", "category",
                        "rating", "review_count", "maps_url", "city", "country"]
             formatted_rows = []
@@ -647,10 +663,10 @@ class ResultsScreen(QWidget):
                     "review_count": str(r.get("review_count") or "").strip(),
                     "maps_url": str(r.get("maps_link") or "").strip(),
                     "city": str(r.get("area") or city).strip(),
-                    "country": str(r.get("country") or country_val).strip(),
+                    "country": str(r.get("country") or country_name).strip(),
                 })
             preview = api.post("/api/lead-imports/local", {
-                "file_name": f"MapHarvest - {niche} in {city}.csv",
+                "file_name": f"MapHarvest - {country_name} - {city} - {niche}.csv",
                 "headers": headers,
                 "total_rows": len(formatted_rows),
                 "file_size": max(1024, len(formatted_rows) * 120),
@@ -672,25 +688,56 @@ class ResultsScreen(QWidget):
                 api.request("POST", f"/api/lead-batches/{batch_id}/rows", params={"first": first + 1},
                             data=packed, timeout=120)
             res = api.post(f"/api/lead-batches/{batch_id}/finish")
-            return res.get("batch") or preview["batch"]
+            return res.get("batch") or preview["batch"], country_name
 
-        def _done(batch):
+        def _done(result):
+            batch, country_name = result if isinstance(result, tuple) else (result, resolved_country or "Australia")
             imported = batch.get("imported", len(rows))
             dups = batch.get("duplicates", 0)
             msg = f"{summary_msg}\nAutomatically added {imported:,} lead(s) directly to Lead Bank!"
             if dups:
                 msg += f" ({dups:,} duplicates skipped)"
-            self.export_path_label.setText(f"Synced {imported:,} lead(s) from '{niche} in {city}' directly into Lead Bank.")
+            self.export_path_label.setText(f"Synced {imported:,} lead(s) from '{country_name} › {city} › {niche}' directly into Lead Bank.")
             self._show_toast(msg, None)
             try:
                 from backend.util import now_iso
+                t_res = api.get("/api/scrape-planner")
                 tid = getattr(self, "active_target_id", None)
                 if not tid:
-                    t_res = api.get("/api/scrape-planner", params={"search": niche})
                     for t in t_res.get("targets", []):
-                        if t["niche"].lower() == niche.lower():
+                        if t.get("niche", "").lower() == niche.lower() and t.get("area_name", "").lower() == city.lower():
                             tid = t["id"]
                             break
+                if not tid:
+                    # Auto-create in planner hierarchy without interrupting scraping
+                    all_c = t_res.get("countries", [])
+                    c_match = next((c for c in all_c if c.get("name", "").strip().lower() == country_name.lower()), None)
+                    if not c_match:
+                        c_new = api.post("/api/scrape-planner/countries", {"name": country_name})
+                        cid = c_new.get("country", {}).get("id")
+                    else:
+                        cid = c_match.get("id")
+
+                    aid = None
+                    if cid:
+                        c_found = next((c for c in t_res.get("countries", []) if c.get("id") == cid), None)
+                        if c_found:
+                            for a_obj in c_found.get("areas", []):
+                                if a_obj.get("name", "").strip().lower() == city.lower():
+                                    aid = a_obj.get("id")
+                                    break
+                    if not aid and cid:
+                        a_new = api.post("/api/scrape-planner/areas", {"country_id": cid, "name": city})
+                        aid = a_new.get("area", {}).get("id")
+
+                    if aid:
+                        t_new = api.post("/api/scrape-planner/targets", {
+                            "area_id": aid,
+                            "niche": niche,
+                            "status": "completed",
+                        })
+                        tid = t_new.get("target", {}).get("id")
+
                 if tid:
                     api.patch(f"/api/scrape-planner/targets/{tid}", {
                         "status": "completed",
@@ -698,8 +745,6 @@ class ResultsScreen(QWidget):
                         "leads_harvested": imported,
                         "last_scraped_at": now_iso()
                     })
-                else:
-                    self._ask_save_to_tracker(batch, niche, city, imported)
             except Exception:
                 pass
 
@@ -795,20 +840,12 @@ class ResultsScreen(QWidget):
             self._show_toast("No scraped leads to add to the Lead Bank.")
             return
         d, a = self._current_task()
+        country = getattr(self, "active_country", "") or ""
         try:
-            from seo_audit_pro.core import api, tasks
             from seo_audit_pro.map_harvest.ui.lead_bank_dialog import AddToLeadBankDialog
-
-            def open_dialog(options):
-                dlg = AddToLeadBankDialog(self, self.all_results, default_domain=d, default_area=a, options=options)
-                dlg.leads_imported.connect(self._on_leads_imported)
-                dlg.exec()
-
-            from seo_audit_pro.core.session import session
-            if False and (session.is_manager() or session.is_team_lead()):   # agents add leads to themselves
-                tasks.run(api.get, "/api/assignees", on_done=open_dialog, on_error=lambda _e: open_dialog({}))
-            else:
-                open_dialog({})
+            dlg = AddToLeadBankDialog(self, self.all_results, default_domain=d, default_area=a, default_country=country)
+            dlg.leads_imported.connect(self._on_leads_imported)
+            dlg.exec()
         except Exception as e:
             self._show_toast(f"Could not open Lead Bank import: {e}")
 
