@@ -340,8 +340,8 @@ class ScrapePlannerPage(Page):
         self.load()
 
     def load(self):
-        tasks.run(api.get, "/api/scrape-planner", on_done=self._on_data_loaded,
-                  on_error=lambda e: show_error(self, e), owner=self)
+        self.fetch("planner", api.get, "/api/scrape-planner", on_done=self._on_data_loaded,
+                   on_error=lambda e: show_error(self, e))
 
     def _on_data_loaded(self, data):
         self._all_countries = data.get("countries", [])
@@ -358,6 +358,8 @@ class ScrapePlannerPage(Page):
 
     def _render_tree(self):
         self._is_rendering = True
+        self.tree.setUpdatesEnabled(False)
+        self.tree.blockSignals(True)
         try:
             # Capture current expanded states from existing tree items before clearing
             if self._has_rendered_once:
@@ -628,6 +630,8 @@ class ScrapePlannerPage(Page):
             self._has_rendered_once = True
         finally:
             self._is_rendering = False
+            self.tree.blockSignals(False)
+            self.tree.setUpdatesEnabled(True)
 
     # ── Context Menu ──────────────────────────────────────────────────────────
 

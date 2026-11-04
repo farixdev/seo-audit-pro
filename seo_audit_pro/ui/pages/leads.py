@@ -104,6 +104,7 @@ class LeadNavigator(QFrame):
         self._selected = ("", "", "")
 
     def set_data(self, facets):
+        self.tree.setUpdatesEnabled(False)
         self.tree.blockSignals(True)
         self.tree.clear()
         bold = QFont(self.font())
@@ -179,6 +180,7 @@ class LeadNavigator(QFrame):
         self.tree.expandAll()
         self.tree.setCurrentItem(selected_item)
         self.tree.blockSignals(False)
+        self.tree.setUpdatesEnabled(True)
         self._filter(self.search.text())
 
     def _find(self, country="", area="", niche=""):

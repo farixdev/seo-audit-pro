@@ -63,7 +63,7 @@ class Page(QWidget):
             cached, age = client_cache.get(k)
             if cached is not None:
                 QTimer.singleShot(0, lambda: self._gen.get(channel) == gen and on_done and on_done(cached))
-                if age < 8:
+                if age < 30:
                     return  # fresh enough; skip the network round-trip
             fn = api.get_cached
 

@@ -580,6 +580,8 @@ class Workspace(QWidget):
         self.history.clear()
         self.topbar.set_can_go_back(False)
         self.navigate("dashboard")
+        self._prewarm_queue = ["leads", "scrape_planner", "map_harvest", "audits", "reports", "settings"]
+        QTimer.singleShot(250, self._prewarm_next_page)
         if api.live_updates():
             get_hub().start()
         self._unread_timer.setInterval(60000 if api.live_updates() else 20000)
@@ -605,6 +607,18 @@ class Workspace(QWidget):
             self.topbar.set_user(session.user)
 
     # -- navigation ----------------------------------------------------------
+    def _prewarm_next_page(self):
+        if not hasattr(self, "_prewarm_queue") or not self._prewarm_queue:
+            return
+        key = self._prewarm_queue.pop(0)
+        try:
+            if key not in self.pages:
+                self.page(key)
+        except Exception:
+            pass
+        if self._prewarm_queue:
+            QTimer.singleShot(100, self._prewarm_next_page)
+
     def page(self, key):
         if key not in self.pages:
             from seo_audit_pro.ui import pages

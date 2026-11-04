@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Brighton Analytics Website SEO & Growth Audit — the client-facing report (HTML, printed to
+Website SEO & Growth Audit — the client-facing report (HTML, printed to
 PDF with Edge/Chrome). One deliverable design for the standalone SEO Audit Tool and the
 SEO Audit Pro app.
 
@@ -20,33 +20,23 @@ from datetime import datetime
 
 from full_report import E, SEV_ORDER, _ms, _where, gbp_checks, plain
 
-# Load brand logo SVG from assets/brighnton.svg
-_RAW_LOGO = ""
-_cand_paths = [
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "brighnton.svg"),
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "seo_audit_pro", "assets", "brighnton.svg"),
-]
-import sys
-if hasattr(sys, "_MEIPASS"):
-    _cand_paths.extend([
-        os.path.join(sys._MEIPASS, "assets", "brighnton.svg"),
-        os.path.join(sys._MEIPASS, "seo_audit_pro", "assets", "brighnton.svg"),
-    ])
-for _p in _cand_paths:
-    if os.path.isfile(_p):
-        try:
-            with open(_p, "r", encoding="utf-8") as _f:
-                _RAW_LOGO = _f.read().strip()
-            if _RAW_LOGO:
-                break
-        except Exception:
-            pass
+# General unbranded SVG logo mark & typography (replaces third-party branding)
+_DEFAULT_COVER_LOGO = """<svg xmlns="http://www.w3.org/2000/svg" width="180" height="34" viewBox="0 0 180 34" fill="none">
+  <rect x="0" y="1" width="32" height="32" rx="8" fill="#FFFFFF"/>
+  <path d="M8 21 L13 15 L17 18 L23 10" stroke="#F07D22" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="23" cy="10" r="2" fill="#F07D22"/>
+  <text x="42" y="23" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="15" font-weight="800" letter-spacing="0.05em" fill="#FFFFFF">SEO AUDIT PRO</text>
+</svg>"""
 
-# Version for orange cover (pure white monochrome so it pops cleanly against #f07e22)
-_COVER_LOGO = _RAW_LOGO.replace('fill="#F07D22"', 'fill="#FFFFFF"') if _RAW_LOGO else ""
+_DEFAULT_HEADER_LOGO = """<svg xmlns="http://www.w3.org/2000/svg" width="180" height="34" viewBox="0 0 180 34" fill="none">
+  <rect x="0" y="1" width="32" height="32" rx="8" fill="#F07D22"/>
+  <path d="M8 21 L13 15 L17 18 L23 10" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="23" cy="10" r="2" fill="#FFFFFF"/>
+  <text x="42" y="23" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="15" font-weight="800" letter-spacing="0.05em" fill="#101828">SEO AUDIT PRO</text>
+</svg>"""
 
-# Version for light page headers (icon & Brighton in orange #F07D22, Analytics in #101828)
-_HEADER_LOGO = _RAW_LOGO.replace('fill="white"', 'fill="#101828"') if _RAW_LOGO else ""
+_COVER_LOGO = _DEFAULT_COVER_LOGO
+_HEADER_LOGO = _DEFAULT_HEADER_LOGO
 
 VIS_IDS = ("robots", "sitemap", "noindex", "canonical", "index", "crawl", "hreflang", "ai_crawler")
 
@@ -245,7 +235,7 @@ def _header(company_name, label, domain):
 
 def build(result, company=None, business=None, downloads=(), gbp=None, gbp_note="no_key", shots=None, per_step=8):
     company = company or {}
-    cname = company.get("name") or "Brighton Analytics"
+    cname = company.get("name") or "SEO Audit Pro"
     shots = shots or {}
     domain = result.get("domain") or ""
     client = business or domain

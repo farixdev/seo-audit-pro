@@ -10,8 +10,8 @@ is left at the end.
 import os
 import threading
 
-BRAND = {"name": "Brighton Analytics"}
-REPORT_NAME = "Brighton Website SEO & Growth Report"
+BRAND = {"name": "SEO Audit Pro"}
+REPORT_NAME = "Website SEO & Growth Report"
 
 
 class Extras:
